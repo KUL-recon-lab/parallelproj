@@ -53,7 +53,7 @@ scanner1 = parallelproj.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
-    ring_positions=xp.linspace(-4, 4, 3),
+    ring_positions=xp.linspace(-4, 4, 3, device=dev),
     symmetry_axis=2,
 )
 
@@ -64,7 +64,7 @@ scanner2 = parallelproj.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
-    ring_positions=xp.linspace(-4, 4, 3),
+    ring_positions=xp.linspace(-4, 4, 3, device=dev),
     symmetry_axis=1,
 )
 
@@ -75,7 +75,7 @@ scanner3 = parallelproj.RegularPolygonPETScannerGeometry(
     num_sides=32,
     num_lor_endpoints_per_side=16,
     lor_spacing=4.3,
-    ring_positions=xp.linspace(-70, 70, 36),
+    ring_positions=xp.linspace(-70, 70, 36, device=dev),
     symmetry_axis=2,
 )
 
@@ -86,7 +86,7 @@ scanner4 = parallelproj.RegularPolygonPETScannerGeometry(
     num_sides=32,
     num_lor_endpoints_per_side=16,
     lor_spacing=4.3,
-    ring_positions=xp.linspace(-70, 70, 36),
+    ring_positions=xp.linspace(-70, 70, 36, device=dev),
     symmetry_axis=0,
 )
 

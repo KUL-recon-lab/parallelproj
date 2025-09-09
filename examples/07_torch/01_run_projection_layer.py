@@ -228,7 +228,7 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=6,
     lor_spacing=3.0,
-    ring_positions=torch.linspace(-4, 4, num_rings),
+    ring_positions=torch.linspace(-4, 4, num_rings, device=dev),
     symmetry_axis=1,
 )
 
