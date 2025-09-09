@@ -77,7 +77,7 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
     lor_spacing=2.3,
     ring_positions=xp.asarray([0.0], device=dev),
     symmetry_axis=2,
-    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7]),
+    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7], device=dev),
 )
 
 # %%
