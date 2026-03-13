@@ -434,6 +434,20 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
         ) or self.xp.isdtype(self._values.dtype, self.xp.complex128)
 
 
+def _sigma_for_numpy(sigma):
+    if array_api_compat.is_array_api_obj(sigma):
+        return np.asarray(sigma)
+    return sigma
+
+
+def _sigma_for_cupy(sigma):
+    if array_api_compat.is_array_api_obj(sigma):
+        import cupy as cp
+
+        return cp.asarray(sigma)
+    return sigma
+
+
 class GaussianFilterOperator(LinearOperator):
     """Gaussian filter operator
 
@@ -469,36 +483,63 @@ class GaussianFilterOperator(LinearOperator):
 
     def _apply(self, x: Array) -> Array:
         xp = array_api_compat.get_namespace(x)
-
-        if parallelproj.is_cuda_array(x):
-            import array_api_compat.cupy as cp
-            import cupyx.scipy.ndimage as ndimagex
-
-            if array_api_compat.is_array_api_obj(self._sigma):
-                sigma = cp.asarray(self._sigma)
-            else:
-                sigma = self._sigma
-
-            return array_api_compat.to_device(
-                xp.from_dlpack(
-                    ndimagex.gaussian_filter(cp.asarray(x), sigma=sigma, **self._kwargs)
-                ),
-                device(x),
-            )
-        else:
+        # NumPy
+        if array_api_compat.is_numpy_array(
+            x
+        ) or array_api_compat.is_array_api_strict_namespace(xp):
             import scipy.ndimage as ndimage
 
-            if array_api_compat.is_array_api_obj(self._sigma):
-                sigma = np.asarray(self._sigma)
-            else:
-                sigma = self._sigma
-
-            return array_api_compat.to_device(
-                xp.from_dlpack(
-                    ndimage.gaussian_filter(np.asarray(x), sigma=sigma, **self._kwargs)
-                ),
-                device(x),
+            tmp = ndimage.gaussian_filter(
+                np.asarray(x),
+                sigma=_sigma_for_numpy(self._sigma),
+                **self._kwargs,
             )
+
+            if array_api_compat.is_array_api_strict_namespace(xp):
+                return xp.asarray(tmp)
+            else:
+                return tmp
+
+        # CuPy
+        if array_api_compat.is_cupy_array(x):
+            import cupy as cp
+            import cupyx.scipy.ndimage as cndimage
+
+            return cndimage.gaussian_filter(
+                cp.asarray(x),
+                sigma=_sigma_for_cupy(self._sigma),
+                **self._kwargs,
+            )
+
+        # Torch
+        if array_api_compat.is_torch_array(x):
+            import torch
+
+            if x.device.type == "cpu":
+                import scipy.ndimage as ndimage
+
+                y_np = ndimage.gaussian_filter(
+                    x.detach().numpy(),
+                    sigma=_sigma_for_numpy(self._sigma),
+                    **self._kwargs,
+                )
+                return torch.from_numpy(np.asarray(y_np)).to(device=x.device)
+
+            # Torch GPU -> CuPy via DLPack -> filter -> Torch via DLPack
+            import cupy as cp
+            import cupyx.scipy.ndimage as cndimage
+
+            x_cp = cp.from_dlpack(x.detach())
+            y_cp = cndimage.gaussian_filter(
+                x_cp,
+                sigma=_sigma_for_cupy(sigma),
+                **kwargs,
+            )
+            return torch.from_dlpack(y_cp)
+
+        raise TypeError(
+            "Unsupported input type. Expected NumPy array, CuPy array, or Torch tensor."
+        )
 
     def _adjoint(self, y: Array) -> Array:
         return self._apply(y)
