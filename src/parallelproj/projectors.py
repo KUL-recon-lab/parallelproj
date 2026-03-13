@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array_api_compat.numpy as np
+import parallelproj_core
 from parallelproj import Array
 import array_api_compat
 import matplotlib.pyplot as plt
@@ -14,7 +15,7 @@ import parallelproj
 from .operators import LinearOperator
 from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
-from .backend import is_cuda_array, empty_cuda_cache, to_numpy_array
+from .backend import to_numpy_array
 
 
 class ParallelViewProjector2D(LinearOperator):
@@ -150,7 +151,7 @@ class ParallelViewProjector2D(LinearOperator):
         return self._device
 
     def _apply(self, x: Array) -> Array:
-        y = parallelproj.joseph3d_fwd(
+        y = parallelproj_core.joseph3d_fwd(
             self._xstart,
             self._xend,
             self.xp.expand_dims(x, axis=0),
@@ -160,7 +161,7 @@ class ParallelViewProjector2D(LinearOperator):
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = parallelproj.joseph3d_back(
+        x = parallelproj_core.joseph3d_back(
             self._xstart,
             self._xend,
             (1,) + self._image_shape,
@@ -450,13 +451,13 @@ class ParallelViewProjector3D(LinearOperator):
         return self._xend
 
     def _apply(self, x: Array) -> Array:
-        y = parallelproj.joseph3d_fwd(
+        y = parallelproj_core.joseph3d_fwd(
             self._xstart, self._xend, x, self.image_origin, self.voxel_size
         )
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = parallelproj.joseph3d_back(
+        x = parallelproj_core.joseph3d_back(
             self._xstart,
             self._xend,
             self.image_shape,
@@ -627,20 +628,20 @@ class RegularPolygonPETProjector(LinearOperator):
         """voxel size"""
         return self._voxel_size
 
-    def clear_cached_lor_endpoints(self) -> None:
-        """clear cached LOR endpoints"""
-        was_cuda_start = False
-        was_cuda_end = False
-        if self._xstart is not None:
-            was_cuda_start = is_cuda_array(self._xstart)
-        if self._xend is not None:
-            was_cuda_end = is_cuda_array(self._xend)
-
-        self._xstart = None
-        self._xend = None
-
-        if was_cuda_start or was_cuda_end:
-            empty_cuda_cache(self.xp)
+    #    def clear_cached_lor_endpoints(self) -> None:
+    #        """clear cached LOR endpoints"""
+    #        was_cuda_start = False
+    #        was_cuda_end = False
+    #        if self._xstart is not None:
+    #            was_cuda_start = is_cuda_array(self._xstart)
+    #        if self._xend is not None:
+    #            was_cuda_end = is_cuda_array(self._xend)
+    #
+    #        self._xstart = None
+    #        self._xend = None
+    #
+    #        if was_cuda_start or was_cuda_end:
+    #            empty_cuda_cache(self.xp)
 
     def __str__(self) -> str:
         """string representation"""
@@ -671,8 +672,8 @@ class RegularPolygonPETProjector(LinearOperator):
         # calculate LOR endpoints if not done yet
         if (self.xstart is None) or (self.xend is None):
             xstart, xend = self._lor_descriptor.get_lor_coordinates(views=self._views)
-            if is_cuda_array(xstart):
-                empty_cuda_cache(self.xp)
+            # if is_cuda_array(xstart):
+            #    empty_cuda_cache(self.xp)
         else:
             xstart = self.xstart
             xend = self.xend
@@ -683,11 +684,11 @@ class RegularPolygonPETProjector(LinearOperator):
             self._xend = xend
 
         if not self.tof:
-            x_fwd = parallelproj.joseph3d_fwd(
+            x_fwd = parallelproj_core.joseph3d_fwd(
                 xstart, xend, x, self._img_origin, self._voxel_size
             )
         else:
-            x_fwd = parallelproj.joseph3d_fwd_tof_sino(
+            x_fwd = parallelproj_core.joseph3d_tof_sino_fwd(
                 xstart,
                 xend,
                 x,
@@ -715,8 +716,8 @@ class RegularPolygonPETProjector(LinearOperator):
         # calculate LOR endpoints if not done yet
         if (self.xstart is None) or (self.xend is None):
             xstart, xend = self._lor_descriptor.get_lor_coordinates(views=self._views)
-            if is_cuda_array(xstart):
-                empty_cuda_cache(self.xp)
+            # if is_cuda_array(xstart):
+            #    empty_cuda_cache(self.xp)
         else:
             xstart = self.xstart
             xend = self.xend
@@ -727,7 +728,7 @@ class RegularPolygonPETProjector(LinearOperator):
             self._xend = xend
 
         if not self.tof:
-            y_back = parallelproj.joseph3d_back(
+            y_back = parallelproj_core.joseph3d_back(
                 xstart,
                 xend,
                 self._img_shape,
@@ -736,7 +737,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 y,
             )
         else:
-            y_back = parallelproj.joseph3d_back_tof_sino(
+            y_back = parallelproj_core.joseph3d_tof_sino_back(
                 xstart,
                 xend,
                 self._img_shape,
@@ -1054,11 +1055,11 @@ class ListmodePETProjector(LinearOperator):
         dev = array_api_compat.device(x)
 
         if not self.tof:
-            x_fwd = parallelproj.joseph3d_fwd(
+            x_fwd = parallelproj_core.joseph3d_fwd(
                 self._xstart, self._xend, x, self._img_origin, self._voxel_size
             )
         else:
-            x_fwd = parallelproj.joseph3d_fwd_tof_lm(
+            x_fwd = parallelproj_core.joseph3d_tof_lm_fwd(
                 self._xstart,
                 self._xend,
                 x,
@@ -1075,6 +1076,7 @@ class ListmodePETProjector(LinearOperator):
                 ),
                 self.tof_parameters.num_sigmas,
                 self._tofbin,
+                self.tof_parameters.num_tofbins,
             )
 
         return x_fwd
@@ -1083,7 +1085,7 @@ class ListmodePETProjector(LinearOperator):
         dev = array_api_compat.device(y)
 
         if not self.tof:
-            y_back = parallelproj.joseph3d_back(
+            y_back = parallelproj_core.joseph3d_back(
                 self._xstart,
                 self._xend,
                 self._img_shape,
@@ -1092,7 +1094,7 @@ class ListmodePETProjector(LinearOperator):
                 y,
             )
         else:
-            y_back = parallelproj.joseph3d_back_tof_lm(
+            y_back = parallelproj_core.joseph3d_tof_lm_back(
                 self._xstart,
                 self._xend,
                 self._img_shape,
@@ -1110,6 +1112,7 @@ class ListmodePETProjector(LinearOperator):
                 ),
                 self.tof_parameters.num_sigmas,
                 self._tofbin,
+                self._tof_parameters.num_tofbins,
             )
 
         return y_back
@@ -1255,11 +1258,11 @@ class EqualBlockPETProjector(LinearOperator):
             )
 
             if not self.tof:
-                x_fwd[i, ...] = parallelproj.joseph3d_fwd(
+                x_fwd[i, ...] = parallelproj_core.joseph3d_fwd(
                     xstart, xend, x, self._img_origin, self._voxel_size
                 )
             else:
-                x_fwd[i, ...] = parallelproj.joseph3d_fwd_tof_sino(
+                x_fwd[i, ...] = parallelproj_core.joseph3d_tof_sino_fwd(
                     xstart,
                     xend,
                     x,
@@ -1293,7 +1296,7 @@ class EqualBlockPETProjector(LinearOperator):
                 self.xp.asarray([i], device=dev)
             )
             if not self.tof:
-                y_back += parallelproj.joseph3d_back(
+                y_back += parallelproj_core.joseph3d_back(
                     xstart,
                     xend,
                     self._img_shape,
@@ -1302,7 +1305,7 @@ class EqualBlockPETProjector(LinearOperator):
                     y[i, ...],
                 )
             else:
-                y_back += parallelproj.joseph3d_back_tof_sino(
+                y_back += parallelproj_core.joseph3d_tof_sino_back(
                     xstart,
                     xend,
                     self._img_shape,
