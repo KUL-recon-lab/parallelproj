@@ -16,9 +16,7 @@ else:
 
 
 def to_numpy_array(x) -> np.ndarray:
-    if array_api_compat.is_numpy_array(x):
-        return np.asarray(x)
-    elif array_api_compat.is_cupy_array(x):
+    if array_api_compat.is_cupy_array(x):
         import array_api_compat.cupy as cp
 
         return cp.asnumpy(x)
@@ -27,6 +25,4 @@ def to_numpy_array(x) -> np.ndarray:
             x.detach().numpy() if x.device.type == "cpu" else x.detach().cpu().numpy()
         )
     else:
-        raise TypeError(
-            "Unsupported input type. Expected NumPy array, CuPy array, or Torch tensor."
-        )
+        return np.asarray(x)
