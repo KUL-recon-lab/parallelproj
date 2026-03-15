@@ -14,7 +14,7 @@ from array_api_compat import device, get_namespace, size
 from .operators import LinearOperator
 from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
-from .backend import to_numpy_array
+from .backend import to_numpy_array, empty_cuda_cache
 
 
 class ParallelViewProjector2D(LinearOperator):
@@ -629,18 +629,10 @@ class RegularPolygonPETProjector(LinearOperator):
 
     def clear_cached_lor_endpoints(self) -> None:
         """clear cached LOR endpoints"""
-        # was_cuda_start = False
-        # was_cuda_end = False
-        # if self._xstart is not None:
-        #    was_cuda_start = is_cuda_array(self._xstart)
-        # if self._xend is not None:
-        #    was_cuda_end = is_cuda_array(self._xend)
-
         self._xstart = None
         self._xend = None
 
-        # if was_cuda_start or was_cuda_end:
-        #    empty_cuda_cache(self.xp)
+        empty_cuda_cache(self.xp)
 
     def __str__(self) -> str:
         """string representation"""

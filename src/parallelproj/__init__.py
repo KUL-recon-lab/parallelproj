@@ -1,5 +1,6 @@
 from .backend import (
     to_numpy_array,
+    empty_cuda_cache,
     Array,
 )
 
@@ -41,6 +42,7 @@ from .tof import TOFParameters
 
 __all__ = [
     "to_numpy_array",
+    "empty_cuda_cache",
     "LinearOperator",
     "MatrixOperator",
     "ElementwiseMultiplicationOperator",
