@@ -95,6 +95,7 @@ class LinearOperator(abc.ABC):
         dev: str,
         verbose: bool = False,
         iscomplex: bool = False,
+        dtype: type | None = None,
         **kwargs,
     ) -> bool:
         """test whether the adjoint is correctly implemented
@@ -109,6 +110,8 @@ class LinearOperator(abc.ABC):
             verbose output
         iscomplex : bool, optional
             use complex arrays
+        dtype : type | None, optional
+            data type of the arrays
         **kwargs : dict
             passed to np.isclose
 
@@ -118,10 +121,11 @@ class LinearOperator(abc.ABC):
             whether the adjoint is correctly implemented
         """
 
-        if iscomplex:
-            dtype = xp.complex128
-        else:
-            dtype = xp.float64
+        if dtype is None:
+            if iscomplex:
+                dtype = xp.complex128
+            else:
+                dtype = xp.float64
 
         x = xp.asarray(np.random.rand(*self.in_shape), device=dev, dtype=dtype)
         y = xp.asarray(np.random.rand(*self.out_shape), device=dev, dtype=dtype)
@@ -137,6 +141,7 @@ class LinearOperator(abc.ABC):
             )
 
         x_fwd = self.apply(x)
+
         y_adj = self.adjoint(y)
 
         if iscomplex:

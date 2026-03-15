@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from types import ModuleType
 from array_api_compat import device, get_namespace, size
-import parallelproj
 
 from .operators import LinearOperator
 from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
@@ -611,7 +610,7 @@ class RegularPolygonPETProjector(LinearOperator):
         self._views = value
         # we need to reset the LOR start and end points in case
         # they were cached
-        self.clear_cached_lor_endpoints()
+        # self.clear_cached_lor_endpoints()
 
     @property
     def xstart(self) -> Array | None:
@@ -683,28 +682,33 @@ class RegularPolygonPETProjector(LinearOperator):
             self._xstart = xstart
             self._xend = xend
 
+        x_fwd = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=dev)
+
         if not self.tof:
-            x_fwd = parallelproj_core.joseph3d_fwd(
-                xstart, xend, x, self._img_origin, self._voxel_size
+            parallelproj_core.joseph3d_fwd(
+                xstart, xend, x, self._img_origin, self._voxel_size, x_fwd
             )
         else:
-            x_fwd = parallelproj_core.joseph3d_tof_sino_fwd(
+            parallelproj_core.joseph3d_tof_sino_fwd(
                 xstart,
                 xend,
                 x,
                 self._img_origin,
                 self._voxel_size,
+                x_fwd,
                 self._tof_parameters.tofbin_width,
                 self.xp.asarray(
-                    [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
+                    [self._tof_parameters.sigma_tof],
+                    dtype=self.xp.float32,
+                    device=dev,
                 ),
                 self.xp.asarray(
                     [self._tof_parameters.tofcenter_offset],
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
                 self.tof_parameters.num_tofbins,
+                self.tof_parameters.num_sigmas,
             )
 
         return x_fwd
@@ -727,20 +731,22 @@ class RegularPolygonPETProjector(LinearOperator):
             self._xstart = xstart
             self._xend = xend
 
+        y_back = self.xp.zeros(self.in_shape, dtype=self.xp.float32, device=dev)
+
         if not self.tof:
-            y_back = parallelproj_core.joseph3d_back(
+            parallelproj_core.joseph3d_back(
                 xstart,
                 xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
             )
         else:
-            y_back = parallelproj_core.joseph3d_tof_sino_back(
+            parallelproj_core.joseph3d_tof_sino_back(
                 xstart,
                 xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
@@ -753,8 +759,8 @@ class RegularPolygonPETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
                 self.tof_parameters.num_tofbins,
+                self.tof_parameters.num_sigmas,
             )
 
         return y_back

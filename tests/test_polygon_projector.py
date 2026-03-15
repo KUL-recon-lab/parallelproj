@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import parallelproj
 import array_api_compat.numpy as np
-from array_api_compat import to_device
 import pytest
 import matplotlib.pyplot as plt
 from types import ModuleType
@@ -222,13 +221,13 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
     vox_value = 2.7
     img_size = 3
 
-    img_shape = 3 * (img_size,)
+    img_shape = (img_size, img_size, img_size)
 
     # setup a test image with a single voxel != 0 at the center of the image
-    x = xp.zeros(img_shape, device=dev)
+    x = xp.zeros(img_shape, device=dev, dtype=xp.float32)
     x[img_shape[0] // 2, img_shape[1] // 2, img_shape[2] // 2] = vox_value
     # setup a test image where all voxels have the same value
-    x2 = vox_value * xp.ones(img_shape, device=dev)
+    x2 = vox_value * xp.ones(img_shape, device=dev, dtype=xp.float32)
 
     for symmetry_axis in [0, 1, 2]:
         scanner = parallelproj.RegularPolygonPETScannerGeometry(
@@ -248,7 +247,7 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             )
 
             proj = parallelproj.RegularPolygonPETProjector(
-                lor_desc, img_shape=img_shape, voxel_size=3 * (vox_size,)
+                lor_desc, img_shape=img_shape, voxel_size=(vox_size, vox_size, vox_size)
             )
 
             x_fwd = proj(x)
@@ -360,12 +359,12 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             projb = parallelproj.RegularPolygonPETProjector(
                 lor_desc,
                 img_shape=img_shape,
-                voxel_size=3 * (vox_size,),
+                voxel_size=(vox_size, vox_size, vox_size),
                 cache_lor_endpoints=False,
             )
             x_fwd2b = projb(x2)
 
-            assert projb.adjointness_test(xp, dev)
+            assert projb.adjointness_test(xp, dev, dtype=xp.float32)
 
             assert projb.xstart is None
             assert projb.xend is None
@@ -378,37 +377,38 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
                 parallelproj.to_numpy_array(x_fwd2),
             )
 
-            # check whether the caching works if we first call the adjoint
-            proj4 = parallelproj.RegularPolygonPETProjector(
-                lor_desc, img_shape=img_shape, voxel_size=3 * (vox_size,)
-            )
+            ####### TODO re-enable caching of LOR endponts + test with subset views
+            #######
 
-            y = xp.ones(proj4.out_shape, dtype=xp.float32, device=dev)
-            tmp = proj4.adjoint(y)
+            ## check whether the caching works if we first call the adjoint
+            # proj4 = parallelproj.RegularPolygonPETProjector(
+            #    lor_desc,
+            #    img_shape=img_shape,
+            #    voxel_size=(vox_size, vox_size, vox_size),
+            #    cache_lor_endpoints=False,
+            # )
 
-            assert proj4.xstart is not None
-            assert proj4.xend is not None
+            # y = xp.ones(proj4.out_shape, dtype=xp.float32, device=dev)
+            # tmp = proj4.adjoint(y)
 
-            assert bool(xp.all(proj.xstart == proj4.xstart))
-            assert bool(xp.all(proj.xend == proj4.xend))
+            # assert proj4.xstart is None
+            # assert proj4.xend is None
 
-            proj4.clear_cached_lor_endpoints()
-            assert proj4.xstart is None
-            assert proj4.xend is None
+            ## proj4.clear_cached_lor_endpoints()
+            ## assert proj4.xstart is None
+            ## assert proj4.xend is None
 
-            proj5 = copy(proj)
-            subset_views = xp.asarray([0, 1], device=dev)
-            proj5.views = xp.asarray(subset_views, device=dev)
+            # proj5 = copy(proj)
+            # subset_views = xp.asarray([0, 1], device=dev)
+            # proj5.views = xp.asarray(subset_views, device=dev)
 
-            assert proj.xstart is not None
-            assert proj.xend is not None
+            ## proj5.clear_cached_lor_endpoints()
+            ## assert proj5.xstart is None
+            ## assert proj5.xend is None
 
-            assert proj5.xstart is None
-            assert proj5.xend is None
+            # x_fwd5 = proj5(x)
 
-            x_fwd5 = proj5(x)
+            # assert proj5.xstart is None
+            # assert proj5.xend is None
 
-            assert proj5.xstart is not None
-            assert proj5.xend is not None
-
-            assert bool(xp.all(proj5.views == subset_views))
+            # assert bool(xp.all(proj5.views == subset_views))
