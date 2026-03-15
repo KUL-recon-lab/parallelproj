@@ -377,38 +377,37 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
                 parallelproj.to_numpy_array(x_fwd2),
             )
 
-            ####### TODO re-enable caching of LOR endponts + test with subset views
-            #######
+            # check whether the caching works if we first call the adjoint
+            proj4 = parallelproj.RegularPolygonPETProjector(
+                lor_desc,
+                img_shape=img_shape,
+                voxel_size=(vox_size, vox_size, vox_size),
+                cache_lor_endpoints=True,
+            )
 
-            ## check whether the caching works if we first call the adjoint
-            # proj4 = parallelproj.RegularPolygonPETProjector(
-            #    lor_desc,
-            #    img_shape=img_shape,
-            #    voxel_size=(vox_size, vox_size, vox_size),
-            #    cache_lor_endpoints=False,
-            # )
+            y = xp.ones(proj4.out_shape, dtype=xp.float32, device=dev)
+            tmp = proj4.adjoint(y)
 
-            # y = xp.ones(proj4.out_shape, dtype=xp.float32, device=dev)
-            # tmp = proj4.adjoint(y)
+            assert proj4.xstart is not None
+            assert proj4.xend is not None
 
-            # assert proj4.xstart is None
-            # assert proj4.xend is None
+            proj4.clear_cached_lor_endpoints()
+            assert proj4.xstart is None
+            assert proj4.xend is None
 
-            ## proj4.clear_cached_lor_endpoints()
-            ## assert proj4.xstart is None
-            ## assert proj4.xend is None
+            tmp = proj4.adjoint(y)
 
-            # proj5 = copy(proj)
-            # subset_views = xp.asarray([0, 1], device=dev)
-            # proj5.views = xp.asarray(subset_views, device=dev)
+            assert proj4.xstart is not None
+            assert proj4.xend is not None
 
-            ## proj5.clear_cached_lor_endpoints()
-            ## assert proj5.xstart is None
-            ## assert proj5.xend is None
+            proj5 = copy(proj)
+            subset_views = xp.asarray([0, 1], device=dev)
+            proj5.views = xp.asarray(subset_views, device=dev)
 
-            # x_fwd5 = proj5(x)
+            # if we reset the views, the cached LOR endpoints should be cleared
+            assert proj5.xstart is None
+            assert proj5.xend is None
 
-            # assert proj5.xstart is None
-            # assert proj5.xend is None
+            x_fwd5 = proj5(x)
 
-            # assert bool(xp.all(proj5.views == subset_views))
+            assert bool(xp.all(proj5.views == subset_views))
