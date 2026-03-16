@@ -1,3 +1,10 @@
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("parallelproj")
+except PackageNotFoundError:
+    __version__ = "unknown"
+
 from .backend import (
     to_numpy_array,
     empty_cuda_cache,

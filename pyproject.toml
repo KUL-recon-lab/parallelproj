@@ -1,27 +1,23 @@
 [build-system]
-requires = ["setuptools >= 61.0", "wheel", "setuptools-scm"]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "parallelproj"
-description = "Python wrappers for parallelproj projectors."
-authors = [
-    {name = "Georg Schramm", email = "georg.schramm@kuleuven.be"},
-]
+dynamic = ["version"]
+requires-python = ">=3.12"
 dependencies = [
     "parallelproj-core>=2.0.4",
     "numpy>=1.23",
-    "scipy~=1.0",
-    "array-api-compat~=1.7",
-    "matplotlib~=3.8",
+    "scipy>=1.8",
+    "array-api-compat>=1.7",
 ]
-requires-python = ">=3.12"
-readme = "README.md"
-license = {text = "MIT"}
-classifiers = [
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python",
-]
+
+[tool.setuptools_scm]
+parentdir_prefix_version = "v"
+fallback_version = "0.0.0"
+version_scheme = "no-guess-dev"
+local_scheme = "node-and-date"
 
 [project.urls]
 Homepage = "https://github.com/gschramm/parallelproj"
