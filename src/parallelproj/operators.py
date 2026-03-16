@@ -535,8 +535,8 @@ class GaussianFilterOperator(LinearOperator):
             x_cp = cp.from_dlpack(x.detach())
             y_cp = cndimage.gaussian_filter(
                 x_cp,
-                sigma=_sigma_for_cupy(sigma),
-                **kwargs,
+                sigma=_sigma_for_cupy(self._sigma),
+                **self._kwargs,
             )
             return torch.from_dlpack(y_cp)
 

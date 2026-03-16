@@ -70,7 +70,7 @@ def _count_event_multiplicity_torch(events: Array, xp) -> Array:
 
 
 def _count_event_multiplicity_cupy(events: Array, xp) -> Array:
-    cupy_mod = _native_cupy_module(xp)
+    cupy_mod = xp
     _, inverse, counts = cupy_mod.unique(
         events,
         axis=0,
@@ -93,7 +93,3 @@ def _count_event_multiplicity_numpy_fallback(events: Array, xp) -> Array:
 
 def _native_torch_module(xp):
     return xp if xp.__name__ == "torch" else xp.torch
-
-
-def _native_cupy_module(xp):
-    return xp if xp.__name__ == "cupy" else xp._module
