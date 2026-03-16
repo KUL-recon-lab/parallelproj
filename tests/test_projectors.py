@@ -40,7 +40,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     assert allclose(proj2d.voxel_size[1:], xp.asarray(voxel_size, device=dev))
     assert proj2d.dev == array_api_compat.device(xstart)
 
-    assert proj2d.adjointness_test(xp, dev, verbose=verbose)
+    assert proj2d.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
 
     # test a simple 2D projection
     x2d = xp.reshape(xp.arange(4, dtype=xp.float32, device=dev), (2, 2))
@@ -51,9 +51,6 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     )
 
     if verbose:
-        print(
-            f"module = {xp.__name__}  -  cuda_enabled {parallelproj.num_visible_cuda_devices > 0}"
-        )
         print("calculated 2d projection = ", x_fwd)
         print("expected   2d projection = ", exp_result)
         print("abs diff                 = ", xp.abs(x_fwd - exp_result))
@@ -87,7 +84,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     xstart = proj3d.xstart
     xend = proj3d.xend
 
-    assert proj3d.adjointness_test(xp, dev, verbose=verbose)
+    assert proj3d.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
 
     # test a simple 3D projection
     x3d = xp.reshape(xp.arange(8, dtype=xp.float32, device=dev), (2, 2, 2))
@@ -196,7 +193,7 @@ def test_lmprojector(
 
     assert lm_proj.num_events == xstart.shape[0]
 
-    assert lm_proj.adjointness_test(xp, dev)
+    assert lm_proj.adjointness_test(xp, dev, dtype=xp.float32)
 
     assert xp.all(lm_proj.voxel_size == xp.asarray(voxel_size, device=dev))
 

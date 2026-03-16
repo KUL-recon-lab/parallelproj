@@ -150,20 +150,26 @@ class ParallelViewProjector2D(LinearOperator):
         return self._device
 
     def _apply(self, x: Array) -> Array:
-        y = parallelproj_core.joseph3d_fwd(
+        y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
+        parallelproj_core.joseph3d_fwd(
             self._xstart,
             self._xend,
             self.xp.expand_dims(x, axis=0),
             self._image_origin,
             self._voxel_size,
+            y,
         )
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = parallelproj_core.joseph3d_back(
+        x = self.xp.zeros(
+            (1,) + self._image_shape, dtype=self.xp.float32, device=self._device
+        )
+
+        parallelproj_core.joseph3d_back(
             self._xstart,
             self._xend,
-            (1,) + self._image_shape,
+            x,
             self._image_origin,
             self._voxel_size,
             y,
@@ -450,16 +456,18 @@ class ParallelViewProjector3D(LinearOperator):
         return self._xend
 
     def _apply(self, x: Array) -> Array:
-        y = parallelproj_core.joseph3d_fwd(
-            self._xstart, self._xend, x, self.image_origin, self.voxel_size
+        y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
+        parallelproj_core.joseph3d_fwd(
+            self._xstart, self._xend, x, self.image_origin, self.voxel_size, y
         )
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = parallelproj_core.joseph3d_back(
+        x = self.xp.zeros(self._image_shape, dtype=self.xp.float32, device=self._device)
+        parallelproj_core.joseph3d_back(
             self._xstart,
             self._xend,
-            self.image_shape,
+            x,
             self.image_origin,
             self.voxel_size,
             y,
