@@ -6,11 +6,12 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 
-from ._backend import Array, empty_cuda_cache, to_numpy_array
+from ._backend import Array, empty_cuda_cache, to_numpy_array, count_event_multiplicity
 
 __all__ = [
     "__version__",
     "Array",
     "empty_cuda_cache",
     "to_numpy_array",
+    "count_event_multiplicity",
 ]
