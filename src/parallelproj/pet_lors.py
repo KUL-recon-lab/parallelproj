@@ -5,7 +5,7 @@ from __future__ import annotations
 import abc
 import enum
 import array_api_compat.numpy as np
-from parallelproj import Array
+from parallelproj import Array, to_numpy_array
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
@@ -15,8 +15,6 @@ from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
 )
-
-from .backend import to_numpy_array
 
 
 class SinogramSpatialAxisOrder(enum.Enum):

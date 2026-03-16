@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import pytest
-import parallelproj
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
 import matplotlib.pyplot as plt
 
 from types import ModuleType
@@ -12,15 +13,15 @@ from .config import pytestmark
 def test_pet_lors(xp: ModuleType, dev: str) -> None:
     num_rings = 3
     symmetry_axis = 2
-    scanner = parallelproj.DemoPETScannerGeometry(
+    scanner = pps.DemoPETScannerGeometry(
         xp, dev, num_rings, symmetry_axis=symmetry_axis
     )
 
     radial_trim = 65
     max_ring_difference = 2
 
-    for sinogram_order in parallelproj.SinogramSpatialAxisOrder:
-        lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+    for sinogram_order in ppl.SinogramSpatialAxisOrder:
+        lor_desc = ppl.RegularPolygonPETLORDescriptor(
             scanner,
             radial_trim=radial_trim,
             max_ring_difference=max_ring_difference,
@@ -51,7 +52,7 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
         plt.close(fig)
 
     # test lor descriptor without max_ring_difference and radial_trim
-    scanner2 = parallelproj.RegularPolygonPETScannerGeometry(
+    scanner2 = pps.RegularPolygonPETScannerGeometry(
         xp,
         dev,
         radius=65.0,
@@ -65,8 +66,8 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
     num_subsets = 9
 
     # test the distribution of views into subsets
-    for sinogram_order in parallelproj.SinogramSpatialAxisOrder:
-        lor_desc2 = parallelproj.RegularPolygonPETLORDescriptor(
+    for sinogram_order in ppl.SinogramSpatialAxisOrder:
+        lor_desc2 = ppl.RegularPolygonPETLORDescriptor(
             scanner2,
             radial_trim=10,
             max_ring_difference=None,
@@ -160,7 +161,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
     aff2 = xp.eye(4, device=dev)
     aff2[1, -1] = -scanner_radius
 
-    block1 = parallelproj.BlockPETScannerModule(
+    block1 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -168,7 +169,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
         affine_transformation_matrix=aff1,
     )
 
-    block2 = parallelproj.BlockPETScannerModule(
+    block2 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -176,7 +177,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
         affine_transformation_matrix=aff2,
     )
 
-    block3 = parallelproj.BlockPETScannerModule(
+    block3 = pps.BlockPETScannerModule(
         xp,
         dev,
         (2, 2, 3),
@@ -184,9 +185,9 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
         affine_transformation_matrix=aff2,
     )
 
-    scanner = parallelproj.ModularizedPETScannerGeometry([block1, block2])
+    scanner = pps.ModularizedPETScannerGeometry([block1, block2])
 
-    lor_desc = parallelproj.EqualBlockPETLORDescriptor(
+    lor_desc = ppl.EqualBlockPETLORDescriptor(
         scanner,
         xp.asarray(
             [
@@ -206,9 +207,9 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
     assert lor_desc.xp == xp
     assert lor_desc.dev == dev
 
-    scanner2 = parallelproj.ModularizedPETScannerGeometry([block1, block2, block3])
+    scanner2 = pps.ModularizedPETScannerGeometry([block1, block2, block3])
     with pytest.raises(Exception):
-        lor_desc2 = parallelproj.EqualBlockPETLORDescriptor(
+        lor_desc2 = ppl.EqualBlockPETLORDescriptor(
             scanner2,
             xp.asarray(
                 [
