@@ -5,12 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "parallelproj"
 dynamic = ["version"]
+description = "Python tools for PET projection and reconstruction workflows."
+readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+authors = [
+  {name = "Georg Schramm"},
+]
 dependencies = [
-    "parallelproj-core>=2.0.4",
-    "numpy>=1.23",
-    "scipy>=1.8",
-    "array-api-compat>=1.7",
+  "parallelproj-core>=2.0.4",
+  "numpy>=1.23",
+  "scipy>=1.8",
+  "array-api-compat>=1.7",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8",
+  "pytest-cov",
+]
+docs = [
+  "sphinx",
+  "furo",
 ]
 
 [tool.setuptools_scm]
@@ -19,34 +35,5 @@ fallback_version = "0.0.0"
 version_scheme = "no-guess-dev"
 local_scheme = "node-and-date"
 
-[project.urls]
-Homepage = "https://github.com/gschramm/parallelproj"
-
-[tool.coverage.report]
-exclude_lines = [
-    "def __repr__",
-    "if verbose:",
-    "if self._debug:",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-    "if parallelproj.is_cuda_array",
-    "if is_cuda_array",
-    "if cuda_present:",
-    "def is_cuda_array",
-    "def empty_cuda_cache",
-    "if num_visible_cuda_devices > 0",
-    "if cupy_enabled",
-    "lib_parallelproj_c_fname",
-    "empty_cuda_cache",
-    "__str__",
-    "Array =",
-    "elif not cupy_enabled and torch_enabled",
-    "elif cupy_enabled and not torch_enabled"
-]
+[tool.pytest.ini_options]
+testpaths = ["tests"]

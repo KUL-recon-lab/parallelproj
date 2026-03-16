@@ -1,3 +1,0 @@
-- [ ] calculate integrals as chunks over smaller cubes
-- [ ] break up loop over multiple GPU devices in many smaller loops
-      to get asynchronous memory transfer
