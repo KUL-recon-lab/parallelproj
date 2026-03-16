@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import array_api_compat.numpy as np
 import parallelproj_core
-from parallelproj import Array
+from parallelproj import Array, to_numpy_array, empty_cuda_cache
 import array_api_compat
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
@@ -14,7 +14,6 @@ from array_api_compat import device, get_namespace, size
 from .operators import LinearOperator
 from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
-from .backend import to_numpy_array, empty_cuda_cache
 
 
 class ParallelViewProjector2D(LinearOperator):

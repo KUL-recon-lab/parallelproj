@@ -10,8 +10,6 @@ from array_api_compat import device, get_namespace
 from parallelproj import Array
 from collections.abc import Sequence
 
-import parallelproj
-
 
 class LinearOperator(abc.ABC):
     """abstract base class for linear operators"""

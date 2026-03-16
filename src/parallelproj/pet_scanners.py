@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import abc
-from parallelproj import Array
+from parallelproj import Array, to_numpy_array
 import matplotlib.pyplot as plt
 import numpy as np
-import array_api_compat
 
 from types import ModuleType
 from array_api_compat import size
-
-from .backend import to_numpy_array
 
 
 class PETScannerModule(abc.ABC):
