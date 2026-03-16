@@ -2,12 +2,12 @@
 Non-TOF and TOF projections using a modularized (block) PET scanner geometry
 ============================================================================
 
-In this example, we show how to perform non-TOF and TOF projections using a 
-PET scanner consisting of multiple block modules where each block module 
+In this example, we show how to perform non-TOF and TOF projections using a
+PET scanner consisting of multiple block modules where each block module
 consists of a regular grid of LOR endpoints.
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -16,25 +16,34 @@ consists of a regular grid of LOR endpoints.
 """
 
 # %%
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
-import matplotlib.pyplot as plt
 import math
+import matplotlib.pyplot as plt
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
+import parallelproj.projectors as ppp
+import parallelproj.tof as ppt
+from parallelproj import to_numpy_array
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
+
 
 # %%
 # input paraters
@@ -81,10 +90,11 @@ for phi in [
             [math.sin(phi), math.cos(phi), 0, 0],
             [0, 0, 1, 0],
             [0, 0, 0, 1],
-        ]
+        ],
+        device=dev,
     )
     mods.append(
-        parallelproj.BlockPETScannerModule(
+        pps.BlockPETScannerModule(
             xp,
             dev,
             block_shape,
@@ -95,7 +105,7 @@ for phi in [
 
 # create the scanner geometry from a list of identical block modules at
 # different locations in space
-scanner = parallelproj.ModularizedPETScannerGeometry(mods)
+scanner = pps.ModularizedPETScannerGeometry(mods)
 
 # %%
 # Setup of a LOR descriptor consisting of block pairs
@@ -106,7 +116,7 @@ scanner = parallelproj.ModularizedPETScannerGeometry(mods)
 # To do this, we have manually define a list containing pairs of block numbers.
 # Here, we define 9 block pairs. Note that more pairs would be possible.
 
-lor_desc = parallelproj.EqualBlockPETLORDescriptor(
+lor_desc = ppl.EqualBlockPETLORDescriptor(
     scanner,
     xp.asarray(
         [
@@ -133,8 +143,8 @@ img_shape = (28, 20, 3)
 voxel_size = (0.5, 0.5, 1.0)
 img = xp.ones(img_shape, dtype=xp.float32, device=dev)
 
-proj = parallelproj.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
-assert proj.adjointness_test(xp, dev)
+proj = ppp.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
+assert proj.adjointness_test(xp, dev, dtype=xp.float32)
 
 # %%
 # Visualize the projector geometry and all LORs
@@ -166,7 +176,7 @@ print(ones_back.shape)
 # Visualize the forward and backward projection results
 
 fig3, ax3 = plt.subplots(figsize=(8, 2), tight_layout=True)
-ax3.imshow(parallelproj.to_numpy_array(img_fwd), cmap="Greys", aspect=3.0)
+ax3.imshow(to_numpy_array(img_fwd), cmap="Greys", aspect=3.0)
 ax3.set_xlabel("LOR number in block pair")
 ax3.set_ylabel("block pair")
 ax3.set_title("forward projection of ones")
@@ -177,7 +187,7 @@ vmin = float(xp.min(ones_back))
 vmax = float(xp.max(ones_back))
 for i in range(3):
     ax4[i].imshow(
-        parallelproj.to_numpy_array(ones_back[:, :, i]),
+        to_numpy_array(ones_back[:, :, i]),
         vmin=vmin,
         vmax=vmax,
         cmap="Greys",
@@ -191,12 +201,12 @@ fig4.show()
 #
 # Now that the LOR descriptor is defined, we can setup the projector.
 
-proj_tof = parallelproj.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
-proj_tof.tof_parameters = parallelproj.TOFParameters(
+proj_tof = ppp.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
+proj_tof.tof_parameters = ppt.TOFParameters(
     num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0, num_sigmas=3.0
 )
 
-assert proj_tof.adjointness_test(xp, dev)
+assert proj_tof.adjointness_test(xp, dev, dtype=xp.float32)
 
 # %%
 # TOF forward project an image full of ones. The forward projection has the
@@ -218,7 +228,7 @@ print(ones_back_tof.shape)
 # Visualize the forward and backward projection results
 
 fig5, ax5 = plt.subplots(figsize=(6, 3), tight_layout=True)
-ax5.plot(parallelproj.to_numpy_array(img_fwd_tof[0, 0, :]), ".-")
+ax5.plot(to_numpy_array(img_fwd_tof[0, 0, :]), ".-")
 ax5.set_xlabel("TOF bin")
 ax5.set_title("TOF profile of LOR 0 in block pair 0")
 fig5.show()
@@ -228,7 +238,7 @@ vmin = float(xp.min(ones_back_tof))
 vmax = float(xp.max(ones_back_tof))
 for i in range(3):
     ax6[i].imshow(
-        parallelproj.to_numpy_array(ones_back_tof[:, :, i]),
+        to_numpy_array(ones_back_tof[:, :, i]),
         vmin=vmin,
         vmax=vmax,
         cmap="Greys",

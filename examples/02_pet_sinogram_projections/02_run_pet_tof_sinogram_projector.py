@@ -3,11 +3,11 @@ PET TOF sinogram projector
 ==========================
 
 In this example we will show how to setup and use a TOF PET sinogram projector
-consisting of a geometrical TOF forward projector (Joseph's method), 
+consisting of a geometrical TOF forward projector (Joseph's method),
 a resolution model and a correction for attenuation.
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -16,35 +16,40 @@ a resolution model and a correction for attenuation.
 """
 
 # %%
-# parallelproj supports the numpy, cupy and pytorch array API and different devices
-# choose your preferred array API uncommenting the corresponding line
-
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
-from array_api_compat import to_device
-import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
+import parallelproj.projectors as ppp
+import parallelproj.operators as ppo
+import parallelproj.tof as ppt
+from parallelproj import to_numpy_array
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
+
 
 # %%
 # setup a small regular polygon PET scanner with 5 rings (polygons)
 
 num_rings = 3
-scanner = parallelproj.RegularPolygonPETScannerGeometry(
+scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -58,11 +63,11 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
 # %%
 # setup the LOR descriptor that defines the sinogram
 
-lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+lor_desc = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=1,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
 # %%
@@ -75,7 +80,7 @@ lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
 
 # define a first projector using an image with 40x8x40 voxels of size 2x2x2 mm
 # where the image center is at world coordinate (0, 0, 0)
-proj = parallelproj.RegularPolygonPETProjector(
+proj = ppp.RegularPolygonPETProjector(
     lor_desc, img_shape=(40, 7, 40), voxel_size=(2.0, 2.0, 2.0)
 )
 
@@ -98,7 +103,7 @@ fig.show()
 # --------------------------------------
 
 # setup a simple image-based resolution model with an Gaussian FWHM of 4.5mm
-res_model = parallelproj.GaussianFilterOperator(
+res_model = ppo.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
@@ -120,7 +125,7 @@ att_sino = xp.exp(-x_att_fwd)
 # Adding time-of-flight to the projector
 # --------------------------------------
 
-proj.tof_parameters = parallelproj.TOFParameters(num_tofbins=9)
+proj.tof_parameters = ppt.TOFParameters(num_tofbins=9)
 
 # %%
 # Combining resolution model, TOF projector and attenuation model
@@ -134,14 +139,10 @@ proj.tof_parameters = parallelproj.TOFParameters(num_tofbins=9)
 print(f"atten. sino shape {att_sino.shape}")
 print(f"proj output shape {proj.out_shape}")
 
-att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-    proj.out_shape, att_sino
-)
+att_op = ppo.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
 
 # setup a forward projector containing the attenuation and resolution
-proj_with_att_and_res_model = parallelproj.CompositeLinearOperator(
-    (att_op, proj, res_model)
-)
+proj_with_att_and_res_model = ppo.CompositeLinearOperator((att_op, proj, res_model))
 
 
 # %%
@@ -171,7 +172,7 @@ vmax = float(xp.max(x_fwd))
 for i in range(7):
     for j in range(9):
         ax[i, j].imshow(
-            parallelproj.to_numpy_array(x_fwd[:, :, i, j].T),
+            to_numpy_array(x_fwd[:, :, i, j].T),
             cmap="Greys",
             vmin=0,
             vmax=vmax,
@@ -193,7 +194,7 @@ vmax = float(xp.max(x_fwd_back))
 for i, axx in enumerate(ax2.ravel()):
     if i < x_fwd_back.shape[1]:
         axx.imshow(
-            parallelproj.to_numpy_array(x_fwd_back[:, i, :].T),
+            to_numpy_array(x_fwd_back[:, i, :].T),
             cmap="Greys",
             vmin=0,
             vmax=vmax,
