@@ -1273,16 +1273,22 @@ class EqualBlockPETProjector(LinearOperator):
             )
 
             if not self.tof:
-                x_fwd[i, ...] = parallelproj_core.joseph3d_fwd(
-                    xstart, xend, x, self._img_origin, self._voxel_size
-                )
-            else:
-                x_fwd[i, ...] = parallelproj_core.joseph3d_tof_sino_fwd(
+                parallelproj_core.joseph3d_fwd(
                     xstart,
                     xend,
                     x,
                     self._img_origin,
                     self._voxel_size,
+                    x_fwd[i, ...],
+                )
+            else:
+                parallelproj_core.joseph3d_tof_sino_fwd(
+                    xstart,
+                    xend,
+                    x,
+                    self._img_origin,
+                    self._voxel_size,
+                    x_fwd[i, ...],
                     self._tof_parameters.tofbin_width,
                     self.xp.asarray(
                         [self._tof_parameters.sigma_tof],
@@ -1294,8 +1300,8 @@ class EqualBlockPETProjector(LinearOperator):
                         dtype=self.xp.float32,
                         device=dev,
                     ),
-                    self.tof_parameters.num_sigmas,
                     self.tof_parameters.num_tofbins,
+                    self.tof_parameters.num_sigmas,
                 )
 
         return x_fwd
@@ -1311,19 +1317,19 @@ class EqualBlockPETProjector(LinearOperator):
                 self.xp.asarray([i], device=dev)
             )
             if not self.tof:
-                y_back += parallelproj_core.joseph3d_back(
+                parallelproj_core.joseph3d_back(
                     xstart,
                     xend,
-                    self._img_shape,
+                    y_back,
                     self._img_origin,
                     self._voxel_size,
                     y[i, ...],
                 )
             else:
-                y_back += parallelproj_core.joseph3d_tof_sino_back(
+                parallelproj_core.joseph3d_tof_sino_back(
                     xstart,
                     xend,
-                    self._img_shape,
+                    y_back,
                     self._img_origin,
                     self._voxel_size,
                     y[i, ...],
@@ -1338,8 +1344,8 @@ class EqualBlockPETProjector(LinearOperator):
                         dtype=self.xp.float32,
                         device=dev,
                     ),
-                    self.tof_parameters.num_sigmas,
                     self.tof_parameters.num_tofbins,
+                    self.tof_parameters.num_sigmas,
                 )
 
         return y_back

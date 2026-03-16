@@ -171,11 +171,13 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         xstart = self.xp.zeros(
             (block_pair_nums.shape[0], self._num_lors_per_block_pair, 3),
             device=self.dev,
+            dtype=self.xp.float32,
         )
 
         xend = self.xp.zeros(
             (block_pair_nums.shape[0], self._num_lors_per_block_pair, 3),
             device=self.dev,
+            dtype=self.xp.float32,
         )
 
         for i, block_pair_num in enumerate(block_pair_nums):

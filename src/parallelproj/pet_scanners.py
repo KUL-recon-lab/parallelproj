@@ -244,7 +244,9 @@ class BlockPETScannerModule(PETScannerModule):
         self._lor_endpoints = xp.asarray(self._lor_endpoints, device=dev)
 
         if affine_transformation_matrix is not None:
-            tmp = xp.ones((self._lor_endpoints.shape[0], 4), device=dev)
+            tmp = xp.ones(
+                (self._lor_endpoints.shape[0], 4), device=dev, dtype=xp.float32
+            )
             tmp[:, :-1] = self._lor_endpoints
 
             self._lor_endpoints = (tmp @ affine_transformation_matrix.T)[:, :3]

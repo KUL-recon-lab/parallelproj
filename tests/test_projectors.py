@@ -283,10 +283,10 @@ def test_equalblock_projector(xp, dev, verbose=True):
     # radius of the scanner
     scanner_radius = 10
 
-    aff1 = xp.eye(4, device=dev)
+    aff1 = xp.eye(4, device=dev, dtype=xp.float32)
     aff1[1, -1] = scanner_radius
 
-    aff2 = xp.eye(4, device=dev)
+    aff2 = xp.eye(4, device=dev, dtype=xp.float32)
     aff2[1, -1] = -scanner_radius
 
     block1 = parallelproj.BlockPETScannerModule(
