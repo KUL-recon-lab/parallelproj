@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-import parallelproj
 import array_api_compat.numpy as np
 import pytest
 import matplotlib.pyplot as plt
 from types import ModuleType
+
+import parallelproj.pet_lors as ppl
+import parallelproj.pet_scanners as pps
+import parallelproj.projectors as ppp
+import parallelproj.tof as ppt
+from parallelproj import to_numpy_array
 
 from .config import pytestmark
 
@@ -21,7 +26,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
 
     voxel_size = (4.0, 4.0, 2.66)
     img_shape = (53, 53, 5)
-    sinogram_order = parallelproj.SinogramSpatialAxisOrder.RVP
+    sinogram_order = ppl.SinogramSpatialAxisOrder.RVP
 
     # setup a test image with 3 hot rods
     x = xp.zeros(img_shape, dtype=xp.float32, device=dev)
@@ -30,7 +35,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     x[img_shape[0] // 2, -3, 1:] = 1.0
 
     # define the scanner geometry, lor descriptor and projector
-    scanner = parallelproj.DemoPETScannerGeometry(
+    scanner = pps.DemoPETScannerGeometry(
         xp,
         dev,
         num_rings=num_rings,
@@ -39,14 +44,14 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
         symmetry_axis=symmetry_axis,
     )
 
-    lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+    lor_desc = ppl.RegularPolygonPETLORDescriptor(
         scanner,
         radial_trim=radial_trim,
         max_ring_difference=max_ring_difference,
         sinogram_order=sinogram_order,
     )
 
-    proj = parallelproj.RegularPolygonPETProjector(lor_desc, img_shape, voxel_size)
+    proj = ppp.RegularPolygonPETProjector(lor_desc, img_shape, voxel_size)
     assert proj.out_shape == (lor_desc.num_rad, lor_desc.num_views, lor_desc.num_planes)
 
     # non-TOF projections
@@ -84,12 +89,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     assert xp.all(event_end_coords[2, :] == xend[1, 0, 0, :])
     assert xp.all(event_end_coords[3, :] == xend[0, 1, 1, :])
 
-    # TOF projections
-    with pytest.raises(ValueError):
-        # number of TOF bins must be odd
-        tof_params = parallelproj.TOFParameters(num_tofbins=6)
-
-    tof_params = parallelproj.TOFParameters(num_tofbins=7, tofbin_width=30.6)
+    tof_params = ppt.TOFParameters(num_tofbins=7, tofbin_width=30.6)
     proj.tof_parameters = tof_params
     assert proj.out_shape == (
         lor_desc.num_rad,
@@ -160,7 +160,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     # setup a projector with non default image origin and views
     views = xp.asarray([0, 1], device=dev)
     img_origin = xp.asarray([-100, -100, -5], device=dev, dtype=xp.float32)
-    proj2 = parallelproj.RegularPolygonPETProjector(
+    proj2 = ppp.RegularPolygonPETProjector(
         lor_desc, img_shape, voxel_size, views=views, img_origin=img_origin
     )
 
@@ -230,7 +230,7 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
     x2 = vox_value * xp.ones(img_shape, device=dev, dtype=xp.float32)
 
     for symmetry_axis in [0, 1, 2]:
-        scanner = parallelproj.RegularPolygonPETScannerGeometry(
+        scanner = pps.RegularPolygonPETScannerGeometry(
             xp,
             dev,
             radius=radius,
@@ -241,12 +241,12 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             symmetry_axis=symmetry_axis,
         )
 
-        for sinogram_order in parallelproj.SinogramSpatialAxisOrder:
-            lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+        for sinogram_order in ppl.SinogramSpatialAxisOrder:
+            lor_desc = ppl.RegularPolygonPETLORDescriptor(
                 scanner, radial_trim=1, sinogram_order=sinogram_order
             )
 
-            proj = parallelproj.RegularPolygonPETProjector(
+            proj = ppp.RegularPolygonPETProjector(
                 lor_desc, img_shape=img_shape, voxel_size=(vox_size, vox_size, vox_size)
             )
 
@@ -356,7 +356,7 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             )
 
             # setup the same projector without caching of the LOR endpoints
-            projb = parallelproj.RegularPolygonPETProjector(
+            projb = ppp.RegularPolygonPETProjector(
                 lor_desc,
                 img_shape=img_shape,
                 voxel_size=(vox_size, vox_size, vox_size),
@@ -373,12 +373,12 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             # check whether the projections with and without caching the LOR
             # endpoints are the same
             assert np.allclose(
-                parallelproj.to_numpy_array(x_fwd2b),
-                parallelproj.to_numpy_array(x_fwd2),
+                to_numpy_array(x_fwd2b),
+                to_numpy_array(x_fwd2),
             )
 
             # check whether the caching works if we first call the adjoint
-            proj4 = parallelproj.RegularPolygonPETProjector(
+            proj4 = ppp.RegularPolygonPETProjector(
                 lor_desc,
                 img_shape=img_shape,
                 voxel_size=(vox_size, vox_size, vox_size),

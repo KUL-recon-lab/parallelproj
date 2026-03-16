@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import parallelproj
+import parallelproj.pet_scanners as pps
 import matplotlib.pyplot as plt
 
 from types import ModuleType
@@ -25,7 +25,7 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     ax0 = 1
     ax1 = 0
 
-    mod = parallelproj.RegularPolygonPETScannerModule(
+    mod = pps.RegularPolygonPETScannerModule(
         xp,
         dev,
         radius=radius,
@@ -65,7 +65,7 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     plt.close(fig)
 
     # test module withput affine transformation matrix
-    mod2 = parallelproj.RegularPolygonPETScannerModule(
+    mod2 = pps.RegularPolygonPETScannerModule(
         xp,
         dev,
         radius=radius,
@@ -86,7 +86,7 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     num_rings = 4
 
     for symmetry_axis in [0, 1, 2]:
-        scanner = parallelproj.DemoPETScannerGeometry(
+        scanner = pps.DemoPETScannerGeometry(
             xp, dev, num_rings=num_rings, symmetry_axis=symmetry_axis
         )
 
@@ -148,7 +148,7 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     # test scanner with manually specified azimuthal angles of the sides
     phis = xp.asarray([0.0, xp.pi / 4], dtype=xp.float32, device=dev)
 
-    scanner2 = parallelproj.RegularPolygonPETScannerGeometry(
+    scanner2 = pps.RegularPolygonPETScannerGeometry(
         xp,
         dev,
         radius=150,
@@ -178,7 +178,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
     aff2 = xp.eye(4, device=dev)
     aff2[1, -1] = -scanner_radius
 
-    block1 = parallelproj.BlockPETScannerModule(
+    block1 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -186,7 +186,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
         affine_transformation_matrix=aff1,
     )
 
-    block2 = parallelproj.BlockPETScannerModule(
+    block2 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -213,7 +213,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
 
     assert xp.max(xp.abs(lor_endpoints1a - lor_endpoints1b)) < 1e-7
 
-    scanner = parallelproj.ModularizedPETScannerGeometry([block1, block2])
+    scanner = pps.ModularizedPETScannerGeometry([block1, block2])
 
     fig = plt.figure(tight_layout=True)
     ax = fig.add_subplot(111, projection="3d")
