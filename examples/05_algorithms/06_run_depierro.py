@@ -2,7 +2,7 @@
 DePierro's algorithm to optimize the Poisson logL with quadratic intensity prior
 ================================================================================
 
-This example demonstrates the use of DePierro's algorithm to minimize the negative 
+This example demonstrates the use of DePierro's algorithm to minimize the negative
 Poisson log-likelihood function combined with a quadratic intensity prior:
 
 .. math::
@@ -12,14 +12,14 @@ subject to
 
 .. math::
     x \\geq 0
-    
+
 using the linear forward model
 
 .. math::
     \\bar{y}(x) = A x + s
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -28,26 +28,30 @@ using the linear forward model
 """
 
 # %%
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
-from array_api_compat import to_device
-import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.operators as ppo
+from parallelproj import to_numpy_array
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
 
 
 # %%
@@ -74,7 +78,7 @@ mat = xp.asarray(
     device=dev,
 )
 
-op_A = parallelproj.MatrixOperator(mat)
+op_A = ppo.MatrixOperator(mat)
 # setup an arbitrary contamination vector that has shape op_A.out_shape
 contamination = xp.asarray([0.3, 0.2, 0.1, 0.4, 0.1], dtype=xp.float64, device=dev)
 
@@ -94,7 +98,7 @@ noise_free_data = op_A(x_true) + contamination
 # add Poisson noise
 np.random.seed(1)
 y = xp.asarray(
-    np.random.poisson(parallelproj.to_numpy_array(noise_free_data)),
+    np.random.poisson(to_numpy_array(noise_free_data)),
     device=dev,
     dtype=xp.float64,
 )
@@ -171,7 +175,7 @@ if xp.__name__.endswith("numpy"):
 fig, ax = plt.subplots(1, 1, tight_layout=True)
 if xp.__name__.endswith("numpy"):
     ax.axhline(cost_function(x_ref), color="k", linestyle="--")
-ax.plot(parallelproj.to_numpy_array(cost))
+ax.plot(to_numpy_array(cost))
 ax.set_xlabel("iteration")
 ax.set_ylabel("cost function")
 ax.grid(ls=":")

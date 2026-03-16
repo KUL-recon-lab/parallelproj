@@ -2,11 +2,11 @@
 2D non-TOF filtered back projection (FBP) of Poisson data
 =========================================================
 
-This example demonstrates the run 2D filtered back projection (FBP) 
+This example demonstrates the run 2D filtered back projection (FBP)
 on pre-corrected Poisson emission data.
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -15,33 +15,32 @@ on pre-corrected Poisson emission data.
 """
 
 # %%
-from __future__ import annotations
-
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
-from array_api_compat import to_device
-import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter
-from utils import RadonDisk, RadonObjectSequence
+import numpy as np
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.projectors as ppp
+from parallelproj import to_numpy_array
+from utils import RadonDisk, RadonObjectSequence
+from scipy.ndimage import gaussian_filter
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    if parallelproj.cuda_present:
-        dev = "cuda"
-    else:
-        dev = "cpu"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
 
 
 # %%
@@ -114,7 +113,7 @@ radon_object = RadonObjectSequence([disk0, disk1, disk2, disk3, disk4])
 
 fig, ax = plt.subplots(tight_layout=True)
 ax.imshow(
-    parallelproj.to_numpy_array(radon_object.values(X0hr, X1hr).T),
+    to_numpy_array(radon_object.values(X0hr, X1hr).T),
     cmap="Greys",
     origin="lower",
 )
@@ -144,7 +143,7 @@ if sino_res > 0:
     for i in range(num_phi):
         emis_sino[:, i] = xp.asarray(
             gaussian_filter(
-                parallelproj.to_numpy_array(emis_sino[:, i]),
+                to_numpy_array(emis_sino[:, i]),
                 sino_res,
             ),
             device=dev,
@@ -159,7 +158,7 @@ contam *= count_fac
 
 if add_noise:
     emis_sino = xp.asarray(
-        np.random.poisson(parallelproj.to_numpy_array(emis_sino)).astype(np.float32),
+        np.random.poisson(to_numpy_array(emis_sino)).astype(np.float32),
         device=dev,
     )
 
@@ -171,21 +170,21 @@ ext_sino = [float(xp.min(r)), float(xp.max(r)), float(xp.min(phi)), float(xp.max
 
 fig, ax = plt.subplots(1, 3, figsize=(12, 4), tight_layout=True)
 ax[0].imshow(
-    parallelproj.to_numpy_array(rt_transform.T),
+    to_numpy_array(rt_transform.T),
     cmap="Greys",
     aspect=20,
     extent=ext_sino,
     origin="lower",
 )
 ax[1].imshow(
-    parallelproj.to_numpy_array(emis_sino.T),
+    to_numpy_array(emis_sino.T),
     cmap="Greys",
     aspect=20,
     extent=ext_sino,
     origin="lower",
 )
 ax[2].imshow(
-    parallelproj.to_numpy_array(pre_corrected_sino.T),
+    to_numpy_array(pre_corrected_sino.T),
     cmap="Greys",
     aspect=20,
     extent=ext_sino,
@@ -207,14 +206,14 @@ fig.show()
 # ------------------------
 
 n_filter = r.shape[0]
-r_shift = xp.arange(n_filter, device=dev, dtype=xp.float64) - n_filter // 2
-f = xp.zeros(n_filter, device=dev, dtype=xp.float64)
+r_shift = xp.arange(n_filter, device=dev, dtype=xp.float32) - n_filter // 2
+f = xp.zeros(n_filter, device=dev, dtype=xp.float32)
 f[r_shift != 0] = -1 / (xp.pi**2 * r_shift[r_shift != 0] ** 2)
 f[(r_shift % 2) == 0] = 0
 f[r_shift == 0] = 0.25
 
 fig, ax = plt.subplots(tight_layout=True)
-ax.plot(r_shift, f, ".-")
+ax.plot(to_numpy_array(r_shift), to_numpy_array(f), ".-")
 ax.set_xlabel(r"$s$")
 ax.set_ylabel(r"$f$")
 ax.set_title("ramp filter", fontsize="medium")
@@ -229,8 +228,8 @@ filtered_pre_corrected_sino = 1.0 * pre_corrected_sino
 for i in range(num_phi):
     filtered_pre_corrected_sino[:, i] = xp.asarray(
         np.convolve(
-            parallelproj.to_numpy_array(filtered_pre_corrected_sino[:, i]),
-            f,
+            to_numpy_array(filtered_pre_corrected_sino[:, i]),
+            to_numpy_array(f),
             mode="same",
         ),
         device=dev,
@@ -238,14 +237,14 @@ for i in range(num_phi):
 
 fig, ax = plt.subplots(1, 2, figsize=(8, 4), tight_layout=True)
 ax[0].imshow(
-    parallelproj.to_numpy_array(pre_corrected_sino.T),
+    to_numpy_array(pre_corrected_sino.T),
     cmap="Greys",
     aspect=20,
     extent=ext_sino,
     origin="lower",
 )
 ax[1].imshow(
-    parallelproj.to_numpy_array(filtered_pre_corrected_sino.T),
+    to_numpy_array(filtered_pre_corrected_sino.T),
     cmap="Greys",
     aspect=20,
     extent=ext_sino,
@@ -264,7 +263,7 @@ fig.show()
 # Define a projector and run filtered back projection (FBP)
 # ---------------------------------------------------------
 
-proj = parallelproj.ParallelViewProjector2D(
+proj = ppp.ParallelViewProjector2D(
     (num_rad, num_rad),
     r,
     -phi,
@@ -276,9 +275,7 @@ proj = parallelproj.ParallelViewProjector2D(
 filtered_back_proj = proj.adjoint(filtered_pre_corrected_sino)
 
 fig, ax = plt.subplots(tight_layout=True)
-ax.imshow(
-    parallelproj.to_numpy_array(filtered_back_proj).T, cmap="Greys", origin="lower"
-)
+ax.imshow(to_numpy_array(filtered_back_proj).T, cmap="Greys", origin="lower")
 ax.set_xlabel(r"$x_0$")
 ax.set_ylabel(r"$x_1$")
 fig.show()
@@ -308,26 +305,26 @@ ext_img = [float(xp.min(r)), float(xp.max(r)), float(xp.min(r)), float(xp.max(r)
 
 fig, ax = plt.subplots(1, 4, figsize=(16, 4), tight_layout=True)
 ax[0].imshow(
-    parallelproj.to_numpy_array(radon_object.values(X0hr, X1hr).T),
+    to_numpy_array(radon_object.values(X0hr, X1hr).T),
     cmap="Greys",
     extent=ext_img,
     origin="lower",
 )
 ax[1].imshow(
-    parallelproj.to_numpy_array(emis_sino.T),
+    to_numpy_array(emis_sino.T),
     cmap="Greys",
     aspect=20,
     extent=ext_sino,
     origin="lower",
 )
 ax[2].imshow(
-    parallelproj.to_numpy_array(filtered_back_proj.T),
+    to_numpy_array(filtered_back_proj.T),
     cmap="Greys",
     extent=ext_img,
     origin="lower",
 )
 ax[3].imshow(
-    parallelproj.to_numpy_array(x_mlem.T),
+    to_numpy_array(x_mlem.T),
     cmap="Greys",
     extent=ext_img,
     origin="lower",

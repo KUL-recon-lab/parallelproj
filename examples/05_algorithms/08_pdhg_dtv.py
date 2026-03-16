@@ -2,8 +2,8 @@
 PDHG to optimize the Poisson logL and directional TV (structural prior)
 =======================================================================
 
-This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm, 
-to minimize the negative  Poisson log-likelihood function combined with a 
+This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm,
+to minimize the negative  Poisson log-likelihood function combined with a
 directional total variation regularizer (a structural prior):
 
 .. math::
@@ -13,21 +13,21 @@ subject to
 
 .. math::
     x \\geq 0
-    
+
 using the linear forward model
 
 .. math::
     \\bar{d}(x) = A x + s
 
 see :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details.
-    
+
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
 .. warning::
-    Running this example using GPU arrays (e.g. using cupy as array backend) 
+    Running this example using GPU arrays (e.g. using cupy as array backend)
     is highly recommended due to "longer" execution times with CPU arrays
 
 .. image:: https://mybinder.org/badge_logo.svg
@@ -36,30 +36,35 @@ see :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details.
 
 # %%
 from __future__ import annotations
-
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
-from array_api_compat import to_device
-import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.operators as ppo
+import parallelproj.tof as ppt
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
+import parallelproj.projectors as ppp
+from parallelproj import to_numpy_array
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    if parallelproj.cuda_present:
-        dev = "cuda"
-    else:
-        dev = "cpu"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
+
 
 # %%
 # **Input Parameters**
@@ -99,7 +104,7 @@ track_cost = True
 #
 
 num_rings = 2
-scanner = parallelproj.RegularPolygonPETScannerGeometry(
+scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=350.0,
@@ -115,13 +120,13 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
 img_shape = (40, 40, 4)
 voxel_size = (4.0, 4.0, 2.5)
 
-lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+lor_desc = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=170,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
-proj = parallelproj.RegularPolygonPETProjector(
+proj = ppp.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
@@ -165,25 +170,23 @@ att_sino = xp.exp(-proj(x_att))
 # into a single linear operator.
 
 # enable TOF - uncomment if you want to run TOF recons
-# proj.tof_parameters = parallelproj.TOFParameters(
-#    num_tofbins=17, tofbin_width=12.0, sigma_tof=12.0
-# )
+proj.tof_parameters = ppt.TOFParameters(
+    num_tofbins=17, tofbin_width=12.0, sigma_tof=12.0
+)
 
 # setup the attenuation multiplication operator which is different
 # for TOF and non-TOF since the attenuation sinogram is always non-TOF
 if proj.tof:
-    att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-        proj.out_shape, att_sino
-    )
+    att_op = ppo.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
 else:
-    att_op = parallelproj.ElementwiseMultiplicationOperator(att_sino)
+    att_op = ppo.ElementwiseMultiplicationOperator(att_sino)
 
-res_model = parallelproj.GaussianFilterOperator(
+res_model = ppo.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
 # compose all 3 operators into a single linear operator
-pet_lin_op = parallelproj.CompositeLinearOperator((att_op, proj, res_model))
+pet_lin_op = ppo.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
 # Simulation of sinogram projection data
@@ -208,9 +211,9 @@ noise_free_data += contamination
 # add Poisson noise
 np.random.seed(1)
 d = xp.asarray(
-    np.random.poisson(np.asarray(to_device(noise_free_data, "cpu"))),
+    np.random.poisson(to_numpy_array(noise_free_data)),
     device=dev,
-    dtype=xp.int16,
+    dtype=xp.float32,
 )
 
 # %%
@@ -280,12 +283,12 @@ def cost_function(img):
 #
 
 # setup the "normal" gradient operator
-G = parallelproj.FiniteForwardDifference(pet_lin_op.in_shape)
+G = ppo.FiniteForwardDifference(pet_lin_op.in_shape)
 # calculate the joint vector field based on the structural prior image
 joint_vector_field = G(x_struct)
 # setup the projected gradient operator
-P = parallelproj.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
-op_G = parallelproj.CompositeLinearOperator((P, G))
+P = ppo.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
+op_G = ppo.CompositeLinearOperator((P, G))
 
 # initialize primal and dual variables
 x_pdhg = 1.0 * x_mlem
@@ -307,14 +310,16 @@ S_A = gamma * rho / tmp
 T_A = (
     (1 / gamma)
     * rho
-    / pet_lin_op.adjoint(xp.ones(pet_lin_op.out_shape, dtype=xp.float64, device=dev))
+    / pet_lin_op.adjoint(xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev))
 )
 
 op_G_norm = op_G.norm(xp, dev, num_iter=100)
 S_G = gamma * rho / op_G_norm
 T_G = (1 / gamma) * rho / op_G_norm
 
-T = xp.where(T_A < T_G, T_A, xp.full(pet_lin_op.in_shape, T_G))
+T = xp.where(
+    T_A < T_G, T_A, xp.full(pet_lin_op.in_shape, T_G, device=dev, dtype=xp.float32)
+)
 
 
 # %%
@@ -322,7 +327,7 @@ T = xp.where(T_A < T_G, T_A, xp.full(pet_lin_op.in_shape, T_G))
 # ^^^^^^^^
 
 print("")
-cost_pdhg = np.zeros(num_iter_pdhg, dtype=xp.float32)
+cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
 
 for i in range(num_iter_pdhg):
     x_pdhg -= T * zbar
@@ -351,12 +356,12 @@ for i in range(num_iter_pdhg):
     print(f"PDHG iter {(i+1):04} / {num_iter_pdhg}, cost {cost_pdhg[i]:.7e}", end="\r")
 
 # %%
-# Vizualizations
+# Visualizations
 # --------------
 
-x_true_np = parallelproj.to_numpy_array(x_true)
-x_struct_np = parallelproj.to_numpy_array(x_struct)
-x_pdhg_np = parallelproj.to_numpy_array(x_pdhg)
+x_true_np = to_numpy_array(x_true)
+x_struct_np = to_numpy_array(x_struct)
+x_pdhg_np = to_numpy_array(x_pdhg)
 
 pl2 = x_true_np.shape[2] // 2
 pl1 = x_true_np.shape[1] // 2

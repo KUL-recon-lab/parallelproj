@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 import abc
+import math
 from parallelproj import Array
 
 from types import ModuleType
@@ -117,8 +118,8 @@ class RadonObject(abc.ABC):
         )
 
     def values(self, x0: Array, x1: Array) -> Array:
-        x0_p = x0 * self.xp.cos(self._rotation) - x1 * self.xp.sin(self._rotation)
-        x1_p = x0 * self.xp.sin(self._rotation) + x1 * self.xp.cos(self._rotation)
+        x0_p = x0 * math.cos(self._rotation) - x1 * math.sin(self._rotation)
+        x1_p = x0 * math.sin(self._rotation) + x1 * math.cos(self._rotation)
 
         x0_pp = x0_p / self._s0 - self._x0_offset
         x1_pp = x1_p / self._s1 - self._x1_offset
