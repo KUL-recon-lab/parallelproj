@@ -2,49 +2,55 @@
 PET TOF listmode projector
 ==========================
 
-In this example we will show how to setup and use a TOF 
+In this example we will show how to setup and use a TOF
 PET listmode projector including geometrical forward projection
-in listmode, image-based resolution model and a listmode 
+in listmode, image-based resolution model and a listmode
 attenuation model.
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
-    array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
-    Choose your preferred array API ``xp`` and device ``dev`` below.
+   parallelproj is python array API compatible meaning it supports different
+   array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
+   Choose your preferred array API ``xp`` and device ``dev`` below.
 
 .. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
+:target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-# %%
-import parallelproj
-from array_api_compat import to_device
-import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.pet_scanners as pps
+import parallelproj.projectors as ppp
+import parallelproj.operators as ppo
+import parallelproj.tof as ppt
+from parallelproj import to_numpy_array
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
+
 
 # %%
 # Setup a small regular polygon PET scanner with 5 rings (polygons)
 # -----------------------------------------------------------------
 
 num_rings = 4
-scanner = parallelproj.RegularPolygonPETScannerGeometry(
+scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -72,10 +78,10 @@ print(event_start_coordinates)
 print(event_end_coordinates)
 
 # setup TOF parameters with a TOF resolution FWHM = 30mm (ca 200ps)
-tof_params = parallelproj.TOFParameters(
-    sigma_tof=30.0 / 2.35, num_tofbins=59, tofbin_width=12.5
-)
-event_tof_bins = xp.asarray([0, 1, 0, -1], device=dev)
+tof_params = ppt.TOFParameters(sigma_tof=30.0 / 2.35, num_tofbins=59, tofbin_width=12.5)
+
+# event tof bins - valid values are between 0 and num_tofbins-1 - 0 being closest to the start of the LOR
+event_tof_bins = xp.asarray([29, 30, 29, 28], device=dev, dtype=xp.int16)
 
 # %%
 # Show the scanner geometry and the events
@@ -101,7 +107,7 @@ fig.show()
 img_shape = (40, 9, 40)
 voxel_size = (2.0, 3.0, 2.0)
 
-lm_proj = parallelproj.ListmodePETProjector(
+lm_proj = ppp.ListmodePETProjector(
     event_start_coordinates, event_end_coordinates, img_shape, voxel_size
 )
 
@@ -135,7 +141,7 @@ for i in range(ax2.size):
     if i < y_back.shape[1]:
         axx = ax2.ravel()[i]
         axx.imshow(
-            parallelproj.to_numpy_array(y_back[:, i, :].T),
+            to_numpy_array(y_back[:, i, :].T),
             cmap="Greys",
             vmin=0,
             vmax=vmax,
@@ -151,16 +157,16 @@ fig2.show()
 # ----------------------------------------------------------------------
 
 # setup a simple image-based resolution model with an Gaussian FWHM of 4.5mm
-res_model = parallelproj.GaussianFilterOperator(
+res_model = ppo.GaussianFilterOperator(
     lm_proj.in_shape, sigma=4.5 / (2.35 * lm_proj.voxel_size)
 )
 
 # define arbritrary attenuation factors
 att_list = xp.asarray([0.3, 0.4, 0.2, 0.6], device=dev)
-att_op = parallelproj.ElementwiseMultiplicationOperator(att_list)
+att_op = ppo.ElementwiseMultiplicationOperator(att_list)
 
 
-lm_proj_with_res_model_and_att = parallelproj.CompositeLinearOperator(
+lm_proj_with_res_model_and_att = ppo.CompositeLinearOperator(
     (att_op, lm_proj, res_model)
 )
 
@@ -179,7 +185,7 @@ for i in range(ax3.size):
     if i < y_back.shape[1]:
         axx = ax3.ravel()[i]
         axx.imshow(
-            parallelproj.to_numpy_array(y_back2[:, i, :].T),
+            to_numpy_array(y_back2[:, i, :].T),
             cmap="Greys",
             vmin=0,
             vmax=vmax,

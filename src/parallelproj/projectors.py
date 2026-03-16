@@ -1080,7 +1080,9 @@ class ListmodePETProjector(LinearOperator):
                 x_fwd,
                 self._tof_parameters.tofbin_width,
                 self.xp.asarray(
-                    [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
+                    [self._tof_parameters.sigma_tof],
+                    dtype=self.xp.float32,
+                    device=dev,
                 ),
                 self.xp.asarray(
                     [self._tof_parameters.tofcenter_offset],
