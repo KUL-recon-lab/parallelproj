@@ -8,7 +8,7 @@ view and plane dimension.
 This example shows how this can be done using the :class:`.RegularPolygonPETLORDescriptor`
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -17,31 +17,35 @@ This example shows how this can be done using the :class:`.RegularPolygonPETLORD
 """
 
 # %%
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
 import matplotlib.pyplot as plt
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
 
 
 # %%
 # setup a small regular polygon PET scanner with 5 rings (polygons)
 
 num_rings = 5
-scanner = parallelproj.RegularPolygonPETScannerGeometry(
+scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -65,11 +69,11 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
 # `sinogram_order` of type :class:`.SinogramSpatialAxisOrder` defines the order of the sinogram dimensions
 # (e.g. RVP -> [radial, view, plane], PRV -> [plane, radial, view])
 
-lor_desc1 = parallelproj.RegularPolygonPETLORDescriptor(
+lor_desc1 = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=2,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
 print(lor_desc1)
@@ -85,11 +89,11 @@ print(
 # %%
 # Define a 2nd LOR descriptor with sinogram order "PRV"
 
-lor_desc2 = parallelproj.RegularPolygonPETLORDescriptor(
+lor_desc2 = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=2,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.PRV,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.PRV,
 )
 
 print(lor_desc2)
@@ -185,7 +189,7 @@ fig.show()
 # The view definition still uses the "zig-zag" sampling which leads to
 # unconvential (very non-parallel) views in the sinogram as shown below.
 
-open_scanner = parallelproj.RegularPolygonPETScannerGeometry(
+open_scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -194,13 +198,13 @@ open_scanner = parallelproj.RegularPolygonPETScannerGeometry(
     lor_spacing=8.0,
     ring_positions=xp.linspace(-8, 8, num_rings, device=dev),
     symmetry_axis=1,
-    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7]),
+    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7], device=dev),
 )
 
-open_lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+open_lor_desc = ppl.RegularPolygonPETLORDescriptor(
     open_scanner,
     radial_trim=1,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
 fig2 = plt.figure(figsize=(16, 8), tight_layout=True)

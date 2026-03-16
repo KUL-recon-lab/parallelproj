@@ -6,7 +6,7 @@ This example shows how to create and visualize PET scanners where the LOR
 endpoints can be modeled as a stack of regular polygons.
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -15,25 +15,27 @@ endpoints can be modeled as a stack of regular polygons.
 """
 
 # %%
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
+import parallelproj.pet_scanners as pps
 import matplotlib.pyplot as plt
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
 
+print(f"Using array API: {xp.__name__}, device: {dev}")
 
 # %%
 # Define four different PET scanners with different geometries
@@ -46,7 +48,7 @@ elif "torch" in xp.__name__:
 # Note that `symmetry_axis` can be used to define which of the three axis is
 # used as the cylinder (symmetry) axis.
 
-scanner1 = parallelproj.RegularPolygonPETScannerGeometry(
+scanner1 = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -57,7 +59,7 @@ scanner1 = parallelproj.RegularPolygonPETScannerGeometry(
     symmetry_axis=2,
 )
 
-scanner2 = parallelproj.RegularPolygonPETScannerGeometry(
+scanner2 = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -68,7 +70,7 @@ scanner2 = parallelproj.RegularPolygonPETScannerGeometry(
     symmetry_axis=1,
 )
 
-scanner3 = parallelproj.RegularPolygonPETScannerGeometry(
+scanner3 = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=400.0,
@@ -79,7 +81,7 @@ scanner3 = parallelproj.RegularPolygonPETScannerGeometry(
     symmetry_axis=2,
 )
 
-scanner4 = parallelproj.RegularPolygonPETScannerGeometry(
+scanner4 = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=400.0,
@@ -139,7 +141,7 @@ fig.show()
 # Here we create an open geometry with 6 sides and 3 rings corresponding to
 # a full geometry using 12 sides where 6 sides were removed.
 
-open_scanner = parallelproj.RegularPolygonPETScannerGeometry(
+open_scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -148,7 +150,7 @@ open_scanner = parallelproj.RegularPolygonPETScannerGeometry(
     lor_spacing=4.0,
     ring_positions=xp.linspace(-4, 4, 3),
     symmetry_axis=2,
-    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7]),
+    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7], device=dev),
 )
 
 fig2 = plt.figure(figsize=(8, 8), tight_layout=True)

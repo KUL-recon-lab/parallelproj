@@ -2,14 +2,14 @@
 Modularized (block) PET scanner geometry
 ========================================
 
-In this example, we show how to setup a generic PET scanner consisting 
-of multiple block modules where each block module consists of a regular 
+In this example, we show how to setup a generic PET scanner consisting
+of multiple block modules where each block module consists of a regular
 grid of LOR endpoints.
 We also show how to define a LOR descriptor for this geometry using
 a description of which block pairs are in coincidence.
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -18,28 +18,33 @@ a description of which block pairs are in coincidence.
 """
 
 # %%
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
 import matplotlib.pyplot as plt
 import math
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    dev = "cuda"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
+
 
 # %%
-# input paraters
+# input parameters
 
 # grid shape of LOR endpoints forming a block module
 block_shape = (3, 2, 2)
@@ -84,10 +89,11 @@ for phi in [
             [math.sin(phi), math.cos(phi), 0, 0],
             [0, 0, 1, 0],
             [0, 0, 0, 1],
-        ]
+        ],
+        device=dev,
     )
     mods.append(
-        parallelproj.BlockPETScannerModule(
+        pps.BlockPETScannerModule(
             xp,
             dev,
             block_shape,
@@ -98,7 +104,7 @@ for phi in [
 
 # create the scanner geometry from a list of identical block modules at
 # different locations in space
-scanner = parallelproj.ModularizedPETScannerGeometry(mods)
+scanner = pps.ModularizedPETScannerGeometry(mods)
 
 # %%
 # Show the scanner geometry consisting of 7 block modules
@@ -117,7 +123,7 @@ fig.show()
 # To do this, we have manually define a list containing pairs of block numbers.
 # Here, we define 12 block pairs. Note that more pairs would be possible.
 
-lor_desc = parallelproj.EqualBlockPETLORDescriptor(
+lor_desc = ppl.EqualBlockPETLORDescriptor(
     scanner,
     xp.asarray(
         [
