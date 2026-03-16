@@ -20,7 +20,7 @@ using the listmode linear forward model
 and data stored in listmode format (event by event).
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -30,33 +30,36 @@ and data stored in listmode format (event by event).
 
 # %%
 from __future__ import annotations
-from parallelproj import Array
-
-import array_api_compat.numpy as xp
-
-# import array_api_compat.cupy as xp
-# import array_api_compat.torch as xp
-
-import parallelproj
-from array_api_compat import to_device, size
-import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from copy import copy
+from matplotlib import animation
+from array_api_compat import size
+import numpy as np
 
-# choose a device (CPU or CUDA GPU)
-if "numpy" in xp.__name__:
-    # using numpy, device must be cpu
-    dev = "cpu"
-elif "cupy" in xp.__name__:
+import parallelproj.operators as ppo
+import parallelproj.tof as ppt
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
+import parallelproj.projectors as ppp
+from parallelproj import to_numpy_array, Array
+
+# %%
+from importlib import import_module, util
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() else "cpu"
+elif util.find_spec("cupy") is not None:
+    xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
-elif "torch" in xp.__name__:
-    # using torch valid choices are 'cpu' or 'cuda'
-    if parallelproj.cuda_present:
-        dev = "cuda"
-    else:
-        dev = "cpu"
+else:
+    xp = import_module("array_api_compat.numpy")
+    # using numpy, device must be cpu
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
 
 
 # %%
@@ -76,7 +79,7 @@ elif "torch" in xp.__name__:
 #
 
 num_rings = 5
-scanner = parallelproj.RegularPolygonPETScannerGeometry(
+scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -92,14 +95,14 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
 img_shape = (40, 40, 8)
 voxel_size = (2.0, 2.0, 2.0)
 
-lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+lor_desc = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=2,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
-proj = parallelproj.RegularPolygonPETProjector(
+proj = ppp.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
@@ -135,25 +138,23 @@ att_sino = xp.exp(-proj(x_att))
 # into a single linear operator.
 
 # enable TOF - comment if you want to run non-TOF
-proj.tof_parameters = parallelproj.TOFParameters(
+proj.tof_parameters = ppt.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
 # setup the attenuation multiplication operator which is different
 # for TOF and non-TOF since the attenuation sinogram is always non-TOF
 if proj.tof:
-    att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-        proj.out_shape, att_sino
-    )
+    att_op = ppo.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
 else:
-    att_op = parallelproj.ElementwiseMultiplicationOperator(att_sino)
+    att_op = ppo.ElementwiseMultiplicationOperator(att_sino)
 
-res_model = parallelproj.GaussianFilterOperator(
+res_model = ppo.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
 # compose all 3 operators into a single linear operator
-pet_lin_op = parallelproj.CompositeLinearOperator((att_op, proj, res_model))
+pet_lin_op = ppo.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
 # Simulation of sinogram projection data
@@ -178,7 +179,7 @@ noise_free_data += contamination
 # add Poisson noise
 np.random.seed(1)
 y = xp.asarray(
-    np.random.poisson(parallelproj.to_numpy_array(noise_free_data)),
+    np.random.poisson(to_numpy_array(noise_free_data)),
     device=dev,
     dtype=xp.int16,
 )
@@ -200,7 +201,7 @@ event_start_coords, event_end_coords, event_tofbins = proj.convert_sinogram_to_l
 # Setup of the LM projector and LM forward model
 # ----------------------------------------------
 
-lm_proj = parallelproj.ListmodePETProjector(
+lm_proj = ppp.ListmodePETProjector(
     event_start_coords,
     event_end_coords,
     proj.in_shape,
@@ -211,7 +212,7 @@ lm_proj = parallelproj.ListmodePETProjector(
 # recalculate the attenuation factor for all LM events
 # this needs to be a non-TOF projection
 att_list = xp.exp(-lm_proj(x_att))
-lm_att_op = parallelproj.ElementwiseMultiplicationOperator(att_list)
+lm_att_op = ppo.ElementwiseMultiplicationOperator(att_list)
 
 # enable TOF in the LM projector
 lm_proj.tof_parameters = proj.tof_parameters
@@ -227,7 +228,7 @@ contamination_list = xp.full(
     dtype=xp.float32,
 )
 
-lm_pet_lin_op = parallelproj.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
+lm_pet_lin_op = ppo.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
 
 # %%
 # LM MLEM reconstruction
@@ -243,7 +244,7 @@ lm_pet_lin_op = parallelproj.CompositeLinearOperator((lm_att_op, lm_proj, res_mo
 
 def lm_em_update(
     x_cur: Array,
-    op: parallelproj.LinearOperator,
+    op: ppo.LinearOperator,
     s: Array,
     adjoint_ones: Array,
 ) -> Array:
@@ -253,7 +254,7 @@ def lm_em_update(
     ----------
     x_cur : Array
         current solution
-    op : parallelproj.LinearOperator
+    op : ppo.LinearOperator
         listmode linear forward operator
     s : Array
         contamination list
@@ -309,8 +310,8 @@ def _update_img(i):
     return (img0, img1)
 
 
-x_true_np = parallelproj.to_numpy_array(x_true)
-x_np = parallelproj.to_numpy_array(x)
+x_true_np = to_numpy_array(x_true)
+x_np = to_numpy_array(x)
 
 fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 vmax = x_np.max()

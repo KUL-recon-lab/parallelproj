@@ -902,7 +902,7 @@ class RegularPolygonPETProjector(LinearOperator):
                     event_tofbins[event_offset : (event_offset + num_events_ss)] = (
                         self.xp.full(
                             num_events_ss,
-                            it - num_tofbins // 2,
+                            it,
                             device=self._dev,
                             dtype=self.xp.int16,
                         )
