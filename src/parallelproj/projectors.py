@@ -1060,17 +1060,25 @@ class ListmodePETProjector(LinearOperator):
     def _apply(self, x: Array) -> Array:
         dev = array_api_compat.device(x)
 
+        x_fwd = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=dev)
+
         if not self.tof:
-            x_fwd = parallelproj_core.joseph3d_fwd(
-                self._xstart, self._xend, x, self._img_origin, self._voxel_size
-            )
-        else:
-            x_fwd = parallelproj_core.joseph3d_tof_lm_fwd(
+            parallelproj_core.joseph3d_fwd(
                 self._xstart,
                 self._xend,
                 x,
                 self._img_origin,
                 self._voxel_size,
+                x_fwd,
+            )
+        else:
+            parallelproj_core.joseph3d_tof_lm_fwd(
+                self._xstart,
+                self._xend,
+                x,
+                self._img_origin,
+                self._voxel_size,
+                x_fwd,
                 self._tof_parameters.tofbin_width,
                 self.xp.asarray(
                     [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
@@ -1080,30 +1088,31 @@ class ListmodePETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
                 self._tofbin,
                 self.tof_parameters.num_tofbins,
+                self.tof_parameters.num_sigmas,
             )
 
         return x_fwd
 
     def _adjoint(self, y: Array) -> Array:
         dev = array_api_compat.device(y)
+        y_back = self.xp.zeros(self.in_shape, dtype=self.xp.float32, device=dev)
 
         if not self.tof:
-            y_back = parallelproj_core.joseph3d_back(
+            parallelproj_core.joseph3d_back(
                 self._xstart,
                 self._xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
             )
         else:
-            y_back = parallelproj_core.joseph3d_tof_lm_back(
+            parallelproj_core.joseph3d_tof_lm_back(
                 self._xstart,
                 self._xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
@@ -1116,9 +1125,9 @@ class ListmodePETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
                 self._tofbin,
                 self._tof_parameters.num_tofbins,
+                self.tof_parameters.num_sigmas,
             )
 
         return y_back

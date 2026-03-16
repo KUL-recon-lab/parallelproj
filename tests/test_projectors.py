@@ -181,8 +181,8 @@ def test_lmprojector(
         device=dev,
     )
 
-    xstart = vstart * voxel_size + img_origin
-    xend = vend * voxel_size + img_origin
+    xstart = xp.astype(vstart * voxel_size + img_origin, xp.float32)
+    xend = xp.astype(vend * voxel_size + img_origin, xp.float32)
 
     lm_proj = parallelproj.ListmodePETProjector(
         xstart, xend, img_dim, voxel_size, img_origin
@@ -257,7 +257,7 @@ def test_lmprojector(
 
     assert lm_proj.tof
 
-    assert lm_proj.adjointness_test(xp, dev)
+    assert lm_proj.adjointness_test(xp, dev, dtype=xp.float32)
 
     # unset the tof parameters and check if tof gets set to False
     lm_proj.tof_parameters = None
@@ -322,7 +322,7 @@ def test_equalblock_projector(xp, dev, verbose=True):
     img_origin = xp.asarray([-6.5, -4.5, -1.0], dtype=xp.float32, device=dev)
 
     proj = parallelproj.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
-    assert proj.adjointness_test(xp, dev)
+    assert proj.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
     assert proj.xp == xp
     assert proj.dev == dev
     assert proj.in_shape == img_shape
@@ -354,7 +354,7 @@ def test_equalblock_projector(xp, dev, verbose=True):
 
     proj_tof.tof_parameters = tof_params
 
-    assert proj_tof.adjointness_test(xp, dev)
+    assert proj_tof.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
     assert proj_tof.tof == True
     assert proj_tof.tof_parameters == tof_params
 
