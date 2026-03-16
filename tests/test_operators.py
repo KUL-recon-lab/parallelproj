@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 import math
-import parallelproj
+import parallelproj.operators as ppo
 import array_api_compat
 import array_api_compat.numpy as np
 
@@ -29,7 +29,7 @@ def test_matrix(xp: ModuleType, dev: str):
     A = xp.asarray([[1.0, 2.0], [-3.0, 2.0], [-1.0, -1.0]], device=dev)
     x = xp.asarray([-2.0, 1.0], device=dev)
 
-    op = parallelproj.MatrixOperator(A)
+    op = ppo.MatrixOperator(A)
 
     # set scale that is not 1
     scale_fac = -2.5
@@ -56,7 +56,7 @@ def test_complex_matrix(xp: ModuleType, dev: str):
     )
     x = xp.asarray([-2.0, 1.0], device=dev, dtype=xp.complex128)
 
-    op = parallelproj.MatrixOperator(A)
+    op = ppo.MatrixOperator(A)
     assert op.adjointness_test(xp, dev, iscomplex=True)
 
     n = op.norm(xp, dev, iscomplex=True)
@@ -70,7 +70,7 @@ def test_elementwise(xp: ModuleType, dev: str):
     v = xp.asarray([3.0, -1.0], device=dev)
     x = xp.asarray([-2.0, 1.0], device=dev)
 
-    op = parallelproj.ElementwiseMultiplicationOperator(v)
+    op = ppo.ElementwiseMultiplicationOperator(v)
     # test call to norm
     op_norm = op.norm(xp, dev)
 
@@ -86,7 +86,7 @@ def test_tofnontofelemenwise(xp: ModuleType, dev: str):
     x = xp.reshape(xp.arange(3 * 3 * 2, device=dev, dtype=xp.float32), (3, 3, 2))
     v = xp.reshape(xp.arange(3 * 3, device=dev, dtype=xp.float32), (3, 3))
 
-    op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(x.shape, v)
+    op = ppo.TOFNonTOFElementwiseMultiplicationOperator(x.shape, v)
     # test call to norm
 
     assert xp.all(op.values == v)
@@ -102,7 +102,7 @@ def test_elemenwise_complex(xp: ModuleType, dev: str):
     v = xp.asarray([3j, -1.0], device=dev, dtype=xp.complex128)
     x = xp.asarray([-2.0, 1j], device=dev, dtype=xp.complex128)
 
-    op = parallelproj.ElementwiseMultiplicationOperator(v)
+    op = ppo.ElementwiseMultiplicationOperator(v)
     # test call to norm
     op_norm = op.norm(xp, dev, iscomplex=True)
 
@@ -120,7 +120,7 @@ def test_tofnontofelemenwise_complex(xp: ModuleType, dev: str):
     v[2, 2] = 3.0 + 2j
     v[1, 2] = -4.0 + 1j
 
-    op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(x.shape, v)
+    op = ppo.TOFNonTOFElementwiseMultiplicationOperator(x.shape, v)
     # test call to norm
 
     assert op.adjointness_test(xp, dev, iscomplex=True)
@@ -133,11 +133,11 @@ def test_gaussian(xp: ModuleType, dev: str):
     in_shape = (32, 32)
     sigma1 = 2.3
 
-    op = parallelproj.GaussianFilterOperator(in_shape, sigma=sigma1)
+    op = ppo.GaussianFilterOperator(in_shape, sigma=sigma1)
     assert op.adjointness_test(xp, dev)
 
     sigma2 = xp.asarray([2.3, 1.2], device=dev)
-    op = parallelproj.GaussianFilterOperator(in_shape, sigma=sigma2)
+    op = ppo.GaussianFilterOperator(in_shape, sigma=sigma2)
     assert op.adjointness_test(xp, dev)
 
 
@@ -148,10 +148,10 @@ def test_composite(xp: ModuleType, dev: str):
     x = xp.asarray([-2.0, 1.0], device=dev)
     v = xp.asarray([3.0, -1.0, 2.0], device=dev)
 
-    op1 = parallelproj.ElementwiseMultiplicationOperator(v)
-    op2 = parallelproj.MatrixOperator(A)
+    op1 = ppo.ElementwiseMultiplicationOperator(v)
+    op2 = ppo.MatrixOperator(A)
 
-    op = parallelproj.CompositeLinearOperator([op1, op2])
+    op = ppo.CompositeLinearOperator([op1, op2])
 
     assert op.operators == [op1, op2]
 
@@ -167,13 +167,13 @@ def test_vstack(xp: ModuleType, dev: str):
     np.random.seed(0)
     in_shape = (16, 11)
 
-    A1 = parallelproj.GaussianFilterOperator(in_shape, sigma=1.0)
-    A2 = parallelproj.ElementwiseMultiplicationOperator(
+    A1 = ppo.GaussianFilterOperator(in_shape, sigma=1.0)
+    A2 = ppo.ElementwiseMultiplicationOperator(
         xp.asarray(np.random.rand(*in_shape), device=dev)
     )
-    A3 = parallelproj.GaussianFilterOperator(in_shape, sigma=2.0)
+    A3 = ppo.GaussianFilterOperator(in_shape, sigma=2.0)
 
-    A = parallelproj.VstackOperator((A1, A2, A3))
+    A = ppo.VstackOperator((A1, A2, A3))
     # test call to norm
     A_norm = A.norm(xp, dev)
 
@@ -198,11 +198,11 @@ def test_operator_sequence(xp: ModuleType, dev: str):
     np.random.seed(0)
     in_shape = (3,)
 
-    A1 = parallelproj.MatrixOperator(xp.asarray(np.random.randn(4, 3), device=dev))
-    A2 = parallelproj.MatrixOperator(xp.asarray(np.random.randn(5, 3), device=dev))
-    A3 = parallelproj.MatrixOperator(xp.asarray(np.random.randn(2, 3), device=dev))
+    A1 = ppo.MatrixOperator(xp.asarray(np.random.randn(4, 3), device=dev))
+    A2 = ppo.MatrixOperator(xp.asarray(np.random.randn(5, 3), device=dev))
+    A3 = ppo.MatrixOperator(xp.asarray(np.random.randn(2, 3), device=dev))
 
-    A = parallelproj.LinearOperatorSequence([A1, A2, A3])
+    A = ppo.LinearOperatorSequence([A1, A2, A3])
 
     assert len(A) == 3
 
@@ -231,7 +231,7 @@ def test_operator_sequence(xp: ModuleType, dev: str):
 
 def test_finite_difference(xp: ModuleType, dev: str):
     # 1D tests
-    A = parallelproj.FiniteForwardDifference((3,))
+    A = ppo.FiniteForwardDifference((3,))
     x = xp.reshape(xp.arange(prod(A.in_shape), device=dev), A.in_shape)
 
     n = A.norm(xp, dev)
@@ -243,7 +243,7 @@ def test_finite_difference(xp: ModuleType, dev: str):
     assert xp.all(y[0, :-1] == 1)
 
     # 2D tests
-    A = parallelproj.FiniteForwardDifference((5, 3))
+    A = ppo.FiniteForwardDifference((5, 3))
     x = xp.reshape(xp.arange(prod(A.in_shape), device=dev), A.in_shape)
 
     # test call to norm
@@ -257,7 +257,7 @@ def test_finite_difference(xp: ModuleType, dev: str):
     assert xp.all(y[1, :, :-1] == 1)
 
     # 3D tests
-    A = parallelproj.FiniteForwardDifference((5, 3, 4))
+    A = ppo.FiniteForwardDifference((5, 3, 4))
     x = xp.reshape(xp.arange(prod(A.in_shape), device=dev), A.in_shape)
 
     # test adjointness
@@ -270,7 +270,7 @@ def test_finite_difference(xp: ModuleType, dev: str):
     assert xp.all(y[2, :, :, :-1] == 1)
 
     # 4D tests
-    A = parallelproj.FiniteForwardDifference((5, 3, 4, 6))
+    A = ppo.FiniteForwardDifference((5, 3, 4, 6))
     x = xp.reshape(xp.arange(prod(A.in_shape), device=dev), A.in_shape)
 
     # test adjointness
@@ -284,7 +284,7 @@ def test_finite_difference(xp: ModuleType, dev: str):
     assert xp.all(y[3, :, :, :, :-1] == 1)
 
     with pytest.raises(ValueError):
-        A = parallelproj.FiniteForwardDifference((3, 3, 3, 3, 3))
+        A = ppo.FiniteForwardDifference((3, 3, 3, 3, 3))
 
 
 def test_gradient_projection(xp: ModuleType, dev: str):
@@ -293,7 +293,7 @@ def test_gradient_projection(xp: ModuleType, dev: str):
     # g = xp.asarray([[[1.0, 0.0, 1.0]], [[0.0, 1.0, 1.0]]], device=dev)
     g = xp.asarray([[[1, 0, 1]], [[0, 1, 1]]], device=dev)
 
-    op = parallelproj.GradientFieldProjectionOperator(g, eta=0.0)
+    op = ppo.GradientFieldProjectionOperator(g, eta=0.0)
 
     assert op.eta == 0.0
     assert op.xp == xp
@@ -321,4 +321,4 @@ def test_gradient_projection(xp: ModuleType, dev: str):
 
     with pytest.raises(ValueError):
         gc = xp.asarray([[[1j, 0, 1]], [[0, 1, 1]]], device=dev)
-        A = parallelproj.GradientFieldProjectionOperator(gc)
+        A = ppo.GradientFieldProjectionOperator(gc)
