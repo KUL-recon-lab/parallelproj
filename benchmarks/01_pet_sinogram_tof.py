@@ -170,7 +170,7 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
                 xp.asarray([tof_parameters.tofcenter_offset], dtype=xp.float32),
                 tof_parameters.num_tofbins,
                 tof_parameters.num_sigmas,
-                # threadsperblock=threadsperblock,
+                threads_per_block=threadsperblock,
             )
             t1 = time.time()
 
@@ -189,7 +189,7 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
                 xp.asarray([tof_parameters.tofcenter_offset], dtype=xp.float32),
                 tof_parameters.num_tofbins,
                 tof_parameters.num_sigmas,
-                # threadsperblock=threadsperblock,
+                threads_per_block=threadsperblock,
             )
             t3 = time.time()
             if ir > 0:

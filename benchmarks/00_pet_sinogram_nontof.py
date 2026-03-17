@@ -145,7 +145,7 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
                 img_origin,
                 voxel_size,
                 img_fwd,
-                # threadsperblock=threadsperblock,
+                threads_per_block=threadsperblock,
             )
             t1 = time.time()
 
@@ -159,7 +159,7 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
                 img_origin,
                 voxel_size,
                 ones,
-                # threadsperblock=threadsperblock,
+                threads_per_block=threadsperblock,
             )
             t3 = time.time()
             if ir > 0:
