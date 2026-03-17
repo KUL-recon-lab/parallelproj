@@ -153,7 +153,6 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
                 device=dev,
                 dtype=xp.int16,
             )
-            - proj.tof_parameters.num_tofbins // 2
         )
     )
 
