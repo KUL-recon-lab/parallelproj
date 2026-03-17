@@ -2,7 +2,9 @@ import time
 import argparse
 import os
 import pandas as pd
-import parallelproj
+import parallelproj.pet_scanners as pps
+import parallelproj.pet_lors as ppl
+import parallelproj_core
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -28,7 +30,7 @@ if args.mode == "GPU":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     import array_api_compat.cupy as xp
 
-    dev = "cuda"
+    dev = xp.cuda.Device(0)
 elif args.mode == "GPU-torch":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     import array_api_compat.torch as xp
@@ -83,7 +85,7 @@ ring_positions = (
 ring_positions -= 0.5 * xp.max(ring_positions)
 
 for ia, symmetry_axis in enumerate(symmetry_axes):
-    scanner = parallelproj.RegularPolygonPETScannerGeometry(
+    scanner = pps.RegularPolygonPETScannerGeometry(
         xp,
         dev,
         radius=0.5 * (744.1 + 2 * 8.51),
@@ -118,10 +120,10 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
     ) * voxel_size
 
     for io, sinogram_order in enumerate(sinogram_orders):
-        lor_descriptor = parallelproj.RegularPolygonPETLORDescriptor(
+        lor_descriptor = ppl.RegularPolygonPETLORDescriptor(
             scanner,
             radial_trim=65,
-            sinogram_order=parallelproj.SinogramSpatialAxisOrder[sinogram_order],
+            sinogram_order=ppl.SinogramSpatialAxisOrder[sinogram_order],
         )
         views = xp.arange(0, lor_descriptor.num_views, num_subsets, device=dev)
 
@@ -130,30 +132,34 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
         print(sinogram_order)
         print(symmetry_axis, img_shape)
 
+        ones = xp.ones(xstart.shape[:-1], dtype=xp.float32, device=dev)
+
         for ir in range(num_runs + 1):
             # perform a complete fwd projection
+            img_fwd = xp.zeros(xstart.shape[:-1], dtype=xp.float32, device=dev)
             t0 = time.time()
-            img_fwd = parallelproj.joseph3d_fwd(
+            parallelproj_core.joseph3d_fwd(
                 xstart,
                 xend,
                 img,
                 img_origin,
                 voxel_size,
-                threadsperblock=threadsperblock,
+                img_fwd,
+                # threadsperblock=threadsperblock,
             )
             t1 = time.time()
 
             # perform a complete backprojection
-            ones = xp.ones(img_fwd.shape, dtype=xp.float32, device=dev)
             t2 = time.time()
-            back_img = parallelproj.joseph3d_back(
+            back_img = xp.zeros(img.shape, dtype=xp.float32, device=dev)
+            parallelproj_core.joseph3d_back(
                 xstart,
                 xend,
-                img_shape,
+                back_img,
                 img_origin,
                 voxel_size,
                 ones,
-                threadsperblock=threadsperblock,
+                # threadsperblock=threadsperblock,
             )
             t3 = time.time()
             if ir > 0:
@@ -188,7 +194,7 @@ df["t forward+back (s)"] = df["t forward (s)"] + df["t back (s)"]
 
 fig, ax = plt.subplots(1, 3, figsize=(7, 7 / 3), sharex=False, sharey="row")
 
-bplot_kwargs = dict(capsize=0.15, errwidth=1.5, errorbar="sd")
+bplot_kwargs = dict(capsize=0.15, err_kws={"linewidth": 1.5}, errorbar="sd")
 
 sns.barplot(
     data=df,
