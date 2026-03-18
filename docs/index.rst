@@ -1,10 +1,5 @@
-.. parallelproj documentation master file, created by
-   sphinx-quickstart on Fri Dec 29 09:47:08 2023.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
-parallelproj: a Python array API compatible library for fast tomographic projections
-====================================================================================
+parallelproj documentation
+==========================
 
 **parallelproj** provides simple and fast high-level python routines for tomographic reconstruction
 that are `python array API <https://data-apis.org/array-api/latest/>`_ 

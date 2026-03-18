@@ -7,15 +7,18 @@
    viewBox="0 0 297 160"
    version="1.1"
    id="svg1"
-   inkscape:version="1.3 (0e150ed, 2023-07-21)"
-   sodipodi:docname="parllelproj-logo.svg"
+   inkscape:version="1.4 (86a8ad7, 2024-10-11)"
+   sodipodi:docname="parallelproj-logo.svg"
+   inkscape:export-filename="parallelproj-logo.png"
+   inkscape:export-xdpi="100"
+   inkscape:export-ydpi="100"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <sodipodi:namedview
      id="namedview1"
-     pagecolor="#437eb5"
+     pagecolor="#ffffff"
      bordercolor="#000000"
      borderopacity="0.25"
      inkscape:showpageshadow="2"
@@ -24,13 +27,13 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
      showgrid="false"
-     inkscape:zoom="0.9831996"
-     inkscape:cx="240.54119"
-     inkscape:cy="339.19867"
-     inkscape:window-width="1512"
-     inkscape:window-height="916"
-     inkscape:window-x="0"
-     inkscape:window-y="38"
+     inkscape:zoom="0.4915998"
+     inkscape:cx="493.28743"
+     inkscape:cy="112.89671"
+     inkscape:window-width="1280"
+     inkscape:window-height="953"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
      inkscape:window-maximized="1"
      inkscape:current-layer="layer1">
     <inkscape:grid
@@ -270,14 +273,14 @@
     </g>
     <text
        xml:space="preserve"
-       style="font-weight:bold;font-size:22.5778px;font-family:Futura;-inkscape-font-specification:'Futura Bold';fill:#f9f9f9;fill-opacity:1;stroke:#adc9e0;stroke-width:0.264999;stroke-opacity:1"
-       x="166.57648"
+       style="font-weight:bold;font-size:22.5778px;font-family:Futura;-inkscape-font-specification:'Futura Bold';fill:#5592c3;fill-opacity:1;stroke:none;stroke-width:0.264999;stroke-opacity:1"
+       x="161.28488"
        y="86.388588"
        id="text50"><tspan
          sodipodi:role="line"
          id="tspan50"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:22.5778px;font-family:Futura;-inkscape-font-specification:Futura;fill:#f9f9f9;stroke-width:0.265"
-         x="166.57648"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:22.5778px;font-family:Futura;-inkscape-font-specification:Futura;fill:#5592c3;fill-opacity:1;stroke:none;stroke-width:0.265"
+         x="161.28488"
          y="86.388588">parallelproj</tspan></text>
     <path
        style="fill:none;fill-rule:evenodd;stroke:#ffaa21;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
@@ -292,25 +295,25 @@
        inkscape:connector-type="polyline"
        inkscape:connector-curvature="0" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-dasharray:none"
+       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
        d="M 102.47419,96.306623 123.8064,118.78611"
        id="path35"
        inkscape:connector-type="polyline"
        inkscape:connector-curvature="0" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-dasharray:none"
+       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
        d="m 53.728171,101.8851 -7.242888,25.31722"
        id="path36"
        inkscape:connector-type="polyline"
        inkscape:connector-curvature="0" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-dasharray:none"
+       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
        d="M 29.28951,101.94466 47.813281,82.942491"
        id="path38"
        inkscape:connector-type="polyline"
        inkscape:connector-curvature="0" />
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;stroke-dasharray:none"
+       style="fill:none;fill-rule:evenodd;stroke:#adc9e0;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
        d="M 66.161268,132.10365 78.44781,118.65611"
        id="path39"
        inkscape:connector-type="polyline"

@@ -51,7 +51,7 @@ sphinx_gallery_conf = {
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "furo"
-html_logo = "_static/parallelproj-logo.svg"
+html_logo = "_static/parallelproj-logo.png"
 
 # Theme options
 html_theme_options = {
