@@ -6,9 +6,8 @@
 parallelproj: a Python array API compatible library for fast tomographic projections
 ====================================================================================
 
-**parallelproj** provides simple and fast
-forward and back projectors for tomographic reconstruction
-(non-TOF and TOF, sinogram ans listmode) in Python that are `python array API <https://data-apis.org/array-api/latest/>`_ 
+**parallelproj** provides simple and fast high-level python routines for tomographic reconstruction
+that are `python array API <https://data-apis.org/array-api/latest/>`_ 
 compatible meaning that they can be used with a variety of python
 array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 
@@ -17,8 +16,6 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 .. note:: 
   **Features of parallelproj**
 
-  * **C/OpenMP** and **CUDA** implementations of **3D Joseph matched forward and back projectors** :cite:p:`Joseph1982`
-  * **non-TOF** and **TOF** versions of the projectors
   * dedicated **sinogram** and **listmode** versions of the projectors
   * **Python array API compatible Python interface** (e.g. directly compatible with numpy, cupy, **pytorch**) 
   * available on `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
@@ -49,14 +46,6 @@ All examples can be run interactively without installation on `mybinder.org`:
     :maxdepth: 1
 
     python_api
-
-.. toctree::
-    :caption: C/CUDA lib API
-    :maxdepth: 1
-
-    libparallelproj_c
-    libparallelproj_cuda
-    cuda_kernels
 
 .. rubric:: References
 .. bibliography::

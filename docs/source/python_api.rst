@@ -1,5 +1,5 @@
-Low-level projector interface ``parallelproj.backend``
-------------------------------------------------------
+Backend utilities ``parallelproj.backend``
+------------------------------------------
 
 .. automodule:: parallelproj.backend
 
