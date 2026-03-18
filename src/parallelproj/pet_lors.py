@@ -353,7 +353,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     @property
     def plane_segment(self) -> Array:
-        """segment number for each plane (equals |rd| for span=1)"""
+        """segment number for each plane (equals abs(rd) for span=1)"""
         return self._plane_segment
 
     @property

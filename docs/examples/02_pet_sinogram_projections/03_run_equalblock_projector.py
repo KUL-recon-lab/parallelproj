@@ -19,21 +19,22 @@ consists of a regular grid of LOR endpoints.
 import math
 import matplotlib.pyplot as plt
 
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
-import parallelproj.projectors as ppp
-import parallelproj.tof as ppt
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
+import parallelproj.tof
 from parallelproj import to_numpy_array
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -94,7 +95,7 @@ for phi in [
         device=dev,
     )
     mods.append(
-        pps.BlockPETScannerModule(
+        parallelproj.pet_scanners.BlockPETScannerModule(
             xp,
             dev,
             block_shape,
@@ -105,7 +106,7 @@ for phi in [
 
 # create the scanner geometry from a list of identical block modules at
 # different locations in space
-scanner = pps.ModularizedPETScannerGeometry(mods)
+scanner = parallelproj.pet_scanners.ModularizedPETScannerGeometry(mods)
 
 # %%
 # Setup of a LOR descriptor consisting of block pairs
@@ -116,7 +117,7 @@ scanner = pps.ModularizedPETScannerGeometry(mods)
 # To do this, we have manually define a list containing pairs of block numbers.
 # Here, we define 9 block pairs. Note that more pairs would be possible.
 
-lor_desc = ppl.EqualBlockPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.EqualBlockPETLORDescriptor(
     scanner,
     xp.asarray(
         [
@@ -143,7 +144,7 @@ img_shape = (28, 20, 3)
 voxel_size = (0.5, 0.5, 1.0)
 img = xp.ones(img_shape, dtype=xp.float32, device=dev)
 
-proj = ppp.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
+proj = parallelproj.projectors.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
 assert proj.adjointness_test(xp, dev, dtype=xp.float32)
 
 # %%
@@ -201,8 +202,8 @@ fig4.show()
 #
 # Now that the LOR descriptor is defined, we can setup the projector.
 
-proj_tof = ppp.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
-proj_tof.tof_parameters = ppt.TOFParameters(
+proj_tof = parallelproj.projectors.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
+proj_tof.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0, num_sigmas=3.0
 )
 

@@ -3,14 +3,7 @@ version: 2
 build:
   os: "ubuntu-lts-latest"
   tools:
-    python: "mambaforge-latest"
-  jobs:
-    post_install:
-      - cmake -B ./build -DCMAKE_INSTALL_PREFIX=/tmp/libparallelproj_install
-      - cmake --build ./build --target install
-      - ls -l /tmp/libparallelproj_install/lib
-      - echo ${PARALLELPROJ_C_LIB} # defined in the RTD project settings
-      - ls -l ${PARALLELPROJ_C_LIB} 
+    python: "miniconda-latest"
 
 conda:
   environment: docs/environment.yml
@@ -22,4 +15,4 @@ python:
 
 sphinx:
   fail_on_warning: true
-  configuration: docs/source/conf.py
+  configuration: docs/conf.py

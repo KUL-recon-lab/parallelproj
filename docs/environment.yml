@@ -13,3 +13,4 @@ dependencies:
   - matplotlib
   - array-api-compat
   - pytorch
+  - scipy

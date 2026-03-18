@@ -35,22 +35,23 @@ from matplotlib import animation
 from array_api_compat import size
 import numpy as np
 
-import parallelproj.operators as ppo
-import parallelproj.tof as ppt
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
-import parallelproj.projectors as ppp
+import parallelproj.operators
+import parallelproj.tof
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -79,7 +80,7 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 #
 
 num_rings = 5
-scanner = pps.RegularPolygonPETScannerGeometry(
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -95,14 +96,14 @@ scanner = pps.RegularPolygonPETScannerGeometry(
 img_shape = (40, 40, 8)
 voxel_size = (2.0, 2.0, 2.0)
 
-lor_desc = ppl.RegularPolygonPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=2,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
-proj = ppp.RegularPolygonPETProjector(
+proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
@@ -138,23 +139,23 @@ att_sino = xp.exp(-proj(x_att))
 # into a single linear operator.
 
 # enable TOF - comment if you want to run non-TOF
-proj.tof_parameters = ppt.TOFParameters(
+proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
 # setup the attenuation multiplication operator which is different
 # for TOF and non-TOF since the attenuation sinogram is always non-TOF
 if proj.tof:
-    att_op = ppo.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
+    att_op = parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
 else:
-    att_op = ppo.ElementwiseMultiplicationOperator(att_sino)
+    att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
 
-res_model = ppo.GaussianFilterOperator(
+res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
 # compose all 3 operators into a single linear operator
-pet_lin_op = ppo.CompositeLinearOperator((att_op, proj, res_model))
+pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
 # Simulation of sinogram projection data
@@ -201,7 +202,7 @@ event_start_coords, event_end_coords, event_tofbins = proj.convert_sinogram_to_l
 # Setup of the LM projector and LM forward model
 # ----------------------------------------------
 
-lm_proj = ppp.ListmodePETProjector(
+lm_proj = parallelproj.projectors.ListmodePETProjector(
     event_start_coords,
     event_end_coords,
     proj.in_shape,
@@ -212,7 +213,7 @@ lm_proj = ppp.ListmodePETProjector(
 # recalculate the attenuation factor for all LM events
 # this needs to be a non-TOF projection
 att_list = xp.exp(-lm_proj(x_att))
-lm_att_op = ppo.ElementwiseMultiplicationOperator(att_list)
+lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_list)
 
 # enable TOF in the LM projector
 lm_proj.tof_parameters = proj.tof_parameters
@@ -228,7 +229,7 @@ contamination_list = xp.full(
     dtype=xp.float32,
 )
 
-lm_pet_lin_op = ppo.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
+lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
 
 # %%
 # LM MLEM reconstruction
@@ -244,7 +245,7 @@ lm_pet_lin_op = ppo.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
 
 def lm_em_update(
     x_cur: Array,
-    op: ppo.LinearOperator,
+    op: parallelproj.operators.LinearOperator,
     s: Array,
     adjoint_ones: Array,
 ) -> Array:
@@ -254,7 +255,7 @@ def lm_em_update(
     ----------
     x_cur : Array
         current solution
-    op : ppo.LinearOperator
+    op : parallelproj.operators.LinearOperator
         listmode linear forward operator
     s : Array
         contamination list
@@ -320,5 +321,6 @@ img1 = ax[1].imshow(x_np[:, :, 0], cmap="Greys", vmin=0, vmax=vmax)
 ax[0].set_title(f"true image - plane {0:02}")
 ax[1].set_title(f"LM MLEM iteration {num_iter} - plane {0:02}")
 fig.tight_layout()
-ani = animation.FuncAnimation(fig, _update_img, x_np.shape[2], interval=200, blit=False)
-fig.show()
+if plt.get_backend() != "agg":
+    ani = animation.FuncAnimation(fig, _update_img, x_np.shape[2], interval=200, blit=False)
+    fig.show()

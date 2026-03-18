@@ -39,22 +39,23 @@ import numpy as np
 import math
 from array_api_compat import size
 
-import parallelproj.operators as ppo
-import parallelproj.tof as ppt
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
-import parallelproj.projectors as ppp
+import parallelproj.operators
+import parallelproj.tof
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
 from parallelproj import to_numpy_array, count_event_multiplicity
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -112,7 +113,7 @@ track_cost = True
 #
 
 num_rings = 5
-scanner = pps.RegularPolygonPETScannerGeometry(
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=350.0,
@@ -128,14 +129,14 @@ scanner = pps.RegularPolygonPETScannerGeometry(
 img_shape = (40, 40, 5)
 voxel_size = (4.0, 4.0, 4.0)
 
-lor_desc = ppl.RegularPolygonPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=170,
     max_ring_difference=num_rings - 1,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
-proj = ppp.RegularPolygonPETProjector(
+proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
@@ -174,23 +175,23 @@ att_sino = xp.exp(-proj(x_att))
 # into a single linear operator.
 
 # enable TOF - comment if you want to run non-TOF
-proj.tof_parameters = ppt.TOFParameters(
+proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=17, tofbin_width=12.0, sigma_tof=12.0
 )
 
 # setup the attenuation multiplication operator which is different
 # for TOF and non-TOF since the attenuation sinogram is always non-TOF
 if proj.tof:
-    att_op = ppo.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
+    att_op = parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
 else:
-    att_op = ppo.ElementwiseMultiplicationOperator(att_sino)
+    att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
 
-res_model = ppo.GaussianFilterOperator(
+res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
 # compose all 3 operators into a single linear operator
-pet_lin_op = ppo.CompositeLinearOperator((att_op, proj, res_model))
+pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
 # Simulation of sinogram projection data
@@ -286,7 +287,7 @@ def cost_function(img):
 #  :math:`T = \min T_A, T_G` pointwise
 #
 
-op_G = ppo.FiniteForwardDifference(pet_lin_op.in_shape)
+op_G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
 
 # initialize primal and dual variables
 x_pdhg = 1.0 * x_mlem
@@ -392,7 +393,7 @@ subset_slices_lm = [slice(i, None, num_subsets) for i in range(num_subsets)]
 lm_pet_subset_linop_seq = []
 
 for i, sl in enumerate(subset_slices_lm):
-    subset_lm_proj = ppp.ListmodePETProjector(
+    subset_lm_proj = parallelproj.projectors.ListmodePETProjector(
         1 * event_start_coords[sl, :],
         1 * event_end_coords[sl, :],
         proj.in_shape,
@@ -412,13 +413,13 @@ for i, sl in enumerate(subset_slices_lm):
         subset_lm_proj.event_tofbins = 1 * event_tofbins[sl]
         subset_lm_proj.tof = proj.tof
 
-    subset_lm_att_op = ppo.ElementwiseMultiplicationOperator(subset_att_list)
+    subset_lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(subset_att_list)
 
     lm_pet_subset_linop_seq.append(
-        ppo.CompositeLinearOperator((subset_lm_att_op, subset_lm_proj, res_model))
+        parallelproj.operators.CompositeLinearOperator((subset_lm_att_op, subset_lm_proj, res_model))
     )
 
-lm_pet_subset_linop_seq = ppo.LinearOperatorSequence(lm_pet_subset_linop_seq)
+lm_pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(lm_pet_subset_linop_seq)
 
 # create the contamination list
 contamination_list = xp.full(

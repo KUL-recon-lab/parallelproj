@@ -18,20 +18,21 @@ on pre-corrected Poisson emission data.
 import matplotlib.pyplot as plt
 import numpy as np
 
-import parallelproj.projectors as ppp
+import parallelproj.projectors
 from parallelproj import to_numpy_array
 from utils import RadonDisk, RadonObjectSequence
 from scipy.ndimage import gaussian_filter
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -263,7 +264,7 @@ fig.show()
 # Define a projector and run filtered back projection (FBP)
 # ---------------------------------------------------------
 
-proj = ppp.ParallelViewProjector2D(
+proj = parallelproj.projectors.ParallelViewProjector2D(
     (num_rad, num_rad),
     r,
     -phi,

@@ -18,19 +18,20 @@ This example shows how this can be done using the :class:`.RegularPolygonPETLORD
 
 # %%
 import numpy as np
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
 import matplotlib.pyplot as plt
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -43,14 +44,14 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 
 
 # %%
-def _central_plane_seg0(lor_desc: ppl.RegularPolygonPETLORDescriptor) -> int:
+def _central_plane_seg0(lor_desc: parallelproj.pet_lors.RegularPolygonPETLORDescriptor) -> int:
     """Return the plane index of the central plane belonging to segment 0."""
     seg = np.asarray(lor_desc.plane_segment.tolist())
     idx = np.where(seg == 0)[0]
     return int(idx[len(idx) // 2])
 
 
-def _last_plane_highest_seg(lor_desc: ppl.RegularPolygonPETLORDescriptor) -> int:
+def _last_plane_highest_seg(lor_desc: parallelproj.pet_lors.RegularPolygonPETLORDescriptor) -> int:
     """Return the last plane index belonging to the highest-magnitude segment."""
     seg = np.asarray(lor_desc.plane_segment.tolist())
     idx = np.where(np.abs(seg) == int(np.abs(seg).max()))[0]
@@ -61,7 +62,7 @@ def _last_plane_highest_seg(lor_desc: ppl.RegularPolygonPETLORDescriptor) -> int
 # setup a small regular polygon PET scanner with 5 rings (polygons)
 
 num_rings = 11
-scanner = pps.RegularPolygonPETScannerGeometry(
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -85,10 +86,10 @@ scanner = pps.RegularPolygonPETScannerGeometry(
 # `sinogram_order` of type :class:`.SinogramSpatialAxisOrder` defines the order of the sinogram dimensions
 # (e.g. RVP -> [radial, view, plane], PRV -> [plane, radial, view])
 
-lor_desc1 = ppl.RegularPolygonPETLORDescriptor(
+lor_desc1 = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
 print(lor_desc1)
@@ -104,10 +105,10 @@ print(
 # %%
 # Define a 2nd LOR descriptor with sinogram order "PRV"
 
-lor_desc2 = ppl.RegularPolygonPETLORDescriptor(
+lor_desc2 = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.PRV,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.PRV,
 )
 
 print(lor_desc2)
@@ -210,11 +211,11 @@ fig_seg0.show()
 
 span = 5
 
-lor_desc_s7 = ppl.RegularPolygonPETLORDescriptor(
+lor_desc_s7 = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     span=span,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
 print(lor_desc_s7)
@@ -276,12 +277,12 @@ fig_3d1.show()
 
 max_ring_difference = 7
 
-lor_desc_s7_mrd9 = ppl.RegularPolygonPETLORDescriptor(
+lor_desc_s7_mrd9 = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     span=span,
     max_ring_difference=max_ring_difference,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
 print(lor_desc_s7_mrd9)

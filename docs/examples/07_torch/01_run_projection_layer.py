@@ -3,7 +3,7 @@ pytorch parallelproj projection layer
 =====================================
 
 In this example, we show how to define a custom pytorch layer that can be used
-to define a feed forward neural network that includes a parallelproj forward and back 
+to define a feed forward neural network that includes a parallelproj forward and back
 backward projections (or any :class:`.LinearOperator`) that can be used with pytorch's
 autograd engine.
 
@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import array_api_compat.torch as torch
 import matplotlib.pyplot as plt
-import parallelproj
+import parallelproj.operators
+import parallelproj.projectors
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj_core as ppc
 from array_api_compat import device
 
 
 # device variable (cpu or cuda) that determines whether calculations
 # are performed on the cpu or cuda gpu
-if parallelproj.cuda_present:
+if torch.cuda.is_available() and ppc.cuda_enabled == 1:
     dev = "cuda"
 else:
     dev = "cpu"
@@ -43,9 +47,7 @@ class LinearSingleChannelOperator(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(
-        ctx, x: torch.Tensor, operator: parallelproj.LinearOperator
-    ) -> torch.Tensor:
+    def forward(ctx, x: torch.Tensor, operator: parallelproj.operators.LinearOperator) -> torch.Tensor:
         """forward pass of the linear operator
 
         Parameters
@@ -136,9 +138,7 @@ class AdjointLinearSingleChannelOperator(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(
-        ctx, x: torch.Tensor, operator: parallelproj.LinearOperator
-    ) -> torch.Tensor:
+    def forward(ctx, x: torch.Tensor, operator: parallelproj.operators.LinearOperator) -> torch.Tensor:
         """forward pass of the adjoint of the linear operator
 
         Parameters
@@ -221,7 +221,7 @@ class AdjointLinearSingleChannelOperator(torch.autograd.Function):
 # three rings.
 
 num_rings = 3
-scanner = parallelproj.RegularPolygonPETScannerGeometry(
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     torch,
     dev,
     radius=35.0,
@@ -233,14 +233,14 @@ scanner = parallelproj.RegularPolygonPETScannerGeometry(
 )
 
 # setup the LOR descriptor that defines the sinogram
-lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=1,
-    sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
-proj = parallelproj.RegularPolygonPETProjector(
+proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=(20, 5, 20), voxel_size=(2.0, 2.0, 2.0)
 )
 

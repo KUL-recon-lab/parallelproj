@@ -15,18 +15,19 @@ endpoints can be modeled as a stack of regular polygons.
 """
 
 # %%
-import parallelproj.pet_scanners as pps
+import parallelproj.pet_scanners
 import matplotlib.pyplot as plt
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -48,7 +49,7 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # Note that `symmetry_axis` can be used to define which of the three axis is
 # used as the cylinder (symmetry) axis.
 
-scanner1 = pps.RegularPolygonPETScannerGeometry(
+scanner1 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -59,7 +60,7 @@ scanner1 = pps.RegularPolygonPETScannerGeometry(
     symmetry_axis=2,
 )
 
-scanner2 = pps.RegularPolygonPETScannerGeometry(
+scanner2 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -70,7 +71,7 @@ scanner2 = pps.RegularPolygonPETScannerGeometry(
     symmetry_axis=1,
 )
 
-scanner3 = pps.RegularPolygonPETScannerGeometry(
+scanner3 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=400.0,
@@ -81,7 +82,7 @@ scanner3 = pps.RegularPolygonPETScannerGeometry(
     symmetry_axis=2,
 )
 
-scanner4 = pps.RegularPolygonPETScannerGeometry(
+scanner4 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=400.0,
@@ -141,7 +142,7 @@ fig.show()
 # Here we create an open geometry with 6 sides and 3 rings corresponding to
 # a full geometry using 12 sides where 6 sides were removed.
 
-open_scanner = pps.RegularPolygonPETScannerGeometry(
+open_scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,

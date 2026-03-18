@@ -18,10 +18,11 @@ a resolution model and a correction for attenuation.
 # %%
 import matplotlib.pyplot as plt
 
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
-import parallelproj.projectors as ppp
-import parallelproj.operators as ppo
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
+import parallelproj.operators
+import parallelproj_core as ppc
 from parallelproj import to_numpy_array
 
 # %%
@@ -31,8 +32,8 @@ from importlib import import_module, util
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -48,7 +49,7 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # setup a small regular polygon PET scanner with 5 rings (polygons)
 
 num_rings = 5
-scanner = pps.RegularPolygonPETScannerGeometry(
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
@@ -62,11 +63,11 @@ scanner = pps.RegularPolygonPETScannerGeometry(
 # %%
 # setup the LOR descriptor that defines the sinogram
 
-lor_desc = ppl.RegularPolygonPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
     max_ring_difference=2,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
 # %%
@@ -79,13 +80,13 @@ lor_desc = ppl.RegularPolygonPETLORDescriptor(
 
 # define a first projector using an image with 40x8x40 voxels of size 2x2x2 mm
 # where the image center is at world coordinate (0, 0, 0)
-proj = ppp.RegularPolygonPETProjector(
+proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
 )
 
 # define a second projector using an image with 20x8x30 voxels of size 3x2x2 mm
 # that is off-center
-proj2 = ppp.RegularPolygonPETProjector(
+proj2 = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc,
     img_shape=(20, 8, 30),
     voxel_size=(3.0, 2.0, 2.0),
@@ -175,11 +176,11 @@ x_fwd_back = proj.adjoint(x_fwd)
 
 
 # setup a simple image-based resolution model with an Gaussian FWHM of 4.5mm
-res_model = ppo.GaussianFilterOperator(
+res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
-proj_with_res_model = ppo.CompositeLinearOperator((proj, res_model))
+proj_with_res_model = parallelproj.operators.CompositeLinearOperator((proj, res_model))
 
 # forward project with resolution model
 x_fwd2 = proj_with_res_model(x)
@@ -224,10 +225,10 @@ x_att_fwd = proj(x_att)
 
 # calculate the attenuation sinogram
 att_sino = xp.exp(-x_att_fwd)
-att_op = ppo.ElementwiseMultiplicationOperator(att_sino)
+att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
 
 # setup a forward projector containing the attenuation and resolution
-proj_with_att_and_res_model = ppo.CompositeLinearOperator((att_op, proj, res_model))
+proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # forward project with resolution and attenuation model
 x_fwd3 = proj_with_att_and_res_model(x)

@@ -1,8 +1,3 @@
-Backend utilities ``parallelproj.backend``
-------------------------------------------
-
-.. automodule:: parallelproj.backend
-
 PET scanner geometries ``parallelproj.pet_scanners``
 ----------------------------------------------------
 

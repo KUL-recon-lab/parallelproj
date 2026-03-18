@@ -18,20 +18,21 @@ a description of which block pairs are in coincidence.
 """
 
 # %%
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
 import matplotlib.pyplot as plt
 import math
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -93,7 +94,7 @@ for phi in [
         device=dev,
     )
     mods.append(
-        pps.BlockPETScannerModule(
+        parallelproj.pet_scanners.BlockPETScannerModule(
             xp,
             dev,
             block_shape,
@@ -104,7 +105,7 @@ for phi in [
 
 # create the scanner geometry from a list of identical block modules at
 # different locations in space
-scanner = pps.ModularizedPETScannerGeometry(mods)
+scanner = parallelproj.pet_scanners.ModularizedPETScannerGeometry(mods)
 
 # %%
 # Show the scanner geometry consisting of 7 block modules
@@ -123,7 +124,7 @@ fig.show()
 # To do this, we have manually define a list containing pairs of block numbers.
 # Here, we define 12 block pairs. Note that more pairs would be possible.
 
-lor_desc = ppl.EqualBlockPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.EqualBlockPETLORDescriptor(
     scanner,
     xp.asarray(
         [

@@ -1,8 +1,9 @@
 """
-TOF-MLEM with projection data
-=============================
+MLEM with projection data of an open PET geometry
+=================================================
 
-This example demonstrates the use of the MLEM algorithm to minimize the negative Poisson log-likelihood function.
+This example demonstrates the use of the MLEM algorithm to minimize the negative Poisson log-likelihood function
+using "sinogram" data from an open PET geometry.
 
 .. math::
     f(x) = \\sum_{i=1}^m \\bar{y}_i (x) - y_i \\log(\\bar{y}_i (x))
@@ -32,22 +33,23 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 import numpy as np
 
-import parallelproj.operators as ppo
-import parallelproj.tof as ppt
-import parallelproj.pet_scanners as pps
-import parallelproj.pet_lors as ppl
-import parallelproj.projectors as ppp
+import parallelproj.operators
+import parallelproj.tof
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -66,36 +68,35 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # We setup a linear forward operator :math:`A` consisting of an
 # image-based resolution model, a non-TOF PET projector and an attenuation model
 #
-# .. note::
-#     The MLEM implementation below works with all linear operators that
-#     subclass :class:`.LinearOperator` (e.g. the high-level projectors).
+# Here we create an open geometry with 6 sides and 5 rings corresponding to
+# a full geometry using 12 sides where 6 sides were removed.
 
-num_rings = 5
-scanner = pps.RegularPolygonPETScannerGeometry(
+num_rings = 1
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
-    num_sides=12,
+    num_sides=6,
     num_lor_endpoints_per_side=15,
     lor_spacing=2.3,
-    ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
+    ring_positions=xp.asarray([0.0], device=dev),
     symmetry_axis=2,
+    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7], device=dev),
 )
 
 # %%
 # setup the LOR descriptor that defines the sinogram
 
-img_shape = (40, 40, 8)
+img_shape = (40, 40, 1)
 voxel_size = (2.0, 2.0, 2.0)
 
-lor_desc = ppl.RegularPolygonPETLORDescriptor(
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    radial_trim=10,
-    max_ring_difference=2,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    radial_trim=1,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 
-proj = ppp.RegularPolygonPETProjector(
+proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
@@ -103,9 +104,16 @@ proj = ppp.RegularPolygonPETProjector(
 x_true = xp.ones(proj.in_shape, device=dev, dtype=xp.float32)
 c0 = proj.in_shape[0] // 2
 c1 = proj.in_shape[1] // 2
-x_true[(c0 - 2) : (c0 + 2), (c1 - 2) : (c1 + 2), :] = 5.0
-x_true[4, c1, 2:] = 5.0
-x_true[c0, 4, :-2] = 5.0
+
+x_true[4, c1, :] = 5.0
+x_true[8, c1, :] = 5.0
+x_true[12, c1, :] = 5.0
+x_true[16, c1, :] = 5.0
+
+x_true[c0, 4, :] = 5.0
+x_true[c0, 8, :] = 5.0
+x_true[c0, 12, :] = 5.0
+x_true[c0, 16, :] = 5.0
 
 x_true[:2, :, :] = 0
 x_true[-2:, :, :] = 0
@@ -131,24 +139,54 @@ att_sino = xp.exp(-proj(x_att))
 # into a single linear operator.
 
 # enable TOF - comment if you want to run non-TOF
-proj.tof_parameters = ppt.TOFParameters(
-    num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
+proj.tof_parameters = parallelproj.tof.TOFParameters(
+    num_tofbins=26,
+    tofbin_width=6.0,
+    sigma_tof=12.0,
 )
 
 # setup the attenuation multiplication operator which is different
 # for TOF and non-TOF since the attenuation sinogram is always non-TOF
 if proj.tof:
-    att_op = ppo.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
+    att_op = parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
 else:
-    att_op = ppo.ElementwiseMultiplicationOperator(att_sino)
+    att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
 
-res_model = ppo.GaussianFilterOperator(
+res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
 )
 
 # compose all 3 operators into a single linear operator
-pet_lin_op = ppo.CompositeLinearOperator((att_op, proj, res_model))
+pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
+# %%
+# Visualization of the geometry
+# -----------------------------
+#
+
+fig = plt.figure(figsize=(16, 8), tight_layout=True)
+ax1 = fig.add_subplot(121, projection="3d")
+ax2 = fig.add_subplot(122, projection="3d")
+proj.show_geometry(ax1)
+proj.show_geometry(ax2)
+proj.lor_descriptor.show_views(
+    ax1,
+    views=xp.asarray([0], device=dev),
+    planes=xp.asarray([num_rings // 2], device=dev),
+    lw=0.5,
+    color="k",
+)
+ax1.set_title(f"view 0, plane {num_rings // 2}")
+proj.lor_descriptor.show_views(
+    ax2,
+    views=xp.asarray([proj.lor_descriptor.num_views // 2], device=dev),
+    planes=xp.asarray([num_rings // 2], device=dev),
+    lw=0.5,
+    color="k",
+)
+ax2.set_title(f"view {proj.lor_descriptor.num_views // 2}, plane {num_rings // 2}")
+fig.tight_layout()
+fig.show()
 
 # %%
 # Simulation of projection data
@@ -171,9 +209,10 @@ contamination = xp.full(
 noise_free_data += contamination
 
 # add Poisson noise
+gamma = 100.0
 np.random.seed(1)
 y = xp.asarray(
-    np.random.poisson(to_numpy_array(noise_free_data)),
+    np.random.poisson(to_numpy_array(gamma * noise_free_data)) / gamma,
     device=dev,
     dtype=xp.float32,
 )
@@ -208,7 +247,7 @@ y = xp.asarray(
 def em_update(
     x_cur: Array,
     data: Array,
-    op: ppo.LinearOperator,
+    op: parallelproj.operators.LinearOperator,
     s: Array,
     adjoint_ones: Array,
 ) -> Array:
@@ -220,7 +259,7 @@ def em_update(
         current solution
     data : Array
         data
-    op : parallelproj.LinearOperator
+    op : parallelproj.operators.LinearOperator
         linear forward operator
     s : Array
         contamination
@@ -241,7 +280,7 @@ def em_update(
 # -----------------------
 
 # number of MLEM iterations
-num_iter = 20
+num_iter = 100
 
 # initialize x
 x = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
@@ -288,5 +327,6 @@ img1 = ax[1].imshow(x_np[:, :, 0], cmap="Greys", vmin=0, vmax=vmax)
 ax[0].set_title(f"true image - plane {0:02}")
 ax[1].set_title(f"MLEM iteration {num_iter} - plane {0:02}")
 fig.tight_layout()
-ani = animation.FuncAnimation(fig, _update_img, x_np.shape[2], interval=200, blit=False)
-fig.show()
+if plt.get_backend() != "agg":
+    ani = animation.FuncAnimation(fig, _update_img, x_np.shape[2], interval=200, blit=False)
+    fig.show()

@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 _build/
 libparallelproj_install/
+.claude/
 
 # C extensions
 *.so

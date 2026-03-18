@@ -31,18 +31,19 @@ using the linear forward model
 import matplotlib.pyplot as plt
 import numpy as np
 
-import parallelproj.operators as ppo
+import parallelproj.operators
 from parallelproj import to_numpy_array
 
 # %%
 from importlib import import_module, util
+import parallelproj_core as ppc
 
 
 # choose array backend and a device (CPU or CUDA GPU)
 if util.find_spec("torch") is not None:
     xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() else "cpu"
-elif util.find_spec("cupy") is not None:
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
     xp = import_module("array_api_compat.cupy")
     # using cupy, only cuda devices are possible
     dev = xp.cuda.Device(0)
@@ -78,7 +79,7 @@ mat = xp.asarray(
     device=dev,
 )
 
-op_A = ppo.MatrixOperator(mat)
+op_A = parallelproj.operators.MatrixOperator(mat)
 # setup an arbitrary contamination vector that has shape op_A.out_shape
 contamination = xp.asarray([0.3, 0.2, 0.1, 0.4, 0.1], dtype=xp.float64, device=dev)
 
