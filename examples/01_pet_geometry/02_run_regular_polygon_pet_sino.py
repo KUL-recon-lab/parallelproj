@@ -17,6 +17,7 @@ This example shows how this can be done using the :class:`.RegularPolygonPETLORD
 """
 
 # %%
+import numpy as np
 import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
 import matplotlib.pyplot as plt
@@ -39,6 +40,21 @@ else:
     dev = "cpu"
 
 print(f"Using array API: {xp.__name__}, device: {dev}")
+
+
+# %%
+def _central_plane_seg0(lor_desc: ppl.RegularPolygonPETLORDescriptor) -> int:
+    """Return the plane index of the central plane belonging to segment 0."""
+    seg = np.asarray(lor_desc.plane_segment.tolist())
+    idx = np.where(seg == 0)[0]
+    return int(idx[len(idx) // 2])
+
+
+def _last_plane_highest_seg(lor_desc: ppl.RegularPolygonPETLORDescriptor) -> int:
+    """Return the last plane index belonging to the highest-magnitude segment."""
+    seg = np.asarray(lor_desc.plane_segment.tolist())
+    idx = np.where(np.abs(seg) == int(np.abs(seg).max()))[0]
+    return int(idx[-1])
 
 
 # %%
@@ -91,7 +107,6 @@ print(
 lor_desc2 = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
-    max_ring_difference=2,
     sinogram_order=ppl.SinogramSpatialAxisOrder.PRV,
 )
 
@@ -135,25 +150,15 @@ print(lor_start_points2[1, 2, 0, :])
 print(lor_end_points2[1, 2, 0, :])
 
 # %%
-# Definition of plane numbers
-# ---------------------------
-#
-# The plane number definition corresponds to a span 1 Michelogram.
-
-for i in range(lor_desc1.num_planes):
-    st_pl = lor_desc1.start_plane_index[i]
-    end_pl = lor_desc1.end_plane_index[i]
-    print(
-        f"plane num: {i:02} - start ring {st_pl} - end ring {end_pl} - ring diff. {(end_pl-st_pl):>2}"
-    )
-
-# %%
 # Visualize the defined LOR endpoints
 # -----------------------------------
 #
 # :meth:`.RegularPolygonPETScannerGeometry.show_lor_endpoints` can be used
 # to visualize the defined LOR endpoints. Note that a zig-zag sampling pattern
 # is used to define a view.
+
+_p0 = _central_plane_seg0(lor_desc1)
+_ph = _last_plane_highest_seg(lor_desc1)
 
 fig = plt.figure(figsize=(16, 8), tight_layout=True)
 ax1 = fig.add_subplot(121, projection="3d")
@@ -162,18 +167,172 @@ scanner.show_lor_endpoints(ax1)
 lor_desc1.show_views(
     ax1,
     views=xp.asarray([0], device=dev),
-    planes=xp.asarray([num_rings // 2], device=dev),
+    planes=xp.asarray([_p0], device=dev),
     lw=0.5,
     color="k",
 )
-ax1.set_title(f"view 0, plane {num_rings // 2}")
+ax1.set_title(f"view 0, central plane of seg 0 (plane {_p0})")
 scanner.show_lor_endpoints(ax2)
 lor_desc1.show_views(
     ax2,
     views=xp.asarray([lor_desc1.num_views // 2], device=dev),
-    planes=xp.asarray([lor_desc1.num_planes - 1], device=dev),
+    planes=xp.asarray([_ph], device=dev),
     lw=0.5,
     color="k",
 )
-ax2.set_title(f"view {lor_desc1.num_views // 2}, plane {lor_desc1.num_planes - 1}")
+ax2.set_title(
+    f"view {lor_desc1.num_views // 2}, last plane of highest seg (plane {_ph})"
+)
 fig.show()
+
+# %%
+# Michelogram for span-1 (no max ring diff)
+
+fig_m0, ax_m0 = plt.subplots(1, 1, figsize=(6, 6), tight_layout=True)
+lor_desc1.show_michelogram(ax_m0)
+fig_m0.show()
+
+# %%
+# Segment side-view diagram for span-1 (no max ring diff)
+
+fig_seg0 = lor_desc1.show_segment_lors()
+fig_seg0.tight_layout()
+fig_seg0.show()
+
+# %%
+# Span-5 sinogram without max ring difference limitation
+# -------------------------------------------------------
+#
+# :class:`.RegularPolygonPETLORDescriptor` supports axial compression via the ``span``
+# parameter.  With ``span=5`` ring pairs whose ring difference falls in the same segment
+# and share the same axial midpoint are merged into a single sinogram plane.
+# Setting ``max_ring_difference=None`` (the default) includes all ring pairs.
+
+span = 5
+
+lor_desc_s7 = ppl.RegularPolygonPETLORDescriptor(
+    scanner,
+    radial_trim=10,
+    span=span,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+)
+
+print(lor_desc_s7)
+print(f"sinogram shape: {lor_desc_s7.spatial_sinogram_shape}")
+print(f"num planes: {lor_desc_s7.num_planes}  (span={span}, no max ring diff)")
+
+# %%
+# Michelogram for span-5 (no max ring diff)
+
+fig_m1, ax_m1 = plt.subplots(1, 1, figsize=(6, 6), tight_layout=True)
+lor_desc_s7.show_michelogram(ax_m1)
+fig_m1.show()
+
+# %%
+# Segment side-view diagram for span-5 (no max ring diff)
+
+fig_seg1 = lor_desc_s7.show_segment_lors()
+fig_seg1.tight_layout()
+fig_seg1.show()
+
+# %%
+# 3D visualisation of two planes – span-5 (no max ring diff)
+
+_p0_s7 = _central_plane_seg0(lor_desc_s7)
+_ph_s7 = _last_plane_highest_seg(lor_desc_s7)
+
+fig_3d1 = plt.figure(figsize=(16, 8), tight_layout=True)
+ax3d1a = fig_3d1.add_subplot(121, projection="3d")
+ax3d1b = fig_3d1.add_subplot(122, projection="3d")
+scanner.show_lor_endpoints(ax3d1a)
+lor_desc_s7.show_views(
+    ax3d1a,
+    views=xp.asarray([0], device=dev),
+    planes=xp.asarray([_p0_s7], device=dev),
+    lw=0.5,
+    color="k",
+)
+ax3d1a.set_title(f"span {span} | view 0, central plane of seg 0 (plane {_p0_s7})")
+scanner.show_lor_endpoints(ax3d1b)
+lor_desc_s7.show_views(
+    ax3d1b,
+    views=xp.asarray([lor_desc_s7.num_views // 2], device=dev),
+    planes=xp.asarray([_ph_s7], device=dev),
+    lw=0.5,
+    color="k",
+)
+ax3d1b.set_title(
+    f"span {span} | view {lor_desc_s7.num_views // 2}, last plane of highest seg (plane {_ph_s7})"
+)
+fig_3d1.show()
+
+# %%
+# Span-5 sinogram with max ring difference = 7
+# ---------------------------------------------
+#
+# By additionally setting ``max_ring_difference=7`` we restrict the included
+# ring pairs, reducing the number of segments and sinogram planes compared to
+# the unrestricted span-5 case above.
+
+max_ring_difference = 7
+
+lor_desc_s7_mrd9 = ppl.RegularPolygonPETLORDescriptor(
+    scanner,
+    radial_trim=10,
+    span=span,
+    max_ring_difference=max_ring_difference,
+    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+)
+
+print(lor_desc_s7_mrd9)
+print(f"sinogram shape: {lor_desc_s7_mrd9.spatial_sinogram_shape}")
+print(
+    f"num planes: {lor_desc_s7_mrd9.num_planes}  (span={span}, max ring diff={max_ring_difference})"
+)
+
+# %%
+# Michelogram for span-5 with max ring diff = 7
+
+fig_m2, ax_m2 = plt.subplots(1, 1, figsize=(6, 6), tight_layout=True)
+lor_desc_s7_mrd9.show_michelogram(ax_m2)
+fig_m2.show()
+
+# %%
+# Segment side-view diagram for span-5 with max ring diff = 7
+
+fig_seg2 = lor_desc_s7_mrd9.show_segment_lors()
+fig_seg2.tight_layout()
+fig_seg2.show()
+
+# %%
+# 3D visualisation of two planes – span-5, max ring diff = 7
+
+_p0_s7_mrd9 = _central_plane_seg0(lor_desc_s7_mrd9)
+_ph_s7_mrd9 = _last_plane_highest_seg(lor_desc_s7_mrd9)
+
+fig_3d2 = plt.figure(figsize=(16, 8), tight_layout=True)
+ax3d2a = fig_3d2.add_subplot(121, projection="3d")
+ax3d2b = fig_3d2.add_subplot(122, projection="3d")
+scanner.show_lor_endpoints(ax3d2a)
+lor_desc_s7_mrd9.show_views(
+    ax3d2a,
+    views=xp.asarray([0], device=dev),
+    planes=xp.asarray([_p0_s7_mrd9], device=dev),
+    lw=0.5,
+    color="k",
+)
+ax3d2a.set_title(
+    f"span {span} mrd {max_ring_difference} | view 0, central plane of seg 0 (plane {_p0_s7_mrd9})"
+)
+scanner.show_lor_endpoints(ax3d2b)
+lor_desc_s7_mrd9.show_views(
+    ax3d2b,
+    views=xp.asarray([lor_desc_s7_mrd9.num_views // 2], device=dev),
+    planes=xp.asarray([_ph_s7_mrd9], device=dev),
+    lw=0.5,
+    color="k",
+)
+ax3d2b.set_title(
+    f"span {span} mrd {max_ring_difference} | view {lor_desc_s7_mrd9.num_views // 2}, last plane of highest seg (plane {_ph_s7_mrd9})"
+)
+fig_3d2.show()

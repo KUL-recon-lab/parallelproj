@@ -483,10 +483,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             self._num_planes, dtype=self.xp.int32, device=self.dev
         )
         self._plane_segment = self.xp.astype(
-            self.xp.abs(
-                self.xp.astype(self._end_plane_index, self.xp.int32)
-                - self.xp.astype(self._start_plane_index, self.xp.int32)
-            ),
+            self.xp.astype(self._end_plane_index, self.xp.int32)
+            - self.xp.astype(self._start_plane_index, self.xp.int32),
             self.xp.int32,
         )
 
@@ -977,8 +975,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                 n_compressed = int((seg_arr_np == seg_val).sum())
                 n_uncompressed = len(uncompressed[seg_val])
                 ax.set_title(
-                    f"segment {seg_label}\n"
-                    f"{n_compressed} comp. / {n_uncompressed} uncomp. planes",
+                    f"seg {seg_label}  {n_compressed} / {n_uncompressed}",
                     fontsize="small",
                 )
                 ax.set_xlim(x_L - 2 * ring_r, x_R + 2 * ring_r)
