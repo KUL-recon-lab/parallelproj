@@ -28,24 +28,29 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 .. hint::
   **For bug reports or feature requests, please open a github issue** `here <https://github.com/gschramm/parallelproj/issues>`_.
 
+Content
+-------
 
 .. toctree::
+    :maxdepth: 1
+    :titlesonly:
     :caption: Getting started
-    :maxdepth: 1
 
-    installation
-    auto_examples/index
-
-All examples can be run interactively without installation on `mybinder.org`:
-
-.. image:: https://mybinder.org/badge_logo.svg
-  :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
+    Installation <installation>
+    Examples <auto_examples/index>
 
 .. toctree::
-    :caption: Python API
-    :maxdepth: 1
+    :maxdepth: 2
+    :caption: API
 
-    python_api
+    PET scanner geometries <api_pet_scanners>
+    PET LOR / sinogram descriptors <api_pet_lors>
+    PET TOF parameters <api_tof>
+    PET projectors <api_projectors>
+    Linear operators <api_operators>
+
+References
+----------
 
 .. rubric:: References
 .. bibliography::
