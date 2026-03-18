@@ -68,6 +68,7 @@ lor_desc = ppl.RegularPolygonPETLORDescriptor(
     radial_trim=10,
     max_ring_difference=1,
     sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    span=1,
 )
 
 # %%

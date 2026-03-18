@@ -44,7 +44,7 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # %%
 # setup a small regular polygon PET scanner with 5 rings (polygons)
 
-num_rings = 5
+num_rings = 11
 scanner = pps.RegularPolygonPETScannerGeometry(
     xp,
     dev,
@@ -52,7 +52,7 @@ scanner = pps.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=4,
     lor_spacing=8.0,
-    ring_positions=xp.linspace(-8, 8, num_rings, device=dev),
+    ring_positions=2 * num_rings * xp.linspace(-1, 1, num_rings, device=dev),
     symmetry_axis=1,
 )
 
@@ -72,7 +72,6 @@ scanner = pps.RegularPolygonPETScannerGeometry(
 lor_desc1 = ppl.RegularPolygonPETLORDescriptor(
     scanner,
     radial_trim=10,
-    max_ring_difference=2,
     sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
@@ -178,54 +177,3 @@ lor_desc1.show_views(
 )
 ax2.set_title(f"view {lor_desc1.num_views // 2}, plane {lor_desc1.num_planes - 1}")
 fig.show()
-
-# %%
-# Defining sinograms in open PET scanner geometries
-# -------------------------------------------------
-#
-# :class:`.RegularPolygonPETLORDescriptor` can also be used with
-# "open" PET scanner geometries. Note, however, that the definition
-# of "views" is not trivial due to the presence of "missing" sides (gaps).
-# The view definition still uses the "zig-zag" sampling which leads to
-# unconvential (very non-parallel) views in the sinogram as shown below.
-
-open_scanner = pps.RegularPolygonPETScannerGeometry(
-    xp,
-    dev,
-    radius=65.0,
-    num_sides=6,
-    num_lor_endpoints_per_side=4,
-    lor_spacing=8.0,
-    ring_positions=xp.linspace(-8, 8, num_rings, device=dev),
-    symmetry_axis=1,
-    phis=(2 * xp.pi / 12) * xp.asarray([-1, 0, 1, 5, 6, 7], device=dev),
-)
-
-open_lor_desc = ppl.RegularPolygonPETLORDescriptor(
-    open_scanner,
-    radial_trim=1,
-    sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
-)
-
-fig2 = plt.figure(figsize=(16, 8), tight_layout=True)
-ax2a = fig2.add_subplot(121, projection="3d")
-ax2b = fig2.add_subplot(122, projection="3d")
-open_scanner.show_lor_endpoints(ax2a)
-open_lor_desc.show_views(
-    ax2a,
-    views=xp.asarray([0], device=dev),
-    planes=xp.asarray([num_rings // 2], device=dev),
-    lw=0.5,
-    color="k",
-)
-ax2a.set_title(f"view 0, plane {num_rings // 2}")
-open_scanner.show_lor_endpoints(ax2b)
-open_lor_desc.show_views(
-    ax2b,
-    views=xp.asarray([open_lor_desc.num_views // 2], device=dev),
-    planes=xp.asarray([num_rings // 2], device=dev),
-    lw=0.5,
-    color="k",
-)
-ax2b.set_title(f"view {open_lor_desc.num_views // 2}, plane {num_rings // 2}")
-fig2.show()
