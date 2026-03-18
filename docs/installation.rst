@@ -76,13 +76,13 @@ Replace ``cuda129`` below with the CUDA version matching your system (e.g. ``cud
 
         .. code-block:: console
 
-           $ mamba create -n parallelproj-cuda129 -c conda-forge parallelproj "libparallelproj=*=cuda129*"
+           $ mamba create -n parallelproj-cuda129 -c conda-forge cuda-version=12.9 parallelproj
 
     .. tab-item:: conda
 
         .. code-block:: console
 
-           $ conda create -n parallelproj-cuda129 -c conda-forge parallelproj "libparallelproj=*=cuda129*"
+           $ conda create -n parallelproj-cuda129 -c conda-forge cuda-version=13.0 parallelproj
 
 Force a CPU-only build
 ^^^^^^^^^^^^^^^^^^^^^^
