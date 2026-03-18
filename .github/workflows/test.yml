@@ -38,6 +38,7 @@ jobs:
             scipy
             matplotlib
             array-api-compat
+            array-api-strict
             pytorch
             pytest
             pytest-cov
