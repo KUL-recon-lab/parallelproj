@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        #os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
+        python-version: ["3.12", "3.x"]
+        include:
+          - python-version: "3.12"
+            python-spec: "python=3.12"
+          - python-version: "3.x"
+            python-spec: "python=3"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: test-env
+          create-args: >-
+            ${{ matrix.python-spec }}
+            parallelproj-core
+            numpy
+            scipy
+            array-api-compat
+            pytest
+            pytest-cov
+          condarc: |
+            channels:
+              - conda-forge
+
+      - name: Install parallelproj
+        shell: bash -el {0}
+        run: pip install --no-deps .
+
+      - name: Print parallelproj version
+        shell: bash -el {0}
+        run: python -c "import parallelproj; print(parallelproj.__version__)"
+
+      - name: Run tests
+        shell: bash -el {0}
+        run: pytest --cov=parallelproj --cov-report=term-missing -v tests/
