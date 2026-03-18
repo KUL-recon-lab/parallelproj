@@ -105,8 +105,6 @@ class PETScannerModule(abc.ABC):
         Array
             a 3 x len(inds) float array with the world coordinates of the LOR endpoints
         """
-        if inds is None:
-            inds = self.lor_endpoint_numbers
         raise NotImplementedError
 
     def get_lor_endpoints(self, inds: Array | None = None) -> Array:
