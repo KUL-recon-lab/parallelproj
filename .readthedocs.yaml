@@ -4,14 +4,12 @@ build:
   os: "ubuntu-lts-latest"
   tools:
     python: "miniconda-latest"
+  jobs:
+    post_install:
+      - pip install --no-deps .
 
 conda:
   environment: docs/environment.yml
-# This part is necessary otherwise the project is not built
-python:
-  install:
-    - method: pip
-      path: .
 
 sphinx:
   fail_on_warning: true
