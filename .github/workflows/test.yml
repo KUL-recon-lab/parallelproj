@@ -35,6 +35,7 @@ jobs:
             numpy
             scipy
             array-api-compat
+            pytorch
             pytest
             pytest-cov
           condarc: |
