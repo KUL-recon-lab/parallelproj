@@ -244,6 +244,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         radial_trim: int = 3,
         max_ring_difference: int | None = None,
         sinogram_order: SinogramSpatialAxisOrder = SinogramSpatialAxisOrder.RVP,
+        span: int = 1,
     ) -> None:
         """
 
@@ -258,12 +259,21 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             all ring differences are included
         sinogram_order : SinogramSpatialAxisOrder, optional
             the order of the sinogram axes, by default SinogramSpatialAxisOrder.RVP
+        span : int, optional
+            axial compression factor (must be odd), by default 1 (no compression).
+            With span > 1, ring pairs whose ring difference falls in the same
+            segment and share the same axial midpoint are merged into a single sinogram plane
+            whose LOR geometry is the average of the constituent ring-pair geometries.
         """
+
+        if span % 2 == 0:
+            raise ValueError("span must be odd")
 
         super().__init__(scanner)
 
         self._scanner = scanner
         self._radial_trim = radial_trim
+        self._span = span
 
         if max_ring_difference is None:
             self._max_ring_difference = scanner.num_rings - 1
@@ -304,14 +314,47 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self._num_views
 
     @property
+    def span(self) -> int:
+        """axial compression factor (1 = no compression)"""
+        return self._span
+
+    @property
     def start_plane_index(self) -> Array:
-        """start plane for all planes"""
+        """start ring index for all planes (only defined for span=1)"""
+        if self._span > 1:
+            raise AttributeError(
+                "start_plane_index is not defined for span > 1. Use start_plane_z instead."
+            )
         return self._start_plane_index
 
     @property
     def end_plane_index(self) -> Array:
-        """end plane for all planes"""
+        """end ring index for all planes (only defined for span=1)"""
+        if self._span > 1:
+            raise AttributeError(
+                "end_plane_index is not defined for span > 1. Use end_plane_z instead."
+            )
         return self._end_plane_index
+
+    @property
+    def start_plane_z(self) -> Array:
+        """start z-coordinate for all planes (averaged over constituent ring pairs for span > 1)"""
+        return self._start_plane_z
+
+    @property
+    def end_plane_z(self) -> Array:
+        """end z-coordinate for all planes (averaged over constituent ring pairs for span > 1)"""
+        return self._end_plane_z
+
+    @property
+    def plane_multiplicity(self) -> Array:
+        """number of ring pairs contributing to each plane (always 1 for span=1)"""
+        return self._plane_multiplicity
+
+    @property
+    def plane_segment(self) -> Array:
+        """segment number for each plane (equals |rd| for span=1)"""
+        return self._plane_segment
 
     @property
     def start_in_ring_index(self) -> Array:
@@ -367,8 +410,36 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             + ")"
         )
 
+    def _ring_diff_to_segment(self, rd: int) -> int:
+        """Return the signed segment number for a given ring difference.
+
+        Parameters
+        ----------
+        rd : int
+            Ring difference ``end_ring - start_ring``.
+
+        Returns
+        -------
+        int
+            Segment number (0 for segment 0, ±k for outer segments).
+        """
+        S = self._span
+        half_span = (S - 1) // 2
+        abs_rd = abs(rd)
+        if abs_rd <= half_span:
+            return 0
+        k = (abs_rd - half_span + S - 1) // S  # ceil division
+        return k if rd > 0 else -k
+
     def _setup_plane_indices(self) -> None:
-        """setup the start / end plane indices (similar to a Michelogram)"""
+        """dispatch to unspanned or spanned plane index setup"""
+        if self._span == 1:
+            self._setup_unspanned_plane_indices()
+        else:
+            self._setup_spanned_plane_indices()
+
+    def _setup_unspanned_plane_indices(self) -> None:
+        """setup the start / end plane indices for span=1 (similar to a Michelogram)"""
         self._start_plane_index = self.xp.arange(
             self.scanner.num_rings, dtype=self.xp.int32, device=self.dev
         )
@@ -393,6 +464,98 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             self._end_plane_index = self.xp.concat((self._end_plane_index, tmp2, tmp1))
 
         self._num_planes = self._start_plane_index.shape[0]
+
+        self._start_plane_z = self.xp.astype(
+            self.xp.take(
+                self._scanner.ring_positions,
+                self.xp.astype(self._start_plane_index, self.xp.int64),
+            ),
+            self.xp.float32,
+        )
+        self._end_plane_z = self.xp.astype(
+            self.xp.take(
+                self._scanner.ring_positions,
+                self.xp.astype(self._end_plane_index, self.xp.int64),
+            ),
+            self.xp.float32,
+        )
+        self._plane_multiplicity = self.xp.ones(
+            self._num_planes, dtype=self.xp.int32, device=self.dev
+        )
+        self._plane_segment = self.xp.astype(
+            self.xp.abs(
+                self.xp.astype(self._end_plane_index, self.xp.int32)
+                - self.xp.astype(self._start_plane_index, self.xp.int32)
+            ),
+            self.xp.int32,
+        )
+
+    def _setup_spanned_plane_indices(self) -> None:
+        """Setup spanned plane z-coordinates using axial compression.
+
+        Ring pairs (start_ring, end_ring) whose ring difference falls in the same
+        segment and share the same axial midpoint (start_ring + end_ring) are grouped
+        into one sinogram plane.  The LOR geometry of that plane is the average of the
+        constituent ring-pair z-positions.
+
+        Segment assignment for ring difference rd (span S, half_span = (S-1)//2):
+          seg = 0                              if |rd| <= half_span
+          seg = ±ceil((|rd|-half_span) / S)   otherwise  (sign follows rd)
+
+        Planes are ordered: segment 0, then +1, -1, +2, -2, … each sorted by
+        increasing axial midpoint (start_ring + end_ring).
+        """
+        import numpy as _np
+
+        R = self._scanner.num_rings
+        D = self._max_ring_difference
+
+        ring_pos = _np.asarray(
+            to_numpy_array(self._scanner.ring_positions), dtype=_np.float64
+        )
+
+        # Group (start_ring, end_ring) pairs by (segment, axial_midpoint_int)
+        # where axial_midpoint_int = start_ring + end_ring  (= 2 * midpoint, integer)
+        plane_groups: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+        for s in range(R):
+            for e in range(R):
+                rd = e - s
+                if abs(rd) > D:
+                    continue
+                seg = self._ring_diff_to_segment(rd)
+                key = (seg, s + e)
+                if key not in plane_groups:
+                    plane_groups[key] = []
+                plane_groups[key].append((s, e))
+
+        # Order: seg 0, then +1, -1, +2, -2, …; within each segment by axial midpoint
+        sorted_keys = sorted(
+            plane_groups.keys(), key=lambda k: (abs(k[0]), -k[0], k[1])
+        )
+
+        self._num_planes = len(sorted_keys)
+
+        start_z = _np.empty(self._num_planes, dtype=_np.float32)
+        end_z = _np.empty(self._num_planes, dtype=_np.float32)
+        mult = _np.empty(self._num_planes, dtype=_np.int32)
+        seg_arr = _np.empty(self._num_planes, dtype=_np.int32)
+
+        for pi, key in enumerate(sorted_keys):
+            pairs = plane_groups[key]
+            start_z[pi] = _np.mean([ring_pos[s] for s, _ in pairs])
+            end_z[pi] = _np.mean([ring_pos[e] for _, e in pairs])
+            mult[pi] = len(pairs)
+            seg_arr[pi] = key[0]
+
+        self._start_plane_z = self.xp.asarray(start_z, device=self.dev)
+        self._end_plane_z = self.xp.asarray(end_z, device=self.dev)
+        self._plane_multiplicity = self.xp.asarray(mult, device=self.dev)
+        self._plane_segment = self.xp.asarray(seg_arr, device=self.dev)
+
+        # integer ring indices are not defined for span > 1
+        self._start_plane_index = None
+        self._end_plane_index = None
 
     def _setup_view_indices(self) -> None:
         """setup the start / end view indices"""
@@ -496,12 +659,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             xstart = xstart_2d + 0
             xend = xend_2d + 0
 
-            xstart[..., self.scanner.symmetry_axis] = float(
-                self.scanner.ring_positions[self.start_plane_index[i]]
-            )
-            xend[..., self.scanner.symmetry_axis] = float(
-                self.scanner.ring_positions[self.end_plane_index[i]]
-            )
+            xstart[..., self._scanner.symmetry_axis] = float(self._start_plane_z[i])
+            xend[..., self._scanner.symmetry_axis] = float(self._end_plane_z[i])
 
             xstart_3d.append(xstart)
             xend_3d.append(xend)
@@ -544,6 +703,317 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         ls = ls.reshape((-1, 2, 3))
         lc = Line3DCollection(ls, linewidths=lw, **kwargs)
         ax.add_collection(lc)
+
+    def _draw_michelogram(self, ax, show_merge_lines: bool = True, **kwargs) -> None:
+        """Draw the Michelogram onto an existing axes.
+
+        Internal helper shared by :meth:`show_michelogram` and
+        :meth:`show_segment_lors`.
+        """
+        import numpy as _np
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+
+        R = self._scanner.num_rings
+        D = self._max_ring_difference
+
+        start_list, end_list, seg_list, z_list = [], [], [], []
+        for s in range(R):
+            for e in range(R):
+                rd = e - s
+                if abs(rd) > D:
+                    continue
+                seg = self._ring_diff_to_segment(rd)
+                start_list.append(s)
+                end_list.append(e)
+                seg_list.append(seg)
+                z_list.append(s + e)
+
+        start_arr = _np.array(start_list, dtype=_np.float32)
+        end_arr = _np.array(end_list, dtype=_np.float32)
+        seg_arr = _np.array(seg_list, dtype=_np.int32)
+        z_arr = _np.array(z_list, dtype=_np.int32)
+
+        abs_seg_arr = _np.abs(seg_arr)
+        n_colors = int(abs_seg_arr.max()) + 1
+
+        base_cmap = plt.get_cmap("tab10" if n_colors <= 10 else "tab20")
+        cmap = ListedColormap([base_cmap(i) for i in range(n_colors)])
+        norm = BoundaryNorm(_np.arange(-0.5, n_colors, 1.0), cmap.N)
+
+        # build plane_groups in the same order used by the projector
+        plane_groups: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for s in range(R):
+            for e in range(R):
+                rd = e - s
+                if abs(rd) > D:
+                    continue
+                seg = self._ring_diff_to_segment(rd)
+                key = (seg, s + e)
+                if key not in plane_groups:
+                    plane_groups[key] = []
+                plane_groups[key].append((s, e))
+        sorted_keys = sorted(
+            plane_groups.keys(), key=lambda k: (abs(k[0]), -k[0], k[1])
+        )
+
+        kwargs.setdefault("s", 20)
+        ax.scatter(
+            start_arr,
+            end_arr,
+            c=abs_seg_arr.astype(_np.float32),
+            cmap=cmap,
+            norm=norm,
+            **kwargs,
+        )
+
+        if show_merge_lines and self._span > 1:
+            for seg, z_int in set(zip(seg_list, z_list)):
+                mask = (seg_arr == seg) & (z_arr == z_int)
+                xs, ys = start_arr[mask], end_arr[mask]
+                if xs.size > 1:
+                    order = _np.argsort(xs)
+                    ax.plot(xs[order], ys[order], color="gray", lw=0.5, alpha=0.5)
+
+        # annotate each compressed plane with its plane index at the group centroid
+        for pi, key in enumerate(sorted_keys):
+            pairs = plane_groups[key]
+            cx = _np.mean([s for s, _ in pairs])
+            cy = _np.mean([e for _, e in pairs])
+            ax.text(
+                cx,
+                cy,
+                str(pi),
+                ha="center",
+                va="center",
+                fontsize=4,
+                color="black",
+                fontweight="bold",
+                zorder=10,
+            )
+
+        ax.set_xlabel("start ring")
+        ax.set_ylabel("end ring")
+        ax.set_title(
+            f"Michelogram\n(span={self._span}, max Δring={D})", fontsize="small"
+        )
+        ax.set_aspect("equal")
+        ax.set_xlim(-0.5, R - 0.5)
+        ax.set_ylim(-0.5, R - 0.5)
+
+    def show_michelogram(
+        self,
+        ax,
+        show_merge_lines: bool = True,
+        **kwargs,
+    ):
+        """Visualize the Michelogram with ring pairs colored by segment number.
+
+        Each point represents a valid ring pair (start_ring, end_ring).  Points are
+        colored by their segment number.  For span > 1, ring pairs that share the same
+        segment *and* the same axial midpoint (start_ring + end_ring) are merged into a
+        single sinogram plane; ``show_merge_lines=True`` draws short lines connecting
+        those merged ring pairs so the compression structure is visible.
+
+        Parameters
+        ----------
+        ax : plt.Axes
+            2D matplotlib axes (not 3D).
+        show_merge_lines : bool, optional
+            draw lines connecting ring pairs that are merged into the same sinogram
+            plane, by default True.  Only has a visible effect for span > 1.
+        **kwargs
+            forwarded to ``ax.scatter`` (e.g. ``s=4``, ``cmap="RdBu_r"``).
+        """
+        self._draw_michelogram(ax, show_merge_lines=show_merge_lines, **kwargs)
+
+    def show_segment_lors(
+        self,
+        axs=None,
+        uncompressed_lor_kwargs: dict | None = None,
+        compressed_lor_kwargs: dict | None = None,
+    ):
+        """Side-view LOR diagram per segment with the Michelogram inset.
+
+        Subplots are arranged in a 2-row grid (when negative segments exist):
+
+        * **columns** – indexed by ``abs(segment)``: 0, 1, 2, …
+        * **row 0** – non-negative segments (0, +1, +2, …)
+        * **row 1, col 0** – Michelogram
+        * **row 1, col ≥ 1** – negative segments (−1, −2, …)
+
+        Each LOR subplot shows:
+
+        * **solid black lines** – every individual ring-pair LOR in the segment
+          (the "uncompressed" planes);
+        * **dashed coloured lines** – the compressed (axially-averaged) LOR geometry
+          (one line per spanned plane).
+
+        Parameters
+        ----------
+        axs : 2-D array-like of Axes, optional
+            Pre-existing axes of shape ``(n_rows, n_cols)``.  If None a new
+            figure is created automatically.
+        uncompressed_lor_kwargs : dict, optional
+            Style overrides for the uncompressed LOR lines.
+        compressed_lor_kwargs : dict, optional
+            Style overrides for the compressed LOR lines.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        import numpy as _np
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Circle
+
+        R = self._scanner.num_rings
+        D = self._max_ring_difference
+        ring_pos = _np.asarray(
+            to_numpy_array(self._scanner.ring_positions), dtype=_np.float64
+        )
+
+        seg_arr_np = _np.asarray(to_numpy_array(self._plane_segment), dtype=_np.int32)
+        all_segs = sorted(set(int(v) for v in seg_arr_np))
+        abs_segs = sorted(set(abs(s) for s in all_segs))  # column indices
+        n_cols = len(abs_segs)
+        neg_segs = [s for s in all_segs if s < 0]
+        n_rows = 2 if neg_segs else 1
+
+        unc_kw: dict = {"color": "black", "lw": 1.0, "alpha": 0.5}
+        if uncompressed_lor_kwargs:
+            unc_kw.update(uncompressed_lor_kwargs)
+        com_kw: dict = {"lw": 1.5, "alpha": 0.9, "linestyle": "--"}
+        if compressed_lor_kwargs:
+            com_kw.update(compressed_lor_kwargs)
+
+        created_fig = axs is None
+        if created_fig:
+            fig, raw = plt.subplots(
+                n_rows,
+                n_cols,
+                figsize=(3 * n_cols, 4 * n_rows),
+                squeeze=False,
+            )
+            _axs = raw  # shape (n_rows, n_cols)
+        else:
+            import numpy as _np2
+
+            _axs = _np2.asarray(axs)
+            fig = _axs.flat[0].get_figure()
+
+        # --- coordinate normalisation -----------------------------------
+        z_min, z_max = ring_pos.min(), ring_pos.max()
+        z_span = max(z_max - z_min, 1.0)
+        margin = 0.12 * z_span
+        x_L, x_R = -z_span / 2.0, z_span / 2.0
+        ring_r = 0.35 * z_span / max(R, 1)
+
+        # --- build uncompressed ring-pair lookup (keyed by signed segment) ---
+        uncompressed: dict[int, list[tuple[int, int]]] = {s: [] for s in all_segs}
+        for s in range(R):
+            for e in range(R):
+                rd = e - s
+                if abs(rd) > D:
+                    continue
+                seg = self._ring_diff_to_segment(rd)
+                if seg in uncompressed:
+                    uncompressed[seg].append((s, e))
+
+        start_z_np = _np.asarray(to_numpy_array(self._start_plane_z))
+        end_z_np = _np.asarray(to_numpy_array(self._end_plane_z))
+
+        n_colors = len(abs_segs)
+        base_cmap = plt.get_cmap("tab10" if n_colors <= 10 else "tab20")
+
+        for col_idx, abs_seg in enumerate(abs_segs):
+            color = base_cmap(col_idx)
+
+            for row_idx in range(n_rows):
+                ax = _axs[row_idx, col_idx]
+
+                # [1, 0]: michelogram inset instead of the non-existent segment -0
+                if row_idx == 1 and abs_seg == 0:
+                    self._draw_michelogram(ax)
+                    continue
+
+                seg_val = abs_seg if row_idx == 0 else -abs_seg
+
+                if seg_val not in all_segs:
+                    ax.axis("off")
+                    continue
+
+                # (a) uncompressed ring-pair LORs
+                for s, e in uncompressed[seg_val]:
+                    ax.plot([x_L, x_R], [ring_pos[s], ring_pos[e]], **unc_kw)
+
+                # (b) compressed (averaged) LORs
+                mask = seg_arr_np == seg_val
+                kw = dict(com_kw)
+                if "color" not in kw:
+                    kw["color"] = color
+                for sz, ez in zip(start_z_np[mask], end_z_np[mask]):
+                    ax.plot([x_L, x_R], [float(sz), float(ez)], **kw)
+
+                # detector rings: one Circle per ring at each detector side
+                for xpos in [x_L, x_R]:
+                    for z in ring_pos:
+                        ax.add_patch(
+                            Circle(
+                                (xpos, float(z)),
+                                ring_r,
+                                edgecolor="black",
+                                facecolor="lightgray",
+                                lw=0.6,
+                                zorder=5,
+                            )
+                        )
+
+                if seg_val > 0:
+                    seg_label = f"+{abs_seg}"
+                elif seg_val < 0:
+                    seg_label = f"−{abs_seg}"
+                else:
+                    seg_label = "0"
+                n_compressed = int((seg_arr_np == seg_val).sum())
+                n_uncompressed = len(uncompressed[seg_val])
+                ax.set_title(
+                    f"segment {seg_label}\n"
+                    f"{n_compressed} comp. / {n_uncompressed} uncomp. planes",
+                    fontsize="small",
+                )
+                ax.set_xlim(x_L - 2 * ring_r, x_R + 2 * ring_r)
+                ax.set_ylim(z_min - margin * 2.0, z_max + margin * 2.0)
+                ax.set_aspect("equal")
+                ax.axis("off")
+
+                # legend on top-left subplot only
+                if row_idx == 0 and col_idx == 0:
+                    ax.legend(
+                        handles=[
+                            Line2D(
+                                [0],
+                                [0],
+                                color="black",
+                                lw=1.0,
+                                alpha=0.5,
+                                label="uncompressed",
+                            ),
+                            Line2D(
+                                [0],
+                                [0],
+                                color="black",
+                                lw=1.5,
+                                linestyle="--",
+                                label="compressed",
+                            ),
+                        ],
+                        loc="upper right",
+                        fontsize="x-small",
+                    )
+
+        if created_fig:
+            fig.tight_layout()
+        return fig
 
     def get_distributed_views_and_slices(
         self, num_subsets: int, num_dim: int
