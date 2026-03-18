@@ -1,3 +1,5 @@
+:tocdepth: 2
+
 PET LOR / sinogram descriptors ``parallelproj.pet_lors``
 --------------------------------------------------------
 

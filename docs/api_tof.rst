@@ -1,3 +1,5 @@
+:tocdepth: 2
+
 PET TOF parameters ``parallelproj.tof``
 ---------------------------------------
 
