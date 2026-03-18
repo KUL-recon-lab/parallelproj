@@ -1,16 +1,15 @@
-name: readthedocs
+name: readthedocs-pp
 channels:
   - conda-forge
 dependencies:
-  - python
-  - sphinx>=7.0
-  - sphinx-rtd-theme
+  - pip
+  - parallelproj-core
+  - libparallelproj=2.*=cpu*
+  - sphinx
   - sphinx-gallery
   - sphinx-design
-  - sphinx-copybutton
+  - furo
   - sphinxcontrib-bibtex
   - matplotlib
   - array-api-compat
   - pytorch
-  - scipy
-  - cmake
