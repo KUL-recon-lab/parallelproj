@@ -57,6 +57,9 @@ html_logo = "_static/parallelproj-logo.png"
 html_theme_options = {
     "navigation_with_keys": True,
     "top_of_page_buttons": ["view", "edit"],
+    "source_repository": "https://github.com/gschramm/parallelproj",
+    "source_branch": "master",
+    "source_directory": "docs/",
 }
 
 # -- napoleon options --------------------------------------------------------

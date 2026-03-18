@@ -6,8 +6,6 @@ that are `python array API <https://data-apis.org/array-api/latest/>`_
 compatible meaning that they can be used with a variety of python
 array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 
-**github repository** `<https://github.com/gschramm/parallelproj>`_
-
 .. note:: 
   **Features of parallelproj**
 
