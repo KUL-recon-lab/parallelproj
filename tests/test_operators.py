@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import importlib
 import pytest
 import math
+import numpy.random as nprnd
 import parallelproj.operators as ppo
 import array_api_compat
 import array_api_compat.numpy as np
 
 from types import ModuleType
 from math import prod
+from unittest.mock import patch
 
 from .config import pytestmark
 
@@ -322,3 +325,73 @@ def test_gradient_projection(xp: ModuleType, dev: str):
     with pytest.raises(ValueError):
         gc = xp.asarray([[[1j, 0, 1]], [[0, 1, 1]]], device=dev)
         A = ppo.GradientFieldProjectionOperator(gc)
+
+
+def test_abstract_raises(xp: ModuleType, dev: str):
+    """Covers raise NotImplementedError in abstract method bodies (lines 24, 30, 46, 51)."""
+
+    class _Op(ppo.LinearOperator):
+        @property
+        def in_shape(self):
+            return super().in_shape
+
+        @property
+        def out_shape(self):
+            return super().out_shape
+
+        def _apply(self, x):
+            return super()._apply(x)
+
+        def _adjoint(self, y):
+            return super()._adjoint(y)
+
+    op = _Op()
+    with pytest.raises(NotImplementedError):
+        _ = op.in_shape
+    with pytest.raises(NotImplementedError):
+        _ = op.out_shape
+    with pytest.raises(NotImplementedError):
+        op._apply(None)
+    with pytest.raises(NotImplementedError):
+        op._adjoint(None)
+
+
+def test_adjointness_verbose(xp: ModuleType, dev: str):
+    """Covers the verbose print in adjointness_test (line 153)."""
+    A = ppo.MatrixOperator(xp.asarray([[1.0, 2.0], [-3.0, 2.0]], device=dev))
+    assert A.adjointness_test(xp, dev, verbose=True)
+
+
+def test_norm_verbose(xp: ModuleType, dev: str):
+    """Covers the verbose print in norm (line 204)."""
+    A = ppo.MatrixOperator(xp.asarray([[1.0, 2.0], [-3.0, 2.0]], device=dev))
+    A.norm(xp, dev, verbose=True, num_iter=2)
+
+
+def test_gaussian_array_api_strict(xp: ModuleType, dev: str):
+    """Covers the array_api_strict branch in GaussianFilterOperator._apply (line 502)."""
+    if importlib.util.find_spec("array_api_strict") is None:
+        pytest.skip("array_api_strict not available")
+    import array_api_strict as xp_strict
+
+    op = ppo.GaussianFilterOperator((8, 8), sigma=1.0)
+    x = xp_strict.asarray(nprnd.rand(8, 8))
+    y = op._apply(x)
+    assert y.shape == (8, 8)
+
+
+def test_gaussian_unsupported_type(xp: ModuleType, dev: str):
+    """Covers the raise TypeError fallback in GaussianFilterOperator._apply (line 543)."""
+    import numpy as _np
+
+    op = ppo.GaussianFilterOperator((4,), sigma=1.0)
+    x = _np.array([1.0, 2.0, 3.0, 4.0])
+
+    with (
+        patch("array_api_compat.is_numpy_array", return_value=False),
+        patch("array_api_compat.is_array_api_strict_namespace", return_value=False),
+        patch("array_api_compat.is_cupy_array", return_value=False),
+        patch("array_api_compat.is_torch_array", return_value=False),
+    ):
+        with pytest.raises(TypeError, match="Unsupported input type"):
+            op._apply(x)

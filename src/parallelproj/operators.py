@@ -201,7 +201,7 @@ class LinearOperator(abc.ABC):
             x /= float(norm_squared)
 
             if verbose:
-                print(f"{(i+1):03} {xp.sqrt(norm_squared):.2E}")
+                print(f"{(i+1):03} {float(xp.sqrt(norm_squared)):.2E}")
 
         return float(xp.sqrt(norm_squared))
 
