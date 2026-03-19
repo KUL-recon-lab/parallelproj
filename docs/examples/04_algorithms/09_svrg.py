@@ -2,10 +2,10 @@
 TOF OSEM with projection data
 =============================
 
-This example demonstrates the use of the SVRG algorithm to minimize the negative Poisson log-likelihood function + relative difference prior.
+This example demonstrates the use of the SVRG algorithm to minimize the negative Poisson log-likelihood function
 
 .. math::
-    f(x) = \\sum_{i=1}^m \\bar{y}_i (x) - y_i \\log(\\bar{y}_i (x)) + \\beta R(x)
+    f(x) = \\sum_{i=1}^m \\bar{y}_i (x) - y_i \\log(\\bar{y}_i (x))
 
 subject to
 
@@ -79,8 +79,8 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
-    num_sides=12,
-    num_lor_endpoints_per_side=15,
+    num_sides=16,
+    num_lor_endpoints_per_side=12,
     lor_spacing=2.3,
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
     symmetry_axis=2,
@@ -191,7 +191,7 @@ y = xp.asarray(
 # a subset of views. The slices can be used to extract the corresponding subsets
 # from full data or corrections sinograms.
 
-num_subsets = 10
+num_subsets = 24
 
 subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
@@ -269,7 +269,7 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 
 class DataFidelity(ABC):
     @abstractmethod
-    def __call__(self, x: Array) -> Array: ...
+    def __call__(self, x: Array) -> float: ...
 
     @abstractmethod
     def gradient(self, x: Array) -> Array: ...
@@ -284,9 +284,9 @@ class NegPoissonLogL(DataFidelity):
     ):
         self._data, self._op, self._s = data, op, s
 
-    def __call__(self, x: Array) -> Array:
+    def __call__(self, x: Array) -> float:
         pred = self._op(x) + self._s
-        return xp.sum(pred - self._data * xp.log(pred))
+        return float(xp.sum(pred - self._data * xp.log(pred)))
 
     def gradient(self, x: Array) -> Array:
         pred = self._op(x) + self._s
@@ -294,7 +294,7 @@ class NegPoissonLogL(DataFidelity):
 
     def call_and_gradient(self, x: Array) -> tuple[Array, Array]:
         pred = self._op(x) + self._s
-        value = xp.sum(pred - self._data * xp.log(pred))
+        value = float(xp.sum(pred - self._data * xp.log(pred)))
         grad = self._op.adjoint(1 - self._data / pred)
         return value, grad
 
@@ -319,27 +319,36 @@ def em_update(x_cur: Array, data_fidelity: DataFidelity, adjoint_ones: Array) ->
 # The "sensitivity" images are also calculated separately for each subset.
 
 # number of OSEM iterations
-num_iter = 20 // len(pet_subset_linop_seq)
+num_epochs = 200 // len(pet_subset_linop_seq)
 
 # initialize x
 x_osem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 
-# calculate A_k^H 1 for all subsets k
-subset_adjoint_ones = [
-    x.adjoint(xp.ones(x.out_shape, dtype=xp.float32, device=dev))
-    for x in pet_subset_linop_seq
-]
+# calculate A_k^H 1 for all subsets k, stored as (num_subsets, *in_shape)
+subset_adjoint_ones = xp.zeros(
+    (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
+)
+for k, op in enumerate(pet_subset_linop_seq):
+    subset_adjoint_ones[k] = op.adjoint(
+        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
+    )
 
 subset_data_fidelities = [
     NegPoissonLogL(y[sl], pet_subset_linop_seq[k], contamination[sl])
     for k, sl in enumerate(subset_slices)
 ]
 
+full_data_fidelity = NegPoissonLogL(y, pet_lin_op, contamination)
+
+df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
+
 # OSEM iterations
-for i in range(num_iter):
+for i in range(num_epochs):
     for k in range(len(subset_slices)):
-        print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_iter:03}", end="\r")
+        print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_epochs:03}", end="\r")
         x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k])
+
+    df_osem[i] = full_data_fidelity(x_osem)
 
 # %%
 # Run the SVRG iterations
@@ -356,7 +365,7 @@ for i in range(num_iter):
 # where :math:`\tilde{g}_k` are the stored subset gradients at the anchor point.
 
 
-def svrg_epoch_init(
+def svrg_calc_snapshot_gradients(
     x_cur: Array,
     subset_data_fidelities: Sequence[DataFidelity],
 ) -> tuple[Array, Array]:
@@ -384,22 +393,37 @@ def svrg_update(
     stored_subset_gradients: Array,
     full_gradient: Array,
     precond: Array,
+    step_size: float = 2.0,
 ) -> Array:
     """Single SVRG subset update with variance-reduced gradient."""
     m = len(subset_data_fidelities)
     grad_k = subset_data_fidelities[subset_idx].gradient(x_cur)
     approx_grad = m * (grad_k - stored_subset_gradients[subset_idx]) + full_gradient
-    return xp.clip(x_cur - precond * approx_grad, 0, None)
+    return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
-num_epochs_svrg = num_iter
 x_svrg = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 
-for epoch in range(num_epochs_svrg):
-    stored_grads, full_grad = svrg_epoch_init(x_svrg, subset_data_fidelities)
+# full sensitivity image: sum of all subset adjoint ones
+adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
+
+svrg_step_size = 1.0
+df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
+
+for epoch in range(num_epochs):
+    if epoch % 2 == 0 or epoch == 1:
+        if epoch < 6:
+            svrg_precond = x_svrg / adjoint_ones
+
+        stored_grads, full_grad = svrg_calc_snapshot_gradients(
+            x_svrg, subset_data_fidelities
+        )
+
+        x_svrg = xp.clip(x_svrg - svrg_step_size * svrg_precond * full_grad, 0, None)
+
     for k in range(num_subsets):
         print(
-            f"SVRG epoch {(epoch+1):03} / {num_epochs_svrg:03}, subset {(k+1):03} / {num_subsets:03}",
+            f"SVRG epoch {(epoch+1):03} / {num_epochs:03}, subset {(k+1):03} / {num_subsets:03}",
             end="\r",
         )
         x_svrg = svrg_update(
@@ -408,5 +432,24 @@ for epoch in range(num_epochs_svrg):
             subset_data_fidelities,
             stored_grads,
             full_grad,
-            x_svrg / subset_adjoint_ones[k],
+            svrg_precond,
+            step_size=svrg_step_size,
         )
+
+    df_svrg[epoch] = full_data_fidelity(x_svrg)
+
+# %%
+# Plot the convergence of OSEM and SVRG
+# --------------------------------------
+
+epochs = np.arange(1, num_epochs + 1)
+
+fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
+ax.plot(epochs, to_numpy_array(df_osem), label="OSEM", marker="o")
+ax.plot(epochs, to_numpy_array(df_svrg), label="SVRG", marker="o")
+ax.set_ylim(min(xp.min(df_osem), xp.min(df_svrg)), df_osem[1])
+ax.legend()
+ax.grid(ls=":")
+ax.set_xlabel("Epoch")
+ax.set_ylabel("Data fidelity")
+fig.show()
