@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import parallelproj.pet_scanners as pps
 import matplotlib.pyplot as plt
 
@@ -220,3 +221,15 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
     scanner.show_lor_endpoints(ax, annotation_fontsize=4, show_linear_index=False)
     fig.show()
     plt.close(fig)
+
+
+def test_pet_scanner_module_get_raw_lor_endpoints_not_implemented(
+    xp: ModuleType, dev: str
+) -> None:
+    class MinimalModule(pps.PETScannerModule):
+        def get_raw_lor_endpoints(self, inds=None):
+            return super().get_raw_lor_endpoints(inds)
+
+    mod = MinimalModule(xp, dev, num_lor_endpoints=4)
+    with pytest.raises(NotImplementedError):
+        mod.get_raw_lor_endpoints()
