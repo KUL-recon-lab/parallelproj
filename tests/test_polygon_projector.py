@@ -55,6 +55,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     assert proj.out_shape == (lor_desc.num_rad, lor_desc.num_views, lor_desc.num_planes)
 
     # non-TOF projections
+    assert isinstance(str(proj), str)
     x_fwd = proj(x)
     y = xp.ones(x_fwd.shape, dtype=xp.float32, device=dev)
     y_back = proj.adjoint(y)
@@ -98,6 +99,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
         tof_params.num_tofbins,
     )
 
+    assert isinstance(str(proj), str)
     x_fwd_tof = proj(x)
     y_tof = xp.ones(x_fwd_tof.shape, dtype=xp.float32, device=dev)
     y_back_tof = proj.adjoint(y_tof)

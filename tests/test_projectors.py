@@ -88,6 +88,8 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     xstart = proj3d.xstart
     xend = proj3d.xend
 
+    assert proj3d.image_shape == image_shape3d
+
     assert proj3d.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
 
     # test a simple 3D projection
