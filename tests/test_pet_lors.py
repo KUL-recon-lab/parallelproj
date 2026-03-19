@@ -224,6 +224,51 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     assert xs.shape[-1] == 3
     assert xe.shape[-1] == 3
 
+    # Verify correctness of compressed plane z-coordinates for span=3.
+    # Use a 3-ring scanner with known, non-uniform ring positions z=[0,1,3].
+    #
+    # span=3 → half_span=1: rd in {0,±1} → seg 0; rd=±2 → seg ±1
+    # Planes are sorted by (|seg|, -seg, axial_midpoint = s+e):
+    #
+    # plane | (seg, mid) | ring pairs       | start_z | end_z | mult | seg
+    #   0   | (0,  0)    | (0,0)            |  0.0    |  0.0  |  1   |  0
+    #   1   | (0,  1)    | (0,1),(1,0)      |  0.5    |  0.5  |  2   |  0
+    #   2   | (0,  2)    | (1,1)            |  1.0    |  1.0  |  1   |  0
+    #   3   | (0,  3)    | (1,2),(2,1)      |  2.0    |  2.0  |  2   |  0
+    #   4   | (0,  4)    | (2,2)            |  3.0    |  3.0  |  1   |  0
+    #   5   | (+1, 2)    | (0,2)            |  0.0    |  3.0  |  1   | +1
+    #   6   | (-1, 2)    | (2,0)            |  3.0    |  0.0  |  1   | -1
+    ring_z = xp.asarray([0.0, 1.0, 3.0], device=dev)
+    scanner_z = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=12,
+        num_lor_endpoints_per_side=1,
+        lor_spacing=2.3,
+        ring_positions=ring_z,
+        symmetry_axis=2,
+    )
+    lor_desc_z = ppl.RegularPolygonPETLORDescriptor(
+        scanner_z, max_ring_difference=2, span=3
+    )
+
+    assert lor_desc_z.num_planes == 7
+
+    exp_start_z = xp.asarray(
+        [0.0, 0.5, 1.0, 2.0, 3.0, 0.0, 3.0], device=dev, dtype=xp.float32
+    )
+    exp_end_z = xp.asarray(
+        [0.0, 0.5, 1.0, 2.0, 3.0, 3.0, 0.0], device=dev, dtype=xp.float32
+    )
+    exp_mult = xp.asarray([1, 2, 1, 2, 1, 1, 1], device=dev, dtype=xp.int32)
+    exp_seg = xp.asarray([0, 0, 0, 0, 0, 1, -1], device=dev, dtype=xp.int32)
+
+    assert bool(xp.all(xp.abs(lor_desc_z.start_plane_z - exp_start_z) < 1e-5))
+    assert bool(xp.all(xp.abs(lor_desc_z.end_plane_z - exp_end_z) < 1e-5))
+    assert bool(xp.all(lor_desc_z.plane_multiplicity == exp_mult))
+    assert bool(xp.all(lor_desc_z.plane_segment == exp_seg))
+
 
 def test_show_michelogram(xp: ModuleType, dev: str) -> None:
     num_rings = 3
@@ -293,9 +338,15 @@ def test_show_segment_lors(xp: ModuleType, dev: str) -> None:
     lor_desc_patch = ppl.RegularPolygonPETLORDescriptor(
         scanner, max_ring_difference=2, span=1
     )
-    lor_desc_patch._plane_segment = xp.asarray([-1, 0, 1, 2], device=dev, dtype=xp.int32)
-    lor_desc_patch._start_plane_z = xp.asarray([0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32)
-    lor_desc_patch._end_plane_z = xp.asarray([0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32)
+    lor_desc_patch._plane_segment = xp.asarray(
+        [-1, 0, 1, 2], device=dev, dtype=xp.int32
+    )
+    lor_desc_patch._start_plane_z = xp.asarray(
+        [0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32
+    )
+    lor_desc_patch._end_plane_z = xp.asarray(
+        [0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32
+    )
     fig = lor_desc_patch.show_segment_lors()
     plt.close(fig)
 
