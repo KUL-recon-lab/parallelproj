@@ -146,6 +146,160 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
             assert subset_slices[0] == tuple(sl)
 
 
+def test_abstract_get_lor_coordinates(xp: ModuleType, dev: str) -> None:
+    """line 58: NotImplementedError in abstract base get_lor_coordinates"""
+    num_rings = 3
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)
+
+    class _ConcreteDesc(ppl.PETLORDescriptor):
+        def get_lor_coordinates(self):
+            return super().get_lor_coordinates()
+
+    desc = _ConcreteDesc(scanner)
+    with pytest.raises(NotImplementedError):
+        desc.get_lor_coordinates()
+
+
+def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
+    num_rings = 3
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)
+
+    # line 270: even span must raise
+    with pytest.raises(ValueError, match="span must be odd"):
+        ppl.RegularPolygonPETLORDescriptor(scanner, span=2)
+
+    # span=1 descriptor
+    lor_desc_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=1
+    )
+
+    # line 319: .span property
+    assert lor_desc_s1.span == 1
+
+    # lines 328, 337: start/end_plane_index happy path (span=1)
+    _ = lor_desc_s1.start_plane_index
+    _ = lor_desc_s1.end_plane_index
+
+    # lines 342, 347, 352, 357: z/multiplicity/segment properties (span=1)
+    _ = lor_desc_s1.start_plane_z
+    _ = lor_desc_s1.end_plane_z
+    _ = lor_desc_s1.plane_multiplicity
+    _ = lor_desc_s1.plane_segment
+
+    # line 401: __str__
+    s = str(lor_desc_s1)
+    assert "RegularPolygonPETLORDescriptor" in s
+
+    # span=3 descriptor (lines 439, 506-556: _setup_spanned_plane_indices)
+    lor_desc_s3 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=3
+    )
+
+    assert lor_desc_s3.span == 3
+    assert lor_desc_s3.num_planes > 0
+
+    # lines 324-328: start_plane_index raises for span > 1
+    with pytest.raises(AttributeError):
+        _ = lor_desc_s3.start_plane_index
+
+    # lines 333-337: end_plane_index raises for span > 1
+    with pytest.raises(AttributeError):
+        _ = lor_desc_s3.end_plane_index
+
+    # lines 342, 347, 352, 357: same properties accessible for span > 1
+    _ = lor_desc_s3.start_plane_z
+    _ = lor_desc_s3.end_plane_z
+    _ = lor_desc_s3.plane_multiplicity
+    _ = lor_desc_s3.plane_segment
+
+    # lines 426-432: _ring_diff_to_segment with span=3 (half_span=1)
+    assert lor_desc_s3._ring_diff_to_segment(0) == 0
+    assert lor_desc_s3._ring_diff_to_segment(1) == 0  # |rd|=1 <= half_span=1
+    assert lor_desc_s3._ring_diff_to_segment(-1) == 0
+    assert lor_desc_s3._ring_diff_to_segment(2) == 1  # ceil((2-1)/3)=1
+    assert lor_desc_s3._ring_diff_to_segment(-2) == -1
+
+    # get_lor_coordinates works end-to-end with span > 1
+    xs, xe = lor_desc_s3.get_lor_coordinates()
+    assert xs.shape[-1] == 3
+    assert xe.shape[-1] == 3
+
+
+def test_show_michelogram(xp: ModuleType, dev: str) -> None:
+    num_rings = 3
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)
+
+    # span=1: basic path, no merge lines (lines 711-799, 825)
+    lor_desc_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=1
+    )
+    fig, ax = plt.subplots()
+    lor_desc_s1.show_michelogram(ax, show_merge_lines=True)
+    plt.close(fig)
+
+    # span=3: exercises merge-line branch (line 767 condition True)
+    lor_desc_s3 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=3
+    )
+    fig, ax = plt.subplots()
+    lor_desc_s3.show_michelogram(ax, show_merge_lines=True)
+    plt.close(fig)
+
+    # show_merge_lines=False: skips the merge-line branch
+    fig, ax = plt.subplots()
+    lor_desc_s3.show_michelogram(ax, show_merge_lines=False)
+    plt.close(fig)
+
+
+def test_show_segment_lors(xp: ModuleType, dev: str) -> None:
+    import numpy as np
+
+    num_rings = 3
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)
+
+    # span=1, mrd=1: only segment 0, n_rows=1 (no negative segments)
+    lor_desc_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=1, span=1
+    )
+    fig = lor_desc_s1.show_segment_lors()
+    plt.close(fig)
+
+    # span=3, mrd=2: segments -1, 0, +1 → n_rows=2, n_cols=2 (lines 863-1013)
+    # covers: Michelogram inset (row=1, col=0), legend (row=0, col=0),
+    # compressed kwargs, uncompressed kwargs, tight_layout
+    lor_desc_s3 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=3
+    )
+    fig = lor_desc_s3.show_segment_lors()
+    plt.close(fig)
+
+    # custom kwargs (lines 881-885)
+    fig = lor_desc_s3.show_segment_lors(
+        uncompressed_lor_kwargs={"alpha": 0.3},
+        compressed_lor_kwargs={"alpha": 0.8, "color": "blue"},
+    )
+    plt.close(fig)
+
+    # pre-existing axes: covers the else branch (lines 896-900)
+    # with span=3, mrd=2 on 3 rings: abs_segs={0,1} → n_cols=2, n_rows=2
+    fig_pre, axs_pre = plt.subplots(2, 2, squeeze=False)
+    lor_desc_s3.show_segment_lors(axs=axs_pre)
+    plt.close(fig_pre)
+
+    # lines 940-941: ax.axis("off") branch when a negative segment is absent.
+    # Symmetric scanners always produce symmetric segments, so we monkeypatch
+    # _plane_segment to {-1, 0, 1, 2} — negative seg -1 exists (→ n_rows=2),
+    # but +2 has no matching -2, so the (row=1, col=2) cell hits ax.axis("off").
+    lor_desc_patch = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=1
+    )
+    lor_desc_patch._plane_segment = xp.asarray([-1, 0, 1, 2], device=dev, dtype=xp.int32)
+    lor_desc_patch._start_plane_z = xp.asarray([0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32)
+    lor_desc_patch._end_plane_z = xp.asarray([0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32)
+    fig = lor_desc_patch.show_segment_lors()
+    plt.close(fig)
+
+
 def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
 
     # grid shape of LOR endpoints forming a block module
