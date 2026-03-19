@@ -29,6 +29,7 @@ using the linear forward model
 # %%
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from copy import copy
@@ -339,3 +340,73 @@ for i in range(num_iter):
     for k in range(len(subset_slices)):
         print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_iter:03}", end="\r")
         x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k])
+
+# %%
+# Run the SVRG iterations
+# -----------------------
+#
+# Each SVRG epoch consists of two phases:
+#
+# 1. Anchor phase: compute and store all subset gradients at the current point
+# 2. Subset updates: for each subset, use the variance-reduced gradient
+#
+# .. math::
+#     g^{VR} = m \left( \nabla f_k(x) - \tilde{g}_k \right) + \sum_{k=1}^m \tilde{g}_k
+#
+# where :math:`\tilde{g}_k` are the stored subset gradients at the anchor point.
+
+
+def svrg_epoch_init(
+    x_cur: Array,
+    subset_data_fidelities: Sequence[DataFidelity],
+) -> tuple[Array, Array]:
+    """Store all subset gradients at the current anchor point and return their sum.
+
+    Returns
+    -------
+    stored_grads : Array, shape (m, *x_cur.shape)
+        Stacked subset gradients evaluated at the anchor point.
+    full_grad : Array, shape x_cur.shape
+        Sum of all subset gradients.
+    """
+    m = len(subset_data_fidelities)
+    stored_grads = xp.zeros((m,) + x_cur.shape, dtype=x_cur.dtype, device=dev)
+    for k, df in enumerate(subset_data_fidelities):
+        stored_grads[k] = df.gradient(x_cur)
+    full_grad = xp.sum(stored_grads, axis=0)
+    return stored_grads, full_grad
+
+
+def svrg_update(
+    x_cur: Array,
+    subset_idx: int,
+    subset_data_fidelities: Sequence[DataFidelity],
+    stored_subset_gradients: Array,
+    full_gradient: Array,
+    precond: Array,
+) -> Array:
+    """Single SVRG subset update with variance-reduced gradient."""
+    m = len(subset_data_fidelities)
+    grad_k = subset_data_fidelities[subset_idx].gradient(x_cur)
+    approx_grad = m * (grad_k - stored_subset_gradients[subset_idx]) + full_gradient
+    return xp.clip(x_cur - precond * approx_grad, 0, None)
+
+
+num_epochs_svrg = num_iter
+x_svrg = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+
+for epoch in range(num_epochs_svrg):
+    stored_grads, full_grad = svrg_epoch_init(x_svrg, subset_data_fidelities)
+    for k in range(num_subsets):
+        print(
+            f"SVRG epoch {(epoch+1):03} / {num_epochs_svrg:03}, subset {(k+1):03} / {num_subsets:03}",
+            end="\r",
+        )
+        x_svrg = svrg_update(
+            x_svrg,
+            k,
+            subset_data_fidelities,
+            stored_grads,
+            full_grad,
+            x_svrg / subset_adjoint_ones[k],
+        )
