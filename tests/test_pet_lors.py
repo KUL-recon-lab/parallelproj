@@ -269,6 +269,64 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     assert bool(xp.all(lor_desc_z.plane_multiplicity == exp_mult))
     assert bool(xp.all(lor_desc_z.plane_segment == exp_seg))
 
+    # Verify compressed plane z-coordinates for a 13-ring scanner, span=9, mrd=11.
+    # Use uniform ring positions z[k]=k (k=0..12) for easy hand-calculation.
+    #
+    # span=9 → half_span=4: |rd|≤4 → seg 0; 5≤|rd|≤11 → seg ±1
+    #
+    # Plane count per segment (grouped by (seg, axial_midpoint=s+e)):
+    #   seg  0: mid=0..24  → 25 planes, 97  ring pairs total
+    #   seg +1: mid=5..19  → 15 planes, 35  ring pairs total
+    #   seg -1: mid=5..19  → 15 planes, 35  ring pairs total
+    #   total: 55 planes, 167 ring pairs
+    #
+    # Spot-checked planes (sorted by (|seg|, -seg, mid)):
+    #   plane  0 (seg=0,  mid= 0): pair  (0, 0)                       → sz=0.0,  ez=0.0,  mult=1
+    #   plane  4 (seg=0,  mid= 4): pairs (0,4),(1,3),(2,2),(3,1),(4,0) → sz=2.0,  ez=2.0,  mult=5
+    #   plane 12 (seg=0,  mid=12): pairs (4,8),(5,7),(6,6),(7,5),(8,4) → sz=6.0,  ez=6.0,  mult=5
+    #   plane 24 (seg=0,  mid=24): pair  (12,12)                       → sz=12.0, ez=12.0, mult=1
+    #   plane 25 (seg=+1, mid= 5): pair  (0, 5)                        → sz=0.0,  ez=5.0,  mult=1
+    #   plane 31 (seg=+1, mid=11): pairs (0,11),(1,10),(2,9),(3,8)     → sz=1.5,  ez=9.5,  mult=4
+    #   plane 40 (seg=-1, mid= 5): pair  (5, 0)                        → sz=5.0,  ez=0.0,  mult=1
+    #   plane 46 (seg=-1, mid=11): pairs (11,0),(10,1),(9,2),(8,3)     → sz=9.5,  ez=1.5,  mult=4
+    ring_z_13 = xp.asarray([float(i) for i in range(13)], device=dev)
+    scanner_13 = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=12,
+        num_lor_endpoints_per_side=1,
+        lor_spacing=2.3,
+        ring_positions=ring_z_13,
+        symmetry_axis=2,
+    )
+    lor_desc_13 = ppl.RegularPolygonPETLORDescriptor(
+        scanner_13, max_ring_difference=11, span=9
+    )
+
+    assert lor_desc_13.num_planes == 55
+    assert bool(xp.sum(lor_desc_13.plane_multiplicity) == 167)
+
+    seg_13 = lor_desc_13.plane_segment
+    assert bool(xp.sum(xp.astype(seg_13 == xp.asarray(0, device=dev, dtype=xp.int32), xp.int32)) == 25)
+    assert bool(xp.sum(xp.astype(seg_13 == xp.asarray(1, device=dev, dtype=xp.int32), xp.int32)) == 15)
+    assert bool(xp.sum(xp.astype(seg_13 == xp.asarray(-1, device=dev, dtype=xp.int32), xp.int32)) == 15)
+
+    def _check_plane(idx, exp_sz, exp_ez, exp_mult, exp_seg):
+        assert bool(xp.abs(lor_desc_13.start_plane_z[idx] - exp_sz) < 1e-5)
+        assert bool(xp.abs(lor_desc_13.end_plane_z[idx] - exp_ez) < 1e-5)
+        assert bool(lor_desc_13.plane_multiplicity[idx] == exp_mult)
+        assert bool(lor_desc_13.plane_segment[idx] == exp_seg)
+
+    _check_plane( 0, 0.0,  0.0,  1,  0)
+    _check_plane( 4, 2.0,  2.0,  5,  0)
+    _check_plane(12, 6.0,  6.0,  5,  0)
+    _check_plane(24, 12.0, 12.0, 1,  0)
+    _check_plane(25, 0.0,  5.0,  1,  1)
+    _check_plane(31, 1.5,  9.5,  4,  1)
+    _check_plane(40, 5.0,  0.0,  1, -1)
+    _check_plane(46, 9.5,  1.5,  4, -1)
+
 
 def test_show_michelogram(xp: ModuleType, dev: str) -> None:
     num_rings = 3
