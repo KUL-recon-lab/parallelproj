@@ -265,34 +265,18 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # data, contamination and the adjoint of ones.
 
 
-def em_update(
+def psgd_update(
     x_cur: Array,
     data: Array,
     op: parallelproj.operators.LinearOperator,
     s: Array,
-    adjoint_ones: Array,
+    precond: Array,
 ) -> Array:
-    """EM update
+    """OSEM update re-written as preconditioned SGD step"""
 
-    Parameters
-    ----------
-    x_cur : Array
-        current solution
-    data : Array
-        data
-    op : parallelproj.LinearOperator
-        linear forward operator
-    s : Array
-        contamination
-    adjoint_ones : Array
-        adjoint of ones
+    subset_neg_logL_grad = op.adjoint(1 - (data / (op(x_cur) + s)))
 
-    Returns
-    -------
-    Array
-    """
-    ybar = op(x_cur) + s
-    return x_cur * op.adjoint(data / ybar) / adjoint_ones
+    return x_cur - precond * subset_neg_logL_grad
 
 
 # %%
@@ -324,10 +308,10 @@ subset_adjoint_ones = [
 for i in range(num_iter):
     for k, sl in enumerate(subset_slices):
         print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_iter:03}", end="\r")
-        x_osem = em_update(
+        x_osem = psgd_update(
             x_osem,
             y[sl],
             pet_subset_linop_seq[k],
             contamination[sl],
-            subset_adjoint_ones[k],
+            x_osem / subset_adjoint_ones[k],
         )
