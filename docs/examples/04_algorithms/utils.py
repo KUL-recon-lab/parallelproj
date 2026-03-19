@@ -157,12 +157,9 @@ class RadonDisk(RadonObject):
         self._radius: float = radius
 
     def _centered_radon_transform(self, r: Array, phi: Array) -> Array:
-        rt = self.xp.zeros_like(r)
-        rt[self.xp.abs(r) <= self._radius] = 2 * self.xp.sqrt(
-            self._radius**2 - r[self.xp.abs(r) <= self._radius] ** 2
-        )
-
-        return rt
+        mask = self.xp.abs(r) <= self._radius
+        safe = self.xp.where(mask, self._radius**2 - r**2, self.xp.zeros_like(r))
+        return self.xp.where(mask, 2 * self.xp.sqrt(safe), self.xp.zeros_like(r))
 
     def _centered_values(self, x0: Array, x1: Array) -> Array:
         return self.xp.where(
@@ -240,8 +237,8 @@ class RadonSquare(RadonObject):
         return self._width
 
     @width.setter
-    def radius(self, value: float) -> None:
-        self._radius = value
+    def width(self, value: float) -> None:
+        self._width = value
 
     @property
     def a(self) -> float:
