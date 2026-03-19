@@ -28,6 +28,7 @@ using the linear forward model
 
 # %%
 from __future__ import annotations
+from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from copy import copy
@@ -265,18 +266,42 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # data, contamination and the adjoint of ones.
 
 
-def psgd_update(
-    x_cur: Array,
-    data: Array,
-    op: parallelproj.operators.LinearOperator,
-    s: Array,
-    precond: Array,
-) -> Array:
-    """OSEM update re-written as preconditioned SGD step"""
+class DataFidelity(ABC):
+    @abstractmethod
+    def __call__(self, x: Array) -> Array: ...
 
-    subset_neg_logL_grad = op.adjoint(1 - (data / (op(x_cur) + s)))
+    @abstractmethod
+    def gradient(self, x: Array) -> Array: ...
 
-    return x_cur - precond * subset_neg_logL_grad
+    @abstractmethod
+    def call_and_gradient(self, x: Array) -> tuple[Array, Array]: ...
+
+
+class NegPoissonLogL(DataFidelity):
+    def __init__(
+        self, data: Array, op: parallelproj.operators.LinearOperator, s: Array
+    ):
+        self._data, self._op, self._s = data, op, s
+
+    def __call__(self, x: Array) -> Array:
+        pred = self._op(x) + self._s
+        return xp.sum(pred - self._data * xp.log(pred))
+
+    def gradient(self, x: Array) -> Array:
+        pred = self._op(x) + self._s
+        return self._op.adjoint(1 - self._data / pred)
+
+    def call_and_gradient(self, x: Array) -> tuple[Array, Array]:
+        pred = self._op(x) + self._s
+        value = xp.sum(pred - self._data * xp.log(pred))
+        grad = self._op.adjoint(1 - self._data / pred)
+        return value, grad
+
+
+def em_update(x_cur: Array, data_fidelity: DataFidelity, adjoint_ones: Array) -> Array:
+    """EM update re-written as preconditioned GD step"""
+    em_diag_precond = x_cur / adjoint_ones
+    return x_cur - em_diag_precond * data_fidelity.gradient(x_cur)
 
 
 # %%
@@ -304,14 +329,13 @@ subset_adjoint_ones = [
     for x in pet_subset_linop_seq
 ]
 
+subset_data_fidelities = [
+    NegPoissonLogL(y[sl], pet_subset_linop_seq[k], contamination[sl])
+    for k, sl in enumerate(subset_slices)
+]
+
 # OSEM iterations
 for i in range(num_iter):
-    for k, sl in enumerate(subset_slices):
+    for k in range(len(subset_slices)):
         print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_iter:03}", end="\r")
-        x_osem = psgd_update(
-            x_osem,
-            y[sl],
-            pet_subset_linop_seq[k],
-            contamination[sl],
-            x_osem / subset_adjoint_ones[k],
-        )
+        x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k])
