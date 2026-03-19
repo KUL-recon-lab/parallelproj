@@ -23,6 +23,8 @@ dependencies = [
 test = [
   "pytest>=8",
   "pytest-cov",
+  "array-api-strict",
+  "pytorch"
 ]
 docs = [
   "sphinx",
