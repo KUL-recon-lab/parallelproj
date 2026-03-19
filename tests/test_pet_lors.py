@@ -59,7 +59,7 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
         num_sides=12,
         num_lor_endpoints_per_side=15,
         lor_spacing=2.3,
-        ring_positions=xp.linspace(-10, 10, num_rings),
+        ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
         symmetry_axis=2,
     )
 
