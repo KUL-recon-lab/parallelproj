@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from ._backend import Array
 from .operators import LinearOperator
 
@@ -206,10 +207,6 @@ class NegPoissonLogL(C2Function):
     def _gradient(self, pred: Array) -> Array:
         return 1 - self._data / pred
 
-    def _call_and_gradient(self, pred: Array) -> tuple[float, Array]:
-        xp = get_namespace(pred)
-        return float(xp.sum(pred - self._data * xp.log(pred))), 1 - self._data / pred
-
     def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
         return self._data / (pred**2) * v
 
@@ -291,11 +288,11 @@ class SumC1Function(C1Function):
 
     Parameters
     ----------
-    functions : list[C1Function]
+    functions : Sequence[C1Function]
         The functions :math:`f_k` to sum.  Must contain at least one element.
     """
 
-    def __init__(self, functions: list[C1Function]):
+    def __init__(self, functions: Sequence[C1Function]):
         super().__init__()
         self._functions = functions
 
@@ -330,12 +327,12 @@ class SumC2Function(C2Function, SumC1Function):
 
     Parameters
     ----------
-    functions : list[C2Function]
+    functions : Sequence[C2Function]
         The functions :math:`f_k` to sum.  Must contain at least one element.
     """
 
-    def __init__(self, functions: list[C2Function]):
-        self._functions: list[C2Function]
+    def __init__(self, functions: Sequence[C2Function]):
+        self._functions: Sequence[C2Function]
         SumC1Function.__init__(self, functions)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
@@ -355,34 +352,43 @@ class C1AffineObjective(C1Function):
 
         \\nabla_x f(x) = \\beta \\cdot A^H \\nabla_{\\bar{y}} g(A x + s).
 
+    When :math:`s` is ``None`` the pure linear model :math:`\\bar{y} = A x`
+    is used, avoiding the addition entirely.
+
+    Scaling is handled exclusively by the ``beta`` attribute of ``loss``
+    itself; no separate scale is applied at the wrapper level.
+
     Parameters
     ----------
     loss : C1Function
         A :class:`C1Function` operating on the prediction space.
     op : LinearOperator
         The linear part of the forward model :math:`A`.
-    s : Array
+    s : Array or None, optional
         Additive contamination term :math:`s` (e.g. scatter/randoms).
-    beta : float, optional
-        Multiplicative scale factor :math:`\\beta` applied on top of any
-        :math:`\\beta` already carried by ``loss``.  Defaults to ``1.0``.
+        ``None`` (default) selects the pure linear model :math:`\\bar{y} = A x`.
     """
 
-    def __init__(
-        self, loss: C1Function, op: LinearOperator, s: Array, beta: float = 1.0
-    ):
-        super().__init__(beta)
+    def __init__(self, loss: C1Function, op: LinearOperator, s: Array | None = None):
+        super().__init__()
         self._loss, self._op, self._s = loss, op, s
 
     def _call(self, x: Array) -> float:
-        return self._loss(self._op(x) + self._s)
+        pred = self._op(x)
+        if self._s is not None:
+            pred = pred + self._s
+        return self._loss(pred)
 
     def _gradient(self, x: Array) -> Array:
-        pred = self._op(x) + self._s
+        pred = self._op(x)
+        if self._s is not None:
+            pred = pred + self._s
         return self._op.adjoint(self._loss.gradient(pred))
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
-        pred = self._op(x) + self._s
+        pred = self._op(x)
+        if self._s is not None:
+            pred = pred + self._s
         value, grad_pred = self._loss.call_and_gradient(pred)
         return value, self._op.adjoint(grad_pred)
 
@@ -397,8 +403,12 @@ class C2AffineObjective(C2Function, C1AffineObjective):
 
         H_f(x)\\, v = \\beta \\cdot A^H \\bigl(\\operatorname{diag}(H_g(\\bar{y})) \\odot (A v)\\bigr)
 
-    where :math:`\\bar{y} = A x + s` and :math:`\\odot` denotes elementwise
+    where :math:`\\bar{y} = A x + s` (or :math:`\\bar{y} = A x` when
+    :math:`s` is ``None``) and :math:`\\odot` denotes elementwise
     multiplication.
+
+    Scaling is handled exclusively by the ``beta`` attribute of ``loss``
+    itself; no separate scale is applied at the wrapper level.
 
     Parameters
     ----------
@@ -406,11 +416,9 @@ class C2AffineObjective(C2Function, C1AffineObjective):
         A :class:`C2Function` operating on the prediction space.
     op : LinearOperator
         The linear part of the forward model :math:`A`.
-    s : Array
+    s : Array or None, optional
         Additive contamination term :math:`s` (e.g. scatter/randoms).
-    beta : float, optional
-        Multiplicative scale factor :math:`\\beta` applied on top of any
-        :math:`\\beta` already carried by ``loss``.  Defaults to ``1.0``.
+        ``None`` (default) selects the pure linear model :math:`\\bar{y} = A x`.
 
     Examples
     --------
@@ -425,19 +433,20 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> x = np.ones(4)                # image estimate
     >>> v = np.ones(4)                # direction vector
     >>>
-    >>> loss = NegPoissonLogL(data)
-    >>> f = C2AffineObjective(loss, op, s, beta=0.5)
+    >>> loss = NegPoissonLogL(data, beta=0.5)
+    >>> aff_obj = C2AffineObjective(loss, op, s)
     >>>
-    >>> grad = f.gradient(x)                          # shape (4,), scaled by beta=0.5
-    >>> hv   = f.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
+    >>> fx = aff_obj(x)                                     # scalar function value, scaled by beta=0.5
+    >>> grad = aff_obj.gradient(x)                          # shape (4,), scaled by beta=0.5
+    >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
     """
 
-    def __init__(
-        self, loss: C2Function, op: LinearOperator, s: Array, beta: float = 1.0
-    ):
+    def __init__(self, loss: C2Function, op: LinearOperator, s: Array | None = None):
         self._loss: C2Function
-        C1AffineObjective.__init__(self, loss, op, s, beta)
+        C1AffineObjective.__init__(self, loss, op, s)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        pred = self._op(x) + self._s
+        pred = self._op(x)
+        if self._s is not None:
+            pred = pred + self._s
         return self._op.adjoint(self._loss.hessian_diag_vec_prod(pred, self._op(v)))
