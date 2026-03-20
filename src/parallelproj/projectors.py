@@ -550,19 +550,24 @@ class RegularPolygonPETProjector(LinearOperator):
         self._xstart = None
         self._xend = None
 
+        self._out_shape = self._compute_out_shape()
+
     @property
     def in_shape(self) -> tuple[int, int, int]:
         return self._img_shape
 
-    @property
-    def out_shape(self) -> tuple[int, int, int]:
+    def _compute_out_shape(self) -> tuple[int, ...]:
         out_shape = list(self._lor_descriptor.spatial_sinogram_shape)
         out_shape[self._lor_descriptor.view_axis_num] = self._views.shape[0]
 
-        if self.tof:
-            out_shape += [self.tof_parameters.num_tofbins]
+        if self._tof and self._tof_parameters is not None:
+            out_shape += [self._tof_parameters.num_tofbins]
 
         return tuple(out_shape)
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        return self._out_shape
 
     @property
     def xp(self) -> ModuleType:
@@ -596,6 +601,8 @@ class RegularPolygonPETProjector(LinearOperator):
         else:
             self._tof = True
 
+        self._out_shape = self._compute_out_shape()
+
     @property
     def lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
         """LOR descriptor"""
@@ -614,6 +621,7 @@ class RegularPolygonPETProjector(LinearOperator):
     @views.setter
     def views(self, value: Array) -> None:
         self._views = value
+        self._out_shape = self._compute_out_shape()
         # we need to reset the LOR start and end points in case
         # they were cached
         self.clear_cached_lor_endpoints()
@@ -667,16 +675,16 @@ class RegularPolygonPETProjector(LinearOperator):
         dev = array_api_compat.device(x)
 
         # calculate LOR endpoints if not done yet
-        if (self.xstart is None) or (self.xend is None):
+        needs_compute = (self.xstart is None) or (self.xend is None)
+        if needs_compute:
             xstart, xend = self._lor_descriptor.get_lor_coordinates(views=self._views)
-            # if is_cuda_array(xstart):
-            #    empty_cuda_cache(self.xp)
+            empty_cuda_cache(self.xp)
         else:
             xstart = self.xstart
             xend = self.xend
 
         # cache LOR endpoints if requested
-        if self._cache_lor_endpoints and ((self.xstart is None) or (self.xend is None)):
+        if self._cache_lor_endpoints and needs_compute:
             self._xstart = xstart
             self._xend = xend
 
@@ -716,16 +724,16 @@ class RegularPolygonPETProjector(LinearOperator):
         dev = array_api_compat.device(y)
 
         # calculate LOR endpoints if not done yet
-        if (self.xstart is None) or (self.xend is None):
+        needs_compute = (self.xstart is None) or (self.xend is None)
+        if needs_compute:
             xstart, xend = self._lor_descriptor.get_lor_coordinates(views=self._views)
-            # if is_cuda_array(xstart):
-            #    empty_cuda_cache(self.xp)
+            empty_cuda_cache(self.xp)
         else:
             xstart = self.xstart
             xend = self.xend
 
         # cache LOR endpoints if requested
-        if self._cache_lor_endpoints and ((self.xstart is None) or (self.xend is None)):
+        if self._cache_lor_endpoints and needs_compute:
             self._xstart = xstart
             self._xend = xend
 
@@ -1205,12 +1213,10 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def out_shape(self) -> tuple[int, int, int]:
-        out_shape = list(
-            [
-                self._lor_descriptor.num_block_pairs,
-                self._lor_descriptor.num_lors_per_block_pair,
-            ]
-        )
+        out_shape = [
+            self._lor_descriptor.num_block_pairs,
+            self._lor_descriptor.num_lors_per_block_pair,
+        ]
 
         if self.tof:
             out_shape += [self.tof_parameters.num_tofbins]
