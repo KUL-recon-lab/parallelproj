@@ -849,7 +849,7 @@ class GradientFieldProjectionOperator(LinearOperator):
         gradient_field_float = self._xp.astype(gradient_field, self._xp.float64)
 
         norm = self._xp.sqrt(
-            self._xp.sum(gradient_field_float**2 + self._eta**2, axis=0)
+            self._xp.sum(gradient_field_float**2, axis=0) + self._eta**2
         )
         inds = norm > 0
         self._normalized_gradient_field = self._xp.zeros(
