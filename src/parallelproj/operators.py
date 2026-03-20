@@ -520,7 +520,7 @@ class GaussianFilterOperator(LinearOperator):
                     sigma=_sigma_for_numpy(self._sigma),
                     **self._kwargs,
                 )
-                return torch.from_numpy(np.asarray(y_np)).to(device=x.device)
+                return torch.from_numpy(y_np).to(device=x.device)
 
             # Torch GPU -> CuPy via DLPack -> filter -> Torch via DLPack
             import cupy as cp
