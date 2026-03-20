@@ -164,6 +164,22 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     assert xp.all(scanner2.modules[0].phis == phis)
 
 
+def test_regular_polygon_pet_scanner_invalid_symmetry_axis(
+    xp: ModuleType, dev: str
+) -> None:
+    with pytest.raises(ValueError, match="symmetry_axis"):
+        pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=150,
+            num_sides=4,
+            num_lor_endpoints_per_side=2,
+            lor_spacing=4.0,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=3,
+        )
+
+
 def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
 
     # grid shape of LOR endpoints forming a block module
