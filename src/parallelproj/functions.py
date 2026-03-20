@@ -239,27 +239,28 @@ class HalfSquaredL2Deviation(C2Function):
 
     Parameters
     ----------
-    data : Array
-        Reference array :math:`d`.
+    data : Array or None, optional
+        Reference array :math:`d`.  ``None`` (default) is equivalent to
+        :math:`d = 0` but avoids the subtraction entirely.
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     """
 
-    def __init__(self, data: Array, beta: float = 1.0):
+    def __init__(self, data: Array | None = None, beta: float = 1.0):
         super().__init__(beta)
         self._data = data
 
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
-        diff = x - self._data
+        diff = x if self._data is None else x - self._data
         return float(0.5 * xp.sum(diff**2))
 
     def _gradient(self, x: Array) -> Array:
-        return x - self._data
+        return x if self._data is None else x - self._data
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         xp = get_namespace(x)
-        diff = x - self._data
+        diff = x if self._data is None else x - self._data
         return float(0.5 * xp.sum(diff**2)), diff
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
@@ -439,6 +440,28 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> fx = aff_obj(x)                                     # scalar function value, scaled by beta=0.5
     >>> grad = aff_obj.gradient(x)                          # shape (4,), scaled by beta=0.5
     >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
+
+    A regularised objective combining a data fidelity term and a roughness
+    penalty via :class:`SumC2Function`:
+
+    .. math::
+
+        h(x) = \\underbrace{f_{\\text{PL}}(Ax + s)}_{\\text{data fidelity}}
+               + \\underbrace{\\beta_{\\text{reg}} \\cdot \\tfrac{1}{2}\\|Dx\\|_2^2}_{\\text{roughness penalty}}
+
+    where :math:`D` is a finite forward difference operator.
+
+    >>> from parallelproj.operators import FiniteForwardDifference
+    >>> from parallelproj.functions import HalfSquaredL2Deviation
+    >>> beta_reg = 0.1
+    >>> D   = FiniteForwardDifference(x.shape)            # finite differences in image space
+    >>> reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta_reg), D)
+    >>> data_fidelity = C2AffineObjective(NegPoissonLogL(data), op, s)
+    >>>
+    >>> obj_fun = data_fidelity + reg                     # SumC2Function
+    >>> obj_val = obj_fun(x)                              # scalar function value
+    >>> grad = obj_fun.gradient(x)                        # shape (4,)
+    >>> hv   = obj_fun.hessian_diag_vec_prod(x, v)        # shape (4,)
     """
 
     def __init__(self, loss: C2Function, op: LinearOperator, s: Array | None = None):
