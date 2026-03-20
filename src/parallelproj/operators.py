@@ -415,22 +415,13 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
         return self._values
 
     def _apply(self, x: Array) -> Array:
-        y = 1 * x  # suboptimal copy; torch.asarray(..., copy=True) is broken for this use case
-        for i in range(x.shape[-1]):
-            y[..., i] *= self._values
-        return y
+        return x * self._values[..., None]
 
     def _adjoint(self, y: Array) -> Array:
-        x = 1 * y  # suboptimal copy; see comment in _apply
         if self.iscomplex:
-            tmp = self.xp.conj(self._values)
+            return y * self.xp.conj(self._values)[..., None]
         else:
-            tmp = self._values
-
-        for i in range(x.shape[-1]):
-            x[..., i] *= tmp
-
-        return x
+            return y * self._values[..., None]
 
     @property
     def iscomplex(self) -> bool:
