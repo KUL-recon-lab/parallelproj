@@ -111,6 +111,25 @@ class C1Function(ABC):
         v, g = self._call_and_gradient(x)
         return (v, g) if self._beta == 1.0 else (self._beta * v, self._beta * g)
 
+    def __add__(self, other: "C1Function") -> "SumC1Function":
+        """Return a :class:`SumC2Function` or :class:`SumC1Function` for ``self + other``.
+
+        Parameters
+        ----------
+        other : C1Function
+            Right-hand operand.
+
+        Returns
+        -------
+        SumC2Function
+            If both operands are :class:`C2Function` instances.
+        SumC1Function
+            Otherwise.
+        """
+        if isinstance(self, C2Function) and isinstance(other, C2Function):
+            return SumC2Function([self, other])
+        return SumC1Function([self, other])
+
 
 class C2Function(C1Function):
     """Abstract base class for twice continuously differentiable (C2) scalar
@@ -248,6 +267,82 @@ class HalfSquaredL2Deviation(C2Function):
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         return v
+
+
+class SumC1Function(C1Function):
+    """Sum of an arbitrary number of :class:`C1Function` objects.
+
+    Represents
+
+    .. math::
+
+        h(x) = \\sum_{k} f_k(x)
+
+    where each :math:`f_k` may itself carry its own :math:`\\beta_k`.
+    The gradients add accordingly:
+
+    .. math::
+
+        \\nabla h(x) = \\sum_{k} \\nabla f_k(x).
+
+    Instances are most conveniently created via the ``+`` operator on any
+    two :class:`C1Function` objects, but can also be constructed directly
+    to sum more than two terms at once.
+
+    Parameters
+    ----------
+    functions : list[C1Function]
+        The functions :math:`f_k` to sum.  Must contain at least one element.
+    """
+
+    def __init__(self, functions: list[C1Function]):
+        super().__init__()
+        self._functions = functions
+
+    def _call(self, x: Array) -> float:
+        return sum(f(x) for f in self._functions)
+
+    def _gradient(self, x: Array) -> Array:
+        result = self._functions[0].gradient(x)
+        for f in self._functions[1:]:
+            result = result + f.gradient(x)
+        return result
+
+    def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
+        val, grad = self._functions[0].call_and_gradient(x)
+        for f in self._functions[1:]:
+            v, g = f.call_and_gradient(x)
+            val += v
+            grad = grad + g
+        return val, grad
+
+
+class SumC2Function(C2Function, SumC1Function):
+    """Sum of an arbitrary number of :class:`C2Function` objects.
+
+    Extends :class:`SumC1Function` with second-order information.  The
+    diagonal Hessian-vector product is:
+
+    .. math::
+
+        \\operatorname{diag}\\!\\left(H_h(x)\\right) \\odot v
+        = \\sum_{k} \\operatorname{diag}\\!\\left(H_{f_k}(x)\\right) \\odot v.
+
+    Parameters
+    ----------
+    functions : list[C2Function]
+        The functions :math:`f_k` to sum.  Must contain at least one element.
+    """
+
+    def __init__(self, functions: list[C2Function]):
+        self._functions: list[C2Function]
+        SumC1Function.__init__(self, functions)
+
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        result = self._functions[0].hessian_diag_vec_prod(x, v)
+        for f in self._functions[1:]:
+            result = result + f.hessian_diag_vec_prod(x, v)
+        return result
 
 
 class C1AffineObjective(C1Function):
