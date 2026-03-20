@@ -195,6 +195,61 @@ class NegPoissonLogL(C2Function):
         return self._data / (pred**2) * v
 
 
+class HalfSquaredL2Deviation(C2Function):
+    """Half squared L2 deviation from reference data.
+
+    Implements
+
+    .. math::
+
+        f(x) = \\frac{1}{2} \\|x - d\\|_2^2
+             = \\frac{1}{2} \\sum_i (x_i - d_i)^2
+
+    with gradient
+
+    .. math::
+
+        \\nabla f(x) = x - d
+
+    and diagonal Hessian-vector product
+
+    .. math::
+
+        \\operatorname{diag}(H_f(x)) \\odot v = v
+
+    (the Hessian is the identity).  The :math:`\\tfrac{1}{2}` prefactor is
+    chosen so that the gradient contains no factor of 2, keeping expressions
+    clean when :math:`\\beta = 1`.
+
+    Parameters
+    ----------
+    data : Array
+        Reference array :math:`d`.
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    """
+
+    def __init__(self, data: Array, beta: float = 1.0):
+        super().__init__(beta)
+        self._data = data
+
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        diff = x - self._data
+        return float(0.5 * xp.sum(diff**2))
+
+    def _gradient(self, x: Array) -> Array:
+        return x - self._data
+
+    def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
+        xp = get_namespace(x)
+        diff = x - self._data
+        return float(0.5 * xp.sum(diff**2)), diff
+
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        return v
+
+
 class C1AffineObjective(C1Function):
     """Composes a prediction-space :class:`C1Function` with an affine forward model.
 
@@ -218,7 +273,9 @@ class C1AffineObjective(C1Function):
         :math:`\\beta` already carried by ``loss``.  Defaults to ``1.0``.
     """
 
-    def __init__(self, loss: C1Function, op: LinearOperator, s: Array, beta: float = 1.0):
+    def __init__(
+        self, loss: C1Function, op: LinearOperator, s: Array, beta: float = 1.0
+    ):
         super().__init__(beta)
         self._loss, self._op, self._s = loss, op, s
 
@@ -280,7 +337,9 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> hv   = f.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
     """
 
-    def __init__(self, loss: C2Function, op: LinearOperator, s: Array, beta: float = 1.0):
+    def __init__(
+        self, loss: C2Function, op: LinearOperator, s: Array, beta: float = 1.0
+    ):
         self._loss: C2Function
         C1AffineObjective.__init__(self, loss, op, s, beta)
 
