@@ -524,6 +524,23 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> grad = aff_obj.gradient(x)                          # shape (4,), scaled by beta=0.5
     >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
 
+    Pure linear forward model with virtual bins (zero rows in :math:`A`)
+    handled via :class:`NegPoissonLogLSafe` and a user-supplied mask:
+
+    >>> from parallelproj.functions import NegPoissonLogLSafe
+    >>> A2 = np.zeros((6, 4))
+    >>> A2[:4, :] = np.random.rand(4, 4)   # last 2 rows are virtual (all zero)
+    >>> op2   = MatrixOperator(A2)
+    >>> data2 = np.array([2., 1., 3., 0., 0., 0.])  # virtual bins measure 0
+    >>> mask  = np.array([True, True, True, True, False, False])
+    >>>
+    >>> loss2 = NegPoissonLogLSafe(data2, mask)
+    >>> aff_obj2 = C2AffineObjective(loss2, op2)            # no contamination s
+    >>>
+    >>> fx2   = aff_obj2(x)                                 # scalar function value, no nan
+    >>> grad2 = aff_obj2.gradient(x)                        # shape (4,), no nan
+    >>> hv2   = aff_obj2.hessian_diag_vec_prod(x, v)        # shape (4,), no nan
+
     A regularised objective combining a data fidelity term and a roughness
     penalty via :class:`SumC2Function`:
 
