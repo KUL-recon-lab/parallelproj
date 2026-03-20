@@ -37,7 +37,7 @@ class LinearOperator(abc.ABC):
     @scale.setter
     def scale(self, value: int | float | complex):
         if not np.isscalar(value):
-            raise ValueError
+            raise ValueError("scale must be a scalar value")
         self._scale = value
 
     @abc.abstractmethod
@@ -227,11 +227,11 @@ class MatrixOperator(LinearOperator):
         self._A = A
 
     @property
-    def in_shape(self) -> tuple[int]:
+    def in_shape(self) -> tuple[int, ...]:
         return (self._A.shape[1],)
 
     @property
-    def out_shape(self) -> tuple[int]:
+    def out_shape(self) -> tuple[int, ...]:
         return (self._A.shape[0],)
 
     @property
@@ -304,7 +304,7 @@ class CompositeLinearOperator(LinearOperator):
 
     def _apply(self, x: Array) -> Array:
         y = x
-        for op in self[::-1]:
+        for op in reversed(self._operators):
             y = op(y)
         return y
 
@@ -562,6 +562,10 @@ class VstackOperator(LinearOperator):
         super().__init__()
         self._operators = operators
         self._in_shape = self._operators[0].in_shape
+        if any(op.in_shape != self._in_shape for op in self._operators[1:]):
+            raise ValueError(
+                "all operators in VstackOperator must have the same in_shape"
+            )
         self._out_shapes = tuple([x.out_shape for x in operators])
         self._raveled_out_shapes = tuple([int(np.prod(x)) for x in self._out_shapes])
         self._out_shape = (sum(self._raveled_out_shapes),)
@@ -838,10 +842,7 @@ class GradientFieldProjectionOperator(LinearOperator):
         self._xp = get_namespace(gradient_field)
         self._dev = device(gradient_field)
 
-        if (
-            gradient_field.dtype == self._xp.complex64
-            or gradient_field.dtype == self._xp.complex128
-        ):
+        if self._xp.isdtype(gradient_field.dtype, "complex floating"):
             raise ValueError("complex gradient fields not supported")
 
         self._eta = eta
@@ -869,11 +870,11 @@ class GradientFieldProjectionOperator(LinearOperator):
         super().__init__()
 
     @property
-    def in_shape(self) -> tuple[int]:
+    def in_shape(self) -> tuple[int, ...]:
         return self._in_shape
 
     @property
-    def out_shape(self) -> tuple[int]:
+    def out_shape(self) -> tuple[int, ...]:
         return self._out_shape
 
     @property
