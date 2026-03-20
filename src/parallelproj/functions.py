@@ -257,9 +257,9 @@ class NegPoissonLogLSafe(C2Function):
     ============================================  ==========
     Expression                                    Limit
     ============================================  ==========
-    :math:`\\bar{y}_i - y_i \\log \\bar{y}_i`     :math:`0`
-    :math:`1 - y_i / \\bar{y}_i`                  :math:`1`
-    :math:`y_i / \\bar{y}_i^2`                    :math:`0`
+    :math:`\\bar{y}_i - y_i \\log \\bar{y}_i`        :math:`0`
+    :math:`1 - y_i / \\bar{y}_i`                   :math:`1`
+    :math:`y_i / \\bar{y}_i^2`                     :math:`0`
     ============================================  ==========
 
     Parameters
@@ -283,7 +283,12 @@ class NegPoissonLogLSafe(C2Function):
         xp = get_namespace(pred)
         safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
         return float(
-            xp.sum(pred - xp.where(self._mask, self._data * xp.log(safe_pred), xp.zeros_like(pred)))
+            xp.sum(
+                pred
+                - xp.where(
+                    self._mask, self._data * xp.log(safe_pred), xp.zeros_like(pred)
+                )
+            )
         )
 
     def _gradient(self, pred: Array) -> Array:
@@ -294,64 +299,91 @@ class NegPoissonLogLSafe(C2Function):
     def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
         xp = get_namespace(pred)
         safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
-        return xp.where(self._mask, self._data / (safe_pred**2), xp.zeros_like(pred)) * v
+        return (
+            xp.where(self._mask, self._data / (safe_pred**2), xp.zeros_like(pred)) * v
+        )
 
 
 class HalfSquaredL2Deviation(C2Function):
-    """Half squared L2 deviation from reference data.
+    """Half squared L2 deviation from reference data, with optional weights.
 
     Implements
 
     .. math::
 
-        f(x) = \\frac{1}{2} \\|x - d\\|_2^2
-             = \\frac{1}{2} \\sum_i (x_i - d_i)^2
+        f(x) = \\frac{1}{2} \\sum_i w_i (x_i - d_i)^2
 
-    with gradient
+    where :math:`w_i = 1` when no weights are supplied (reducing to the
+    standard :math:`\\tfrac{1}{2}\\|x - d\\|_2^2`).
 
-    .. math::
-
-        \\nabla f(x) = x - d
-
-    and diagonal Hessian-vector product
+    Gradient:
 
     .. math::
 
-        \\operatorname{diag}(H_f(x)) \\odot v = v
+        \\nabla f(x) = w \\odot (x - d)
 
-    (the Hessian is the identity).  The :math:`\\tfrac{1}{2}` prefactor is
-    chosen so that the gradient contains no factor of 2, keeping expressions
-    clean when :math:`\\beta = 1`.
+    Diagonal Hessian-vector product:
+
+    .. math::
+
+        \\operatorname{diag}(H_f(x)) \\odot v = w \\odot v
+
+    The :math:`\\tfrac{1}{2}` prefactor is chosen so that the gradient
+    contains no factor of 2, keeping expressions clean when :math:`\\beta = 1`.
 
     Parameters
     ----------
     data : Array or None, optional
         Reference array :math:`d`.  ``None`` (default) is equivalent to
         :math:`d = 0` but avoids the subtraction entirely.
+    weights : Array or None, optional
+        Non-negative weight array :math:`w` of the same shape as ``data``
+        (or ``x`` when ``data`` is ``None``).  ``None`` (default) is
+        equivalent to unit weights but avoids the multiplication entirely.
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     """
 
-    def __init__(self, data: Array | None = None, beta: float = 1.0):
+    def __init__(
+        self,
+        data: Array | None = None,
+        weights: Array | None = None,
+        beta: float = 1.0,
+    ):
         super().__init__(beta)
         self._data = data
+        self._weights = weights
 
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
         diff = x if self._data is None else x - self._data
-        return float(0.5 * xp.sum(diff**2))
+        if self._weights is None:
+            return float(0.5 * xp.sum(diff**2))
+        else:
+            return float(0.5 * xp.sum(self._weights * diff**2))
 
     def _gradient(self, x: Array) -> Array:
         xp = get_namespace(x)
-        return xp.asarray(x, copy=True) if self._data is None else x - self._data
+        diff = xp.asarray(x, copy=True) if self._data is None else x - self._data
+        if self._weights is None:
+            return diff
+        else:
+            return self._weights * diff
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         xp = get_namespace(x)
         diff = xp.asarray(x, copy=True) if self._data is None else x - self._data
-        return float(0.5 * xp.sum(diff**2)), diff
+        if self._weights is None:
+            return float(0.5 * xp.sum(diff**2)), diff
+        else:
+            wdiff = self._weights * diff
+            return float(0.5 * xp.sum(self._weights * diff**2)), wdiff
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        return v
+        if self._weights is None:
+            return v
+        else:
+            return self._weights * v
 
 
 class SumC1Function(C1Function):
