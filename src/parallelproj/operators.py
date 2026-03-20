@@ -284,7 +284,7 @@ class CompositeLinearOperator(LinearOperator):
 
         Parameters
         ----------
-        operators : Sequence[LinearOperator, ...]
+        operators : Sequence[LinearOperator]
             Sequence of linear operators
         """
         super().__init__()
@@ -471,8 +471,8 @@ class GaussianFilterOperator(LinearOperator):
             shape of the input array
         sigma: float | array
             standard deviation of the gaussian filter
-        **kwargs : sometype
-            passed to the ndimage gaussian_filter function
+        **kwargs : dict
+            passed to the ndimage gaussian_filter function (e.g. ``mode``, ``truncate``)
         """
         super().__init__()
         self._in_shape = in_shape
@@ -548,6 +548,8 @@ class GaussianFilterOperator(LinearOperator):
         )
 
     def _adjoint(self, y: Array) -> Array:
+        # A Gaussian filter with a symmetric kernel is self-adjoint, so the
+        # adjoint equals the forward application.
         return self._apply(y)
 
 
@@ -628,7 +630,7 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
 
         Parameters
         ----------
-        operators : Sequence[LinearOperator, ...]
+        operators : Sequence[LinearOperator]
             Sequence of linear operators
         """
         self._operators = operators
