@@ -15,7 +15,7 @@ class LinearOperator(abc.ABC):
     """abstract base class for linear operators"""
 
     def __init__(self) -> None:
-        self._scale = 1
+        self._scale: float | complex = 1.0
 
     @property
     @abc.abstractmethod
@@ -30,15 +30,15 @@ class LinearOperator(abc.ABC):
         raise NotImplementedError
 
     @property
-    def scale(self) -> int | float | complex:
+    def scale(self) -> float | complex:
         """scalar factor applied to the linear operator"""
         return self._scale
 
     @scale.setter
-    def scale(self, value: int | float | complex):
+    def scale(self, value: float | complex):
         if not np.isscalar(value):
             raise ValueError("scale must be a scalar value")
-        self._scale = value
+        self._scale = complex(value) if isinstance(value, complex) else float(value)
 
     @abc.abstractmethod
     def _apply(self, x: Array) -> Array:
@@ -61,7 +61,7 @@ class LinearOperator(abc.ABC):
         -------
         Array
         """
-        if self._scale == 1:
+        if self._scale == 1.0:
             return self._apply(x)
         else:
             return self._scale * self._apply(x)
@@ -82,7 +82,7 @@ class LinearOperator(abc.ABC):
         Array
         """
 
-        if self._scale == 1:
+        if self._scale == 1.0:
             return self._adjoint(y)
         else:
             return self._scale.conjugate() * self._adjoint(y)
@@ -152,7 +152,7 @@ class LinearOperator(abc.ABC):
         if verbose:
             print(ip1, ip2)
 
-        return np.isclose(ip1, ip2, **kwargs)
+        return bool(np.isclose(ip1, ip2, **kwargs))
 
     def norm(
         self,

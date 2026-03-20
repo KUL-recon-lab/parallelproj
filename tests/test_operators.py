@@ -166,6 +166,14 @@ def test_composite(xp: ModuleType, dev: str):
     assert [x.out_shape for x in op] == [op1.out_shape, op2.out_shape]
 
 
+def test_vstack_mismatched_in_shape_raises(xp: ModuleType, dev: str):
+    A1 = ppo.GaussianFilterOperator((16, 11), sigma=1.0)
+    A2 = ppo.GaussianFilterOperator((8, 11), sigma=1.0)  # different in_shape
+
+    with pytest.raises(ValueError, match="in_shape"):
+        ppo.VstackOperator((A1, A2))
+
+
 def test_vstack(xp: ModuleType, dev: str):
     np.random.seed(0)
     in_shape = (16, 11)
