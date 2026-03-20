@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import abc
+from collections.abc import Sequence
+from types import ModuleType
+
 from parallelproj import Array, to_numpy_array
 import matplotlib.pyplot as plt
 import numpy as np
 
-from types import ModuleType
 
 class PETScannerModule(abc.ABC):
     """abstract base class for PET scanner module"""
@@ -40,8 +42,7 @@ class PETScannerModule(abc.ABC):
         self._lor_endpoint_numbers = self.xp.arange(num_lor_endpoints, device=self.dev)
 
         if affine_transformation_matrix is None:
-            aff_mat = self.xp.eye(4, device=self.dev)
-            self._affine_transformation_matrix = aff_mat
+            self._affine_transformation_matrix = self.xp.eye(4, device=self.dev)
             self._has_affine_transformation = False
         else:
             self._affine_transformation_matrix = affine_transformation_matrix
@@ -84,6 +85,7 @@ class PETScannerModule(abc.ABC):
         Returns
         -------
         Array
+            4x4 identity matrix if no transformation was provided
         """
         return self._affine_transformation_matrix
 
@@ -123,7 +125,9 @@ class PETScannerModule(abc.ABC):
         lor_endpoints = self.get_raw_lor_endpoints(inds)
 
         if self._has_affine_transformation:
-            tmp = self.xp.ones((lor_endpoints.shape[0], 4), device=self.dev)
+            tmp = self.xp.ones(
+                (lor_endpoints.shape[0], 4), device=self.dev, dtype=self.xp.float32
+            )
             tmp[:, :-1] = lor_endpoints
             lor_endpoints = (tmp @ self.affine_transformation_matrix.T)[:, :3]
 
@@ -304,13 +308,13 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         ----------
         xp: ModuleType
             array module to use for storing the LOR endpoints
-        device: str
+        dev: str
             device to use for storing the LOR endpoints
         radius : float
             inner radius of the regular polygon
         num_sides: int
             number of sides of the regular polygon
-        num_lor_endpoints_per_sides: int
+        num_lor_endpoints_per_side: int
             number of LOR endpoints per side
         lor_spacing : float
             spacing between the LOR endpoints in the polygon direction
@@ -434,13 +438,17 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         phi = self.xp.take(self._phis, side)
 
         lor_endpoints = self.xp.zeros(
-            (self.num_lor_endpoints, 3), device=self.dev, dtype=self.xp.float32
+            (inds.shape[0], 3), device=self.dev, dtype=self.xp.float32
         )
+
+        cosphi = self.xp.cos(phi)
+        sinphi = self.xp.sin(phi)
+
         lor_endpoints[:, self.ax0] = (
-            self.xp.cos(phi) * self.radius - self.xp.sin(phi) * self.lor_spacing * tmp
+            cosphi * self.radius - sinphi * self.lor_spacing * tmp
         )
         lor_endpoints[:, self.ax1] = (
-            self.xp.sin(phi) * self.radius + self.xp.cos(phi) * self.lor_spacing * tmp
+            sinphi * self.radius + cosphi * self.lor_spacing * tmp
         )
 
         return lor_endpoints
@@ -449,12 +457,12 @@ class RegularPolygonPETScannerModule(PETScannerModule):
 class ModularizedPETScannerGeometry:
     """description of a PET scanner geometry consisting of LOR endpoint modules"""
 
-    def __init__(self, modules: tuple[PETScannerModule]):
+    def __init__(self, modules: Sequence[PETScannerModule]):
         """
         Parameters
         ----------
-        modules : tuple[PETScannerModule]
-            a tuple of scanner modules
+        modules : Sequence[PETScannerModule]
+            a sequence of scanner modules
         """
 
         # member variable that determines whether we want to use
@@ -477,9 +485,7 @@ class ModularizedPETScannerGeometry:
         offsets = [0]
         for module in self._modules[:-1]:
             offsets.append(offsets[-1] + module.num_lor_endpoints)
-        self._all_lor_endpoints_index_offset = self.xp.asarray(
-            offsets, device=self.dev
-        )
+        self._all_lor_endpoints_index_offset = self.xp.asarray(offsets, device=self.dev)
 
         self._all_lor_endpoints = self.xp.zeros(
             (self._num_lor_endpoints, 3), device=self.dev, dtype=self.xp.float32
@@ -493,19 +499,18 @@ class ModularizedPETScannerGeometry:
                 :,
             ] = self.xp.astype(module.get_lor_endpoints(), self.xp.float32)
 
-        self._all_lor_endpoints_module_number = [
-            int(self._num_lor_endpoints_per_module[i]) * [i]
-            for i in range(self._num_modules)
-        ]
-
         self._all_lor_endpoints_module_number = self.xp.asarray(
-            [i for r in self._all_lor_endpoints_module_number for i in r],
+            [
+                i
+                for i, module in enumerate(self._modules)
+                for _ in range(module.num_lor_endpoints)
+            ],
             device=self.dev,
         )
 
     @property
-    def modules(self) -> tuple[PETScannerModule]:
-        """tuple of modules defining the scanner"""
+    def modules(self) -> Sequence[PETScannerModule]:
+        """sequence of modules defining the scanner"""
         return self._modules
 
     @property
@@ -515,7 +520,7 @@ class ModularizedPETScannerGeometry:
 
     @property
     def num_lor_endpoints_per_module(self) -> Array:
-        """numpy array showing how many LOR endpoints are in every module"""
+        """array showing how many LOR endpoints are in every module"""
         return self._num_lor_endpoints_per_module
 
     @property
@@ -622,7 +627,7 @@ class ModularizedPETScannerGeometry:
 
 
 class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
-    """description of a PET scanner geometry consisting stacked regular polygons
+    """description of a PET scanner geometry consisting of stacked regular polygons
 
     Examples
     --------
