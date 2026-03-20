@@ -415,13 +415,13 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
         return self._values
 
     def _apply(self, x: Array) -> Array:
-        y = 1 * x  # suboptimal to copy array, but bug in torch asarray with copy = True
+        y = 1 * x  # suboptimal copy; torch.asarray(..., copy=True) is broken for this use case
         for i in range(x.shape[-1]):
             y[..., i] *= self._values
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = 1 * y  # suboptimal to copy array
+        x = 1 * y  # suboptimal copy; see comment in _apply
         if self.iscomplex:
             tmp = self.xp.conj(self._values)
         else:
@@ -554,7 +554,12 @@ class GaussianFilterOperator(LinearOperator):
 
 
 class VstackOperator(LinearOperator):
-    """Stacking operator for stacking multiple linear operators vertically"""
+    """Stacking operator for stacking multiple linear operators vertically
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.VstackOperator
+    """
 
     def __init__(self, operators: tuple[LinearOperator, ...]) -> None:
         """init method
@@ -680,7 +685,20 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
         return result
 
     def norms(self, xp: ModuleType, dev: str) -> list[float]:
-        """:math:`\\text{norm}(A^i)` for all :math:`i`"""
+        """:math:`\\text{norm}(A^i)` for all :math:`i`
+
+        Parameters
+        ----------
+        xp : ModuleType
+            array module to use
+        dev : str
+            device (cpu or cuda)
+
+        Returns
+        -------
+        list[float]
+            norm of each operator in the sequence
+        """
         return [op.norm(xp, dev) for op in self]
 
 
