@@ -1,6 +1,6 @@
 """
-TOF OSEM with projection data
-=============================
+SVRG example
+============
 
 This example demonstrates the use of the SVRG algorithm to minimize the negative Poisson log-likelihood function
 
@@ -30,7 +30,6 @@ using the linear forward model
 from __future__ import annotations
 from collections.abc import Sequence
 import matplotlib.pyplot as plt
-from matplotlib import animation
 from copy import copy
 import numpy as np
 
@@ -40,7 +39,7 @@ import parallelproj.pet_scanners
 import parallelproj.pet_lors
 import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
-from parallelproj.functions import NegPoissonLogL, AffineObjective, C1Function
+from parallelproj.functions import NegPoissonLogL, C2AffineObjective, C1Function
 
 # %%
 from importlib import import_module, util
@@ -267,10 +266,15 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # data, contamination and the adjoint of ones.
 
 
-def em_update(x_cur: Array, data_fidelity: C1Function, adjoint_ones: Array) -> Array:
+def em_update(
+    x_cur: Array,
+    negpoissonlogl: C1Function,
+    adjoint_ones: Array,
+    step_size: float = 1.0,
+) -> Array:
     """EM update re-written as preconditioned GD step"""
     em_diag_precond = x_cur / adjoint_ones
-    return x_cur - em_diag_precond * data_fidelity.gradient(x_cur)
+    return x_cur - step_size * em_diag_precond * negpoissonlogl.gradient(x_cur)
 
 
 # %%
@@ -286,11 +290,9 @@ def em_update(x_cur: Array, data_fidelity: C1Function, adjoint_ones: Array) -> A
 #
 # The "sensitivity" images are also calculated separately for each subset.
 
-# number of OSEM iterations
-num_epochs = 480 // num_subsets
-
-# initialize x
-x_osem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+# number of epochs (iterations) for OSEM and SVRG
+num_epochs_mlem = 1200
+num_epochs = num_epochs_mlem // num_subsets
 
 # calculate A_k^H 1 for all subsets k, stored as (num_subsets, *in_shape)
 subset_adjoint_ones = xp.zeros(
@@ -302,15 +304,37 @@ for k, op in enumerate(pet_subset_linop_seq):
     )
 
 subset_data_fidelities = [
-    AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
+    C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
     for k, sl in enumerate(subset_slices)
 ]
 
-full_data_fidelity = AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
+full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
 
+# run 1 OSEM epoch as a common warm-start for both algorithms
+x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+for k in range(len(subset_slices)):
+    print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
+    x_init = em_update(
+        x_init, subset_data_fidelities[k], subset_adjoint_ones[k], step_size=1.0
+    )
+
+# full sensitivity image: A^H 1 = sum of all subset adjoint ones
+adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
+
+df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev)
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
-# OSEM iterations
+# %%
+# MLEM iterations (full data, no subsets) starting from x_init
+x_mlem = xp.asarray(x_init, copy=True)
+for i in range(num_epochs_mlem):
+    print(f"MLEM iteration {(i + 1):03} / {num_epochs_mlem:03}", end="\r")
+    x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones)
+    df_mlem[i] = full_data_fidelity(x_mlem)
+
+# %%
+# OSEM iterations starting from x_init
+x_osem = xp.asarray(x_init, copy=True)
 for i in range(num_epochs):
     for k in range(len(subset_slices)):
         print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_epochs:03}", end="\r")
@@ -370,10 +394,8 @@ def svrg_update(
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
-x_svrg = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-
-# full sensitivity image: sum of all subset adjoint ones
-adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
+# start SVRG from the same warm-start as OSEM and MLEM
+x_svrg = xp.asarray(x_init, copy=True)
 
 svrg_step_size = 1.0
 df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
@@ -407,17 +429,29 @@ for epoch in range(num_epochs):
     df_svrg[epoch] = full_data_fidelity(x_svrg)
 
 # %%
-# Plot the convergence of OSEM and SVRG
-# --------------------------------------
+# Plot the convergence of MLEM, OSEM and SVRG
+# --------------------------------------------
 
-epochs = np.arange(1, num_epochs + 1)
+epochs = np.arange(1, df_osem.shape[0] + 1)
+
+df_min = min(float(xp.min(df_mlem)), float(xp.min(df_osem)), float(xp.min(df_svrg)))
+df_max = float(df_osem[0])  # use first OSEM epoch as upper limit
 
 fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
-ax.plot(epochs, to_numpy_array(df_osem), label="OSEM", marker="o")
-ax.plot(epochs, to_numpy_array(df_svrg), label="SVRG", marker="o")
-ax.set_ylim(min(float(xp.min(df_osem)), float(xp.min(df_svrg))), float(df_osem[1]))
+ax.plot(epochs, to_numpy_array(df_osem), label=f"OSEM {num_subsets}ss", marker="o")
+ax.plot(
+    epochs,
+    to_numpy_array(df_svrg),
+    label=f"SVRG {num_subsets}ss, {svrg_step_size:.1f}",
+    marker="o",
+)
+ax.axhline(float(df_mlem[99]), label=f"MLEM {100} ep.", ls="--", color="gray")
+ax.axhline(
+    float(df_mlem[-1]), label=f"MLEM {num_epochs_mlem} ep.", ls="--", color="black"
+)
+ax.set_ylim(df_min, df_max)
 ax.legend()
 ax.grid(ls=":")
 ax.set_xlabel("Epoch")
-ax.set_ylabel("Data fidelity")
+ax.set_ylabel("Negative Poisson Log-Likelihood")
 fig.show()
