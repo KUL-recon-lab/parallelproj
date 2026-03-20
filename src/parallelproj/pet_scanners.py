@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from types import ModuleType
-from array_api_compat import size
-
 
 class PETScannerModule(abc.ABC):
     """abstract base class for PET scanner module"""
@@ -476,12 +474,11 @@ class ModularizedPETScannerGeometry:
         module endpoints
         """
 
+        offsets = [0]
+        for module in self._modules[:-1]:
+            offsets.append(offsets[-1] + module.num_lor_endpoints)
         self._all_lor_endpoints_index_offset = self.xp.asarray(
-            [
-                int(sum(self._num_lor_endpoints_per_module[:i]))
-                for i in range(size(self._num_lor_endpoints_per_module))
-            ],
-            device=self.dev,
+            offsets, device=self.dev
         )
 
         self._all_lor_endpoints = self.xp.zeros(
