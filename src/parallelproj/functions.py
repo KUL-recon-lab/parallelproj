@@ -281,20 +281,20 @@ class NegPoissonLogLSafe(C2Function):
 
     def _call(self, pred: Array) -> float:
         xp = get_namespace(pred)
-        zeros = xp.zeros_like(pred)
+        safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
         return float(
-            xp.sum(pred - xp.where(self._mask, self._data * xp.log(pred), zeros))
+            xp.sum(pred - xp.where(self._mask, self._data * xp.log(safe_pred), xp.zeros_like(pred)))
         )
 
     def _gradient(self, pred: Array) -> Array:
         xp = get_namespace(pred)
-        zeros = xp.zeros_like(pred)
-        return 1 - xp.where(self._mask, self._data / pred, zeros)
+        safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
+        return 1 - xp.where(self._mask, self._data / safe_pred, xp.zeros_like(pred))
 
     def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
         xp = get_namespace(pred)
-        zeros = xp.zeros_like(pred)
-        return xp.where(self._mask, self._data / (pred**2), zeros) * v
+        safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
+        return xp.where(self._mask, self._data / (safe_pred**2), xp.zeros_like(pred)) * v
 
 
 class HalfSquaredL2Deviation(C2Function):
