@@ -43,7 +43,6 @@ class PETScannerModule(abc.ABC):
 
         if affine_transformation_matrix is None:
             aff_mat = self.xp.eye(4, device=self.dev)
-            aff_mat[-1, -1] = 0
             self._affine_transformation_matrix = aff_mat
             self._has_affine_transformation = False
         else:
@@ -436,7 +435,9 @@ class RegularPolygonPETScannerModule(PETScannerModule):
 
         phi = self.xp.take(self._phis, side)
 
-        lor_endpoints = self.xp.zeros((self.num_lor_endpoints, 3), device=self.dev)
+        lor_endpoints = self.xp.zeros(
+            (self.num_lor_endpoints, 3), device=self.dev, dtype=self.xp.float32
+        )
         lor_endpoints[:, self.ax0] = (
             self.xp.cos(phi) * self.radius - self.xp.sin(phi) * self.lor_spacing * tmp
         )
@@ -683,12 +684,14 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         elif symmetry_axis == 2:
             self._ax0 = 1
             self._ax1 = 0
+        else:
+            raise ValueError("symmetry_axis must be 0, 1, or 2")
 
         modules = []
 
         for ring in range(self.num_rings):
-            aff_mat = xp.eye(4, device=dev)
-            aff_mat[symmetry_axis, -1] = ring_positions[ring]
+            aff_mat = xp.eye(4, device=dev, dtype=xp.float32)
+            aff_mat[symmetry_axis, -1] = xp.astype(ring_positions[ring], xp.float32)
 
             modules.append(
                 RegularPolygonPETScannerModule(
@@ -802,7 +805,7 @@ class DemoPETScannerGeometry(RegularPolygonPETScannerGeometry):
             5.32 * xp.arange(num_rings, device=dev, dtype=xp.float32)
             + (xp.astype(xp.arange(num_rings, device=dev) // 9, xp.float32)) * 2.8
         )
-        ring_positions -= 0.5 * xp.max(ring_positions)
+        ring_positions = ring_positions - 0.5 * xp.max(ring_positions)
 
         super().__init__(
             xp,

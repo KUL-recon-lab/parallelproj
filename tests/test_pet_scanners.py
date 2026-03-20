@@ -78,7 +78,7 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     )
 
     aff_mat2 = xp.eye(4, device=dev)
-    aff_mat2[-1, -1] = 0
+    aff_mat2[-1, -1] = 1
 
     assert xp.all(mod2.affine_transformation_matrix == aff_mat2)
 
