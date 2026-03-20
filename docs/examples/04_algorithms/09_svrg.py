@@ -28,7 +28,6 @@ using the linear forward model
 
 # %%
 from __future__ import annotations
-from abc import ABC, abstractmethod
 from collections.abc import Sequence
 import matplotlib.pyplot as plt
 from matplotlib import animation
@@ -41,6 +40,7 @@ import parallelproj.pet_scanners
 import parallelproj.pet_lors
 import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
+from parallelproj.functions import NegPoissonLogL, AffineObjective, C1Function
 
 # %%
 from importlib import import_module, util
@@ -267,7 +267,7 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # data, contamination and the adjoint of ones.
 
 
-def em_update(x_cur: Array, data_fidelity: DataFidelity, adjoint_ones: Array) -> Array:
+def em_update(x_cur: Array, data_fidelity: C1Function, adjoint_ones: Array) -> Array:
     """EM update re-written as preconditioned GD step"""
     em_diag_precond = x_cur / adjoint_ones
     return x_cur - em_diag_precond * data_fidelity.gradient(x_cur)
@@ -302,11 +302,11 @@ for k, op in enumerate(pet_subset_linop_seq):
     )
 
 subset_data_fidelities = [
-    NegPoissonLogL(y[sl], pet_subset_linop_seq[k], contamination[sl])
+    AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
     for k, sl in enumerate(subset_slices)
 ]
 
-full_data_fidelity = NegPoissonLogL(y, pet_lin_op, contamination)
+full_data_fidelity = AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
 
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
@@ -335,7 +335,7 @@ for i in range(num_epochs):
 
 def svrg_calc_snapshot_gradients(
     x_cur: Array,
-    subset_obj_functions: Sequence[DataFidelity],
+    subset_obj_functions: Sequence[C1Function],
 ) -> tuple[Array, Array]:
     """Store all subset gradients at the current anchor point and return their sum.
 
@@ -357,7 +357,7 @@ def svrg_calc_snapshot_gradients(
 def svrg_update(
     x_cur: Array,
     subset_idx: int,
-    subset_obj_functions: Sequence[DataFidelity],
+    subset_obj_functions: Sequence[C1Function],
     stored_subset_gradients: Array,
     full_gradient: Array,
     precond: Array,

@@ -6,16 +6,64 @@ from array_api_compat import get_namespace
 
 
 class C1Function(ABC):
-    """Abstract base class for continuously differentiable (C¹) scalar functions.
+    """Abstract base class for continuously differentiable (C1) scalar functions
+    with an optional scalar scale factor :math:`\\beta`.
 
-    Subclasses must implement :meth:`__call__` and :meth:`gradient`.
-    The default :meth:`call_and_gradient` calls both separately; subclasses
-    may override it to share intermediate computations for efficiency.
+    The public interface (:meth:`__call__`, :meth:`gradient`,
+    :meth:`call_and_gradient`) evaluates :math:`\\beta f(x)`.  Subclasses only
+    implement the *unscaled* private methods :meth:`_call` and
+    :meth:`_gradient`; :math:`\\beta` is applied automatically.
+
+    Parameters
+    ----------
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta` applied to the function
+        value and all derivatives.  Defaults to ``1.0``.
     """
 
+    def __init__(self, beta: float = 1.0):
+        self._beta = beta
+
+    # ------------------------------------------------------------------
+    # beta property
+    # ------------------------------------------------------------------
+
+    @property
+    def beta(self) -> float:
+        """Multiplicative scale factor :math:`\\beta`."""
+        return self._beta
+
+    @beta.setter
+    def beta(self, value: float) -> None:
+        self._beta = value
+
+    # ------------------------------------------------------------------
+    # Abstract interface — subclasses implement the *unscaled* versions
+    # ------------------------------------------------------------------
+
     @abstractmethod
+    def _call(self, x: Array) -> float:
+        """Unscaled function value at x (implemented by subclasses)."""
+        ...
+
+    @abstractmethod
+    def _gradient(self, x: Array) -> Array:
+        """Unscaled gradient at x (implemented by subclasses)."""
+        ...
+
+    def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
+        """Unscaled function value and gradient at x.
+
+        Subclasses may override this to share intermediate computations.
+        """
+        return self._call(x), self._gradient(x)
+
+    # ------------------------------------------------------------------
+    # Public interface — applies self._beta
+    # ------------------------------------------------------------------
+
     def __call__(self, x: Array) -> float:
-        """Evaluate the function at x.
+        """Evaluate :math:`\\beta f(x)`.
 
         Parameters
         ----------
@@ -25,13 +73,13 @@ class C1Function(ABC):
         Returns
         -------
         float
-            Scalar function value.
+            Scaled scalar function value.
         """
-        ...
+        v = self._call(x)
+        return v if self._beta == 1.0 else self._beta * v
 
-    @abstractmethod
     def gradient(self, x: Array) -> Array:
-        """Gradient of the function evaluated at x.
+        """Gradient of :math:`\\beta f(x)`.
 
         Parameters
         ----------
@@ -41,14 +89,14 @@ class C1Function(ABC):
         Returns
         -------
         Array
-            Array of the same shape as x containing the gradient.
+            Array of the same shape as x containing
+            :math:`\\beta \\nabla f(x)`.
         """
-        ...
+        g = self._gradient(x)
+        return g if self._beta == 1.0 else self._beta * g
 
     def call_and_gradient(self, x: Array) -> tuple[float, Array]:
-        """Evaluate the function and its gradient at x.
-
-        May be overridden by subclasses to share intermediate computations.
+        """Evaluate :math:`\\beta f(x)` and its gradient simultaneously.
 
         Parameters
         ----------
@@ -58,81 +106,184 @@ class C1Function(ABC):
         Returns
         -------
         tuple[float, Array]
-            Function value and gradient.
+            Scaled function value and gradient.
         """
-        return self.__call__(x), self.gradient(x)
+        v, g = self._call_and_gradient(x)
+        return (v, g) if self._beta == 1.0 else (self._beta * v, self._beta * g)
 
 
 class C2Function(C1Function):
-    """Abstract base class for twice continuously differentiable (C2) scalar functions.
+    """Abstract base class for twice continuously differentiable (C2) scalar
+    functions with an optional scalar scale factor :math:`\\beta`.
 
-    Extends :class:`C1Function` with access to curvature information via the
-    diagonal of the Hessian, useful for diagonal pre-conditioning in
-    second-order or quasi-Newton optimization methods.
+    Extends :class:`C1Function` with curvature information.  The public
+    :meth:`hessian_diag_vec_prod` returns
+    :math:`\\beta \\operatorname{diag}(H_f(x))\\, v`.
+    Subclasses implement the unscaled :meth:`_hessian_diag_vec_prod`.
     """
 
     @abstractmethod
-    def hessian_diag(self, x: Array) -> Array:
-        """Diagonal of the Hessian of the function evaluated at x.
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        """Unscaled diagonal Hessian-vector product (implemented by subclasses)."""
+        ...
+
+    def hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        """Scaled diagonal Hessian-vector product:
+        :math:`\\beta \\operatorname{diag}(H_f(x))\\, v`.
 
         Parameters
         ----------
         x : Array
             Point at which to evaluate the Hessian diagonal.
+        v : Array
+            Vector to multiply with the Hessian diagonal, same shape as x.
 
         Returns
         -------
         Array
-            Array of the same shape as x containing the diagonal entries
-            of the Hessian matrix.
+            Array of the same shape as x containing
+            :math:`\\beta \\operatorname{diag}(H_f(x)) \\odot v`
+            (elementwise).
         """
-        ...
+        h = self._hessian_diag_vec_prod(x, v)
+        return h if self._beta == 1.0 else self._beta * h
 
 
-class NegPoissonLogL(C1Function):
-    """Negative Poisson log-likelihood for a linear forward model.
+class NegPoissonLogL(C2Function):
+    """Negative Poisson log-likelihood as a function of expected counts.
 
-    Implements the objective function
-
-    .. math::
-
-        f(x) = \\sum_i \\bar{y}_i(x) - y_i \\log \\bar{y}_i(x)
-
-    with the linear forward model :math:`\\bar{y}(x) = A x + s`, where
-    :math:`A` is a :class:`.LinearOperator`, :math:`y` is the measured data,
-    and :math:`s` is an additive contamination term (e.g. scatter/randoms).
-
-    The gradient is
+    Implements
 
     .. math::
 
-        \\nabla f(x) = A^H \\left(1 - \\frac{y}{\\bar{y}(x)}\\right).
+        f(\\bar{y}) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i
+
+    and its gradient w.r.t. the expected counts :math:`\\bar{y}`:
+
+    .. math::
+
+        \\nabla_{\\bar{y}} f = 1 - \\frac{y}{\\bar{y}}.
+
+    This class operates directly on the predicted counts :math:`\\bar{y}`,
+    independently of how they were computed. Use :class:`C2AffineObjective` to
+    compose with a forward model :math:`\\bar{y}(x) = A x + s`.
 
     Parameters
     ----------
     data : Array
         Measured data :math:`y`.
-    op : LinearOperator
-        Forward operator :math:`A`.
-    s : Array
-        Additive contamination sinogram :math:`s`.
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     """
 
-    def __init__(self, data: Array, op: LinearOperator, s: Array):
-        self._data, self._op, self._s = data, op, s
+    def __init__(self, data: Array, beta: float = 1.0):
+        super().__init__(beta)
+        self._data = data
 
-    def __call__(self, x: Array) -> float:
-        pred = self._op(x) + self._s
+    def _call(self, pred: Array) -> float:
         xp = get_namespace(pred)
         return float(xp.sum(pred - self._data * xp.log(pred)))
 
-    def gradient(self, x: Array) -> Array:
-        pred = self._op(x) + self._s
-        return self._op.adjoint(1 - self._data / pred)
+    def _gradient(self, pred: Array) -> Array:
+        return 1 - self._data / pred
 
-    def call_and_gradient(self, x: Array) -> tuple[float, Array]:
-        pred = self._op(x) + self._s
+    def _call_and_gradient(self, pred: Array) -> tuple[float, Array]:
         xp = get_namespace(pred)
-        value = float(xp.sum(pred - self._data * xp.log(pred)))
-        grad = self._op.adjoint(1 - self._data / pred)
-        return value, grad
+        return float(xp.sum(pred - self._data * xp.log(pred))), 1 - self._data / pred
+
+    def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
+        return self._data / (pred**2) * v
+
+
+class C1AffineObjective(C1Function):
+    """Composes a prediction-space :class:`C1Function` with an affine forward model.
+
+    Turns :math:`g(\\bar{y})` into
+    :math:`f(x) = \\beta \\cdot g(A x + s)` using the chain rule:
+
+    .. math::
+
+        \\nabla_x f(x) = \\beta \\cdot A^H \\nabla_{\\bar{y}} g(A x + s).
+
+    Parameters
+    ----------
+    loss : C1Function
+        A :class:`C1Function` operating on the prediction space.
+    op : LinearOperator
+        The linear part of the forward model :math:`A`.
+    s : Array
+        Additive contamination term :math:`s` (e.g. scatter/randoms).
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta` applied on top of any
+        :math:`\\beta` already carried by ``loss``.  Defaults to ``1.0``.
+    """
+
+    def __init__(self, loss: C1Function, op: LinearOperator, s: Array, beta: float = 1.0):
+        super().__init__(beta)
+        self._loss, self._op, self._s = loss, op, s
+
+    def _call(self, x: Array) -> float:
+        return self._loss(self._op(x) + self._s)
+
+    def _gradient(self, x: Array) -> Array:
+        pred = self._op(x) + self._s
+        return self._op.adjoint(self._loss.gradient(pred))
+
+    def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
+        pred = self._op(x) + self._s
+        value, grad_pred = self._loss.call_and_gradient(pred)
+        return value, self._op.adjoint(grad_pred)
+
+
+class C2AffineObjective(C2Function, C1AffineObjective):
+    """Composes a prediction-space :class:`C2Function` with an affine forward model.
+
+    Extends :class:`C1AffineObjective` with second-order information. For
+    :math:`f(x) = \\beta \\cdot g(A x + s)` the Hessian-vector product is:
+
+    .. math::
+
+        H_f(x)\\, v = \\beta \\cdot A^H \\bigl(\\operatorname{diag}(H_g(\\bar{y})) \\odot (A v)\\bigr)
+
+    where :math:`\\bar{y} = A x + s` and :math:`\\odot` denotes elementwise
+    multiplication.
+
+    Parameters
+    ----------
+    loss : C2Function
+        A :class:`C2Function` operating on the prediction space.
+    op : LinearOperator
+        The linear part of the forward model :math:`A`.
+    s : Array
+        Additive contamination term :math:`s` (e.g. scatter/randoms).
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta` applied on top of any
+        :math:`\\beta` already carried by ``loss``.  Defaults to ``1.0``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from parallelproj.operators import MatrixOperator
+    >>> from parallelproj.functions import NegPoissonLogL, C2AffineObjective
+    >>> # 4-element image space, 6-element sinogram space
+    >>> A = np.random.rand(6, 4)
+    >>> op = MatrixOperator(A)
+    >>> s = 0.1 * np.ones(6)          # scatter/randoms contamination
+    >>> data = np.ones(6)             # measured counts
+    >>> x = np.ones(4)                # image estimate
+    >>> v = np.ones(4)                # direction vector
+    >>>
+    >>> loss = NegPoissonLogL(data)
+    >>> f = C2AffineObjective(loss, op, s, beta=0.5)
+    >>>
+    >>> grad = f.gradient(x)                          # shape (4,), scaled by beta=0.5
+    >>> hv   = f.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
+    """
+
+    def __init__(self, loss: C2Function, op: LinearOperator, s: Array, beta: float = 1.0):
+        self._loss: C2Function
+        C1AffineObjective.__init__(self, loss, op, s, beta)
+
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        pred = self._op(x) + self._s
+        return self._op.adjoint(self._loss.hessian_diag_vec_prod(pred, self._op(v)))
