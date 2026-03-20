@@ -148,7 +148,7 @@ else:
     att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
 
 res_model = parallelproj.operators.GaussianFilterOperator(
-    proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
+    proj.in_shape, sigma=2.0 / (2.35 * proj.voxel_size)
 )
 
 # compose all 3 operators into a single linear operator
@@ -319,7 +319,7 @@ def em_update(x_cur: Array, data_fidelity: DataFidelity, adjoint_ones: Array) ->
 # The "sensitivity" images are also calculated separately for each subset.
 
 # number of OSEM iterations
-num_epochs = 200 // len(pet_subset_linop_seq)
+num_epochs = 480 // num_subsets
 
 # initialize x
 x_osem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
@@ -411,8 +411,8 @@ svrg_step_size = 1.0
 df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
 for epoch in range(num_epochs):
-    if epoch % 2 == 0 or epoch == 1:
-        if epoch < 6:
+    if epoch % 2 == 0:
+        if epoch <= 4:
             svrg_precond = x_svrg / adjoint_ones
 
         stored_grads, full_grad = svrg_calc_snapshot_gradients(
@@ -447,7 +447,7 @@ epochs = np.arange(1, num_epochs + 1)
 fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
 ax.plot(epochs, to_numpy_array(df_osem), label="OSEM", marker="o")
 ax.plot(epochs, to_numpy_array(df_svrg), label="SVRG", marker="o")
-ax.set_ylim(min(xp.min(df_osem), xp.min(df_svrg)), df_osem[1])
+ax.set_ylim(min(float(xp.min(df_osem)), float(xp.min(df_svrg))), float(df_osem[1]))
 ax.legend()
 ax.grid(ls=":")
 ax.set_xlabel("Epoch")
