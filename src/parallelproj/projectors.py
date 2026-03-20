@@ -272,7 +272,7 @@ class ParallelViewProjector3D(LinearOperator):
         view_angles: Array,
         radius: float,
         image_origin: tuple[float, float, float],
-        voxel_size: tuple[float, float],
+        voxel_size: tuple[float, float, float],
         ring_positions: Array,
         span: int = 1,
         max_ring_diff: int | None = None,
@@ -576,10 +576,9 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        self._tof = value
-
         if self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
+        self._tof = value
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
@@ -813,7 +812,7 @@ class RegularPolygonPETProjector(LinearOperator):
             x,
             y,
             z,
-            filled=np.ones(sh, dtype=np.bool),
+            filled=np.ones(sh, dtype=bool),
             facecolors=colors,
             edgecolors=edgecolor,
         )
@@ -1135,11 +1134,11 @@ class ListmodePETProjector(LinearOperator):
 
 
 class EqualBlockPETProjector(LinearOperator):
-    """geometric non-TOF and TOF sinogram projector for regular polygon PET scanners
+    """geometric non-TOF and TOF sinogram projector for equal block PET scanners
 
     Examples
     --------
-    .. minigallery:: parallelproj.RegularPolygonPETProjector
+    .. minigallery:: parallelproj.EqualBlockPETProjector
     """
 
     def __init__(
@@ -1152,7 +1151,7 @@ class EqualBlockPETProjector(LinearOperator):
         """
         Parameters
         ----------
-        lor_descriptor : RegularPolygonPETLORDescriptor
+        lor_descriptor : EqualBlockPETLORDescriptor
             descriptor of the LOR start / end points
         img_shape : tuple[int, int, int]
             shape of the image to be projected
@@ -1225,10 +1224,9 @@ class EqualBlockPETProjector(LinearOperator):
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        self._tof = value
-
         if self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
+        self._tof = value
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
@@ -1400,7 +1398,7 @@ class EqualBlockPETProjector(LinearOperator):
             x,
             y,
             z,
-            filled=np.ones(sh, dtype=np.bool),
+            filled=np.ones(sh, dtype=bool),
             facecolors=colors,
             edgecolors=edgecolor,
         )
