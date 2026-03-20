@@ -267,38 +267,6 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # data, contamination and the adjoint of ones.
 
 
-class DataFidelity(ABC):
-    @abstractmethod
-    def __call__(self, x: Array) -> float: ...
-
-    @abstractmethod
-    def gradient(self, x: Array) -> Array: ...
-
-    @abstractmethod
-    def call_and_gradient(self, x: Array) -> tuple[Array, Array]: ...
-
-
-class NegPoissonLogL(DataFidelity):
-    def __init__(
-        self, data: Array, op: parallelproj.operators.LinearOperator, s: Array
-    ):
-        self._data, self._op, self._s = data, op, s
-
-    def __call__(self, x: Array) -> float:
-        pred = self._op(x) + self._s
-        return float(xp.sum(pred - self._data * xp.log(pred)))
-
-    def gradient(self, x: Array) -> Array:
-        pred = self._op(x) + self._s
-        return self._op.adjoint(1 - self._data / pred)
-
-    def call_and_gradient(self, x: Array) -> tuple[Array, Array]:
-        pred = self._op(x) + self._s
-        value = float(xp.sum(pred - self._data * xp.log(pred)))
-        grad = self._op.adjoint(1 - self._data / pred)
-        return value, grad
-
-
 def em_update(x_cur: Array, data_fidelity: DataFidelity, adjoint_ones: Array) -> Array:
     """EM update re-written as preconditioned GD step"""
     em_diag_precond = x_cur / adjoint_ones
