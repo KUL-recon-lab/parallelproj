@@ -189,6 +189,10 @@ class ParallelViewProjector2D(LinearOperator):
         **kwargs : dict
             passed to matplotlib.pyplot.imshow
 
+        Returns
+        -------
+        plt.Figure
+            the matplotlib figure
         """
         if views_to_show is None:
             views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)
@@ -292,7 +296,7 @@ class ParallelViewProjector3D(LinearOperator):
         image_origin : tuple[float, float, float]
             world coordinates of the [0,0,0] voxel
         voxel_size : tuple[float, float, float]
-            the voxel size in all directions (last direction is axial)
+            the voxel size in all three directions (n0, n1, axial)
         ring_positions : Array
             position of the rings in world coordinates
         span : int
@@ -889,8 +893,8 @@ class RegularPolygonPETProjector(LinearOperator):
 
                 ss = self.xp.reshape(ss, (size(ss),))
 
-                # currently there is no "repeat" function in array-api, so
-                # we convert back and forth to numpy cpu array
+                # array_api_strict does not support repeat with array-valued counts;
+                # we convert back and forth to numpy cpu array as a workaround
                 event_sino_inds = self.xp.asarray(
                     np.repeat(np.arange(ss.shape[0]), to_numpy_array(ss)),
                     device=self._dev,
