@@ -33,11 +33,12 @@ Content
     :maxdepth: 1
     :caption: API
 
+    Linear operators <api_operators>
+    Functions <api_functions>
     PET scanner geometries <api_pet_scanners>
     PET LOR / sinogram descriptors <api_pet_lors>
-    PET TOF parameters <api_tof>
     PET projectors <api_projectors>
-    Linear operators <api_operators>
+    PET TOF parameters <api_tof>
 
 References
 ----------
