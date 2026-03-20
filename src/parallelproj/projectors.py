@@ -101,11 +101,11 @@ class ParallelViewProjector2D(LinearOperator):
         return self._xp
 
     @property
-    def in_shape(self) -> tuple[int, int]:
+    def in_shape(self) -> tuple[int, ...]:
         return self._image_shape
 
     @property
-    def out_shape(self) -> tuple[int, int]:
+    def out_shape(self) -> tuple[int, ...]:
         return (self._num_rad, self._num_views)
 
     @property
@@ -186,7 +186,7 @@ class ParallelViewProjector2D(LinearOperator):
             view numbers to show
         image : None | Array
             show an image inside the projector geometry
-        **kwargs : some type
+        **kwargs : dict
             passed to matplotlib.pyplot.imshow
 
         """
@@ -990,7 +990,7 @@ class ListmodePETProjector(LinearOperator):
         return self._img_shape
 
     @property
-    def out_shape(self) -> tuple[int]:
+    def out_shape(self) -> tuple[int, ...]:
         return (self._xstart.shape[0],)
 
     @property
