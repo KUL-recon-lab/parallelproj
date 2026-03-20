@@ -367,7 +367,7 @@ for i in range(num_epochs):
 
 def svrg_calc_snapshot_gradients(
     x_cur: Array,
-    subset_data_fidelities: Sequence[DataFidelity],
+    subset_obj_functions: Sequence[DataFidelity],
 ) -> tuple[Array, Array]:
     """Store all subset gradients at the current anchor point and return their sum.
 
@@ -380,7 +380,7 @@ def svrg_calc_snapshot_gradients(
     """
     m = len(subset_data_fidelities)
     stored_grads = xp.zeros((m,) + x_cur.shape, dtype=x_cur.dtype, device=dev)
-    for k, df in enumerate(subset_data_fidelities):
+    for k, df in enumerate(subset_obj_functions):
         stored_grads[k] = df.gradient(x_cur)
     full_grad = xp.sum(stored_grads, axis=0)
     return stored_grads, full_grad
@@ -389,15 +389,15 @@ def svrg_calc_snapshot_gradients(
 def svrg_update(
     x_cur: Array,
     subset_idx: int,
-    subset_data_fidelities: Sequence[DataFidelity],
+    subset_obj_functions: Sequence[DataFidelity],
     stored_subset_gradients: Array,
     full_gradient: Array,
     precond: Array,
-    step_size: float = 2.0,
+    step_size: float = 1.0,
 ) -> Array:
     """Single SVRG subset update with variance-reduced gradient."""
-    m = len(subset_data_fidelities)
-    grad_k = subset_data_fidelities[subset_idx].gradient(x_cur)
+    m = len(subset_obj_functions)
+    grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
     approx_grad = m * (grad_k - stored_subset_gradients[subset_idx]) + full_gradient
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
