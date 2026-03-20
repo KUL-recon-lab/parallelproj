@@ -244,6 +244,7 @@ class MatrixOperator(LinearOperator):
         """array module of the operator"""
         return array_api_compat.get_namespace(self._A)
 
+    @property
     def iscomplex(self) -> bool:
         """bool whether the operator is complex"""
         return self.xp.isdtype(self._A.dtype, self.xp.complex64) or self.xp.isdtype(
@@ -254,7 +255,7 @@ class MatrixOperator(LinearOperator):
         return self.xp.matmul(self._A, x)
 
     def _adjoint(self, y: Array) -> Array:
-        if self.iscomplex():
+        if self.iscomplex:
             return self.xp.matmul(self.xp.conj(self._A).T, y)
         else:
             return self.xp.matmul(self._A.T, y)
@@ -360,11 +361,12 @@ class ElementwiseMultiplicationOperator(LinearOperator):
         return self._values * x
 
     def _adjoint(self, y: Array) -> Array:
-        if self.iscomplex():
+        if self.iscomplex:
             return self.xp.conj(self._values) * y
         else:
             return self._values * y
 
+    @property
     def iscomplex(self) -> bool:
         """bool whether the operator is complex"""
         return self.xp.isdtype(
@@ -420,7 +422,7 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
 
     def _adjoint(self, y: Array) -> Array:
         x = 1 * y  # suboptimal to copy array
-        if self.iscomplex():
+        if self.iscomplex:
             tmp = self.xp.conj(self._values)
         else:
             tmp = self._values
@@ -430,6 +432,7 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
 
         return x
 
+    @property
     def iscomplex(self) -> bool:
         """bool whether the operator is complex"""
         return self.xp.isdtype(
