@@ -256,11 +256,12 @@ class HalfSquaredL2Deviation(C2Function):
         return float(0.5 * xp.sum(diff**2))
 
     def _gradient(self, x: Array) -> Array:
-        return x if self._data is None else x - self._data
+        xp = get_namespace(x)
+        return xp.asarray(x, copy=True) if self._data is None else x - self._data
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         xp = get_namespace(x)
-        diff = x if self._data is None else x - self._data
+        diff = xp.asarray(x, copy=True) if self._data is None else x - self._data
         return float(0.5 * xp.sum(diff**2)), diff
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
@@ -346,18 +347,16 @@ class SumC2Function(C2Function, SumC1Function):
 class C1AffineObjective(C1Function):
     """Composes a prediction-space :class:`C1Function` with an affine forward model.
 
-    Turns :math:`g(\\bar{y})` into
-    :math:`f(x) = \\beta \\cdot g(A x + s)` using the chain rule:
+    Turns :math:`g(\\bar{y})` into :math:`f(x) = g(A x + s)` using the
+    chain rule:
 
     .. math::
 
-        \\nabla_x f(x) = \\beta \\cdot A^H \\nabla_{\\bar{y}} g(A x + s).
+        \\nabla_x f(x) = A^H \\nabla_{\\bar{y}} g(A x + s).
 
+    Any scaling is carried exclusively by the ``beta`` attribute of ``loss``.
     When :math:`s` is ``None`` the pure linear model :math:`\\bar{y} = A x`
     is used, avoiding the addition entirely.
-
-    Scaling is handled exclusively by the ``beta`` attribute of ``loss``
-    itself; no separate scale is applied at the wrapper level.
 
     Parameters
     ----------
@@ -398,18 +397,16 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     """Composes a prediction-space :class:`C2Function` with an affine forward model.
 
     Extends :class:`C1AffineObjective` with second-order information. For
-    :math:`f(x) = \\beta \\cdot g(A x + s)` the Hessian-vector product is:
+    :math:`f(x) = g(A x + s)` the Hessian-vector product is:
 
     .. math::
 
-        H_f(x)\\, v = \\beta \\cdot A^H \\bigl(\\operatorname{diag}(H_g(\\bar{y})) \\odot (A v)\\bigr)
+        H_f(x)\\, v = A^H \\bigl(\\operatorname{diag}(H_g(\\bar{y})) \\odot (A v)\\bigr)
 
     where :math:`\\bar{y} = A x + s` (or :math:`\\bar{y} = A x` when
     :math:`s` is ``None``) and :math:`\\odot` denotes elementwise
-    multiplication.
-
-    Scaling is handled exclusively by the ``beta`` attribute of ``loss``
-    itself; no separate scale is applied at the wrapper level.
+    multiplication.  Any scaling is carried exclusively by the ``beta``
+    attribute of ``loss``.
 
     Parameters
     ----------
