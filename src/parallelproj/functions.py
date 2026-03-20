@@ -211,6 +211,92 @@ class NegPoissonLogL(C2Function):
         return self._data / (pred**2) * v
 
 
+class NegPoissonLogLSafe(C2Function):
+    """Negative Poisson log-likelihood, safe for bins with zero expectation.
+
+    Identical to :class:`NegPoissonLogL` but correctly handles *virtual bins*
+    where the predicted counts :math:`\\bar{y}_i = 0`.  Naively evaluating
+    :math:`0 \\cdot \\log 0`, :math:`0 / 0`, or :math:`0 / 0^2` yields
+    ``nan``; this class avoids those cases via a user-supplied boolean mask
+    :math:`m_i` (``True`` = active bin, ``False`` = virtual bin).
+
+    .. note::
+
+        The mask cannot be derived from the measured data :math:`y` alone.
+        With Poisson noise, any active bin can observe :math:`y_i = 0`
+        while still having :math:`\\bar{y}_i > 0`, which is well-defined
+        and requires no special treatment.  The mask must reflect the
+        *structure* of the forward model: a bin is virtual when no image
+        voxel contributes to it (i.e. the corresponding row of :math:`A`
+        is zero) **and** the contamination :math:`s_i = 0`.  This
+        information is geometry-dependent and must be provided by the user.
+        If :math:`s_i > 0` for all bins, no virtual bins exist and
+        :class:`NegPoissonLogL` can be used directly.
+
+    Implements
+
+    .. math::
+
+        f(\\bar{y}) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i
+
+    with gradient
+
+    .. math::
+
+        \\nabla_{\\bar{y}} f = 1 - \\frac{y}{\\bar{y}}
+
+    and diagonal Hessian-vector product
+
+    .. math::
+
+        \\operatorname{diag}(H_f(\\bar{y})) \\odot v = \\frac{y}{\\bar{y}^2} \\odot v.
+
+    For virtual bins (:math:`m_i = \\text{False}`, :math:`\\bar{y}_i = 0`)
+    the mathematically correct limiting values are substituted:
+
+    ============================================  ==========
+    Expression                                    Limit
+    ============================================  ==========
+    :math:`\\bar{y}_i - y_i \\log \\bar{y}_i`     :math:`0`
+    :math:`1 - y_i / \\bar{y}_i`                  :math:`1`
+    :math:`y_i / \\bar{y}_i^2`                    :math:`0`
+    ============================================  ==========
+
+    Parameters
+    ----------
+    data : Array
+        Measured data :math:`y`.
+    mask : Array
+        Boolean array of the same shape as ``data``.  ``True`` for active
+        bins (:math:`\\bar{y}_i > 0` is guaranteed), ``False`` for virtual
+        bins (:math:`\\bar{y}_i = 0` by construction).
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    """
+
+    def __init__(self, data: Array, mask: Array, beta: float = 1.0):
+        super().__init__(beta)
+        self._data = data
+        self._mask = mask
+
+    def _call(self, pred: Array) -> float:
+        xp = get_namespace(pred)
+        zeros = xp.zeros_like(pred)
+        return float(
+            xp.sum(pred - xp.where(self._mask, self._data * xp.log(pred), zeros))
+        )
+
+    def _gradient(self, pred: Array) -> Array:
+        xp = get_namespace(pred)
+        zeros = xp.zeros_like(pred)
+        return 1 - xp.where(self._mask, self._data / pred, zeros)
+
+    def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
+        xp = get_namespace(pred)
+        zeros = xp.zeros_like(pred)
+        return xp.where(self._mask, self._data / (pred**2), zeros) * v
+
+
 class HalfSquaredL2Deviation(C2Function):
     """Half squared L2 deviation from reference data.
 
