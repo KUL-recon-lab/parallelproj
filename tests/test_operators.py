@@ -51,6 +51,53 @@ def test_matrix(xp: ModuleType, dev: str):
     assert allclose(scale_fac * (A @ x), op(x))
 
 
+def test_adjoint_operator(xp: ModuleType, dev: str):
+    np.random.seed(0)
+
+    A = xp.asarray([[1.0, 2.0], [-3.0, 2.0], [-1.0, -1.0]], device=dev)
+    x = xp.asarray([-2.0, 1.0], device=dev)
+    y = xp.asarray([1.0, 0.0, -1.0], device=dev)
+
+    op = ppo.MatrixOperator(A)
+    op_H = op.H
+
+    # shapes are swapped
+    assert op_H.in_shape == op.out_shape
+    assert op_H.out_shape == op.in_shape
+
+    # forward of A.H equals adjoint of A
+    assert allclose(op_H(y), op.adjoint(y))
+
+    # adjoint of A.H equals forward of A
+    assert allclose(op_H.adjoint(x), op(x))
+
+    # A.H is itself a valid linear operator
+    assert op_H.adjointness_test(xp, dev)
+
+    # scale propagation: setting A.scale updates A.H.scale to its conjugate
+    op.scale = 2.0
+    assert op_H.scale == 2.0  # real scale: conjugate of 2.0 is 2.0
+
+    # setting A.H.scale propagates back to A as conjugate
+    op_H.scale = 3.0
+    assert op.scale == 3.0
+
+
+def test_adjoint_operator_complex_scale(xp: ModuleType, dev: str):
+    A = xp.asarray([[1.0, 2.0], [-3.0, 2.0], [-1.0, -1.0]], device=dev)
+
+    op = ppo.MatrixOperator(A)
+    op_H = op.H
+
+    # complex scale: A.H.scale == conj(A.scale)
+    op.scale = 1.0 + 2.0j
+    assert op_H.scale == (1.0 - 2.0j)
+
+    # setting A.H.scale = α sets A.scale = conj(α)
+    op_H.scale = 3.0 + 1.0j
+    assert op.scale == (3.0 - 1.0j)
+
+
 def test_complex_matrix(xp: ModuleType, dev: str):
     np.random.seed(0)
 
