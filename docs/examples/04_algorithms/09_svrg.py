@@ -1,21 +1,29 @@
 """
-SVRG example
-============
+Convergence comparison: MLEM vs OSEM vs SVRG
+=============================================
 
-This example demonstrates the use of the SVRG algorithm to minimize the negative Poisson log-likelihood function
-
-.. math::
-    f(x) = \\sum_{i=1}^m \\bar{y}_i (x) - y_i \\log(\\bar{y}_i (x))
-
-subject to
+This example compares the convergence speed (per epoch) of three algorithms
+for minimising the negative Poisson log-likelihood
 
 .. math::
-    x \\geq 0
+    f(x) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i, \\qquad \\bar{y}(x) = A x + s
 
-using the linear forward model
+subject to :math:`x \\geq 0`:
 
-.. math::
-    \\bar{y}(x) = A x + s
+* **MLEM** — expectation–maximisation on the full data; one iteration = one
+  full data pass; guaranteed to converge but slow per epoch.
+* **OSEM** — ordered-subsets EM; one epoch = :math:`m` subset updates ≈ one
+  full data pass; fast empirical convergence but *no* convergence guarantee.
+* **SVRG** — stochastic variance-reduced gradient with subsets; one epoch =
+  :math:`m` variance-reduced subset updates; provably convergent like MLEM
+  while achieving the fast per-epoch progress of OSEM.
+
+.. note::
+    For SVRG, one epoch requires **two** full data passes: one to compute
+    the snapshot gradients at the anchor point, and one for the
+    :math:`m` variance-reduced subset updates.  The epoch axis in the
+    convergence plot therefore understates the true computational cost of
+    SVRG relative to OSEM by a factor of roughly two.
 
 .. tip::
     parallelproj is python array API compatible meaning it supports different
@@ -240,30 +248,22 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 )
 
 # %%
-# EM update to minimize :math:`f(x)`
-# ----------------------------------
+# EM update
+# ---------
 #
-# The EM update that can be used in MLEM or OSEM is given by cite:p:`Dempster1977` :cite:p:`Shepp1982` :cite:p:`Lange1984` :cite:p:`Hudson1994`
+# The EM update used in MLEM and OSEM is :cite:p:`Dempster1977`
+# :cite:p:`Shepp1982` :cite:p:`Lange1984` :cite:p:`Hudson1994`
 #
 # .. math::
 #     x^+ = \frac{x}{A^H 1} A^H \frac{y}{A x + s}
 #
-# to calculate the minimizer of :math:`f(x)` iteratively.
-#
-# To monitor the convergence we calculate the relative cost
-#
-# .. math::
-#    \frac{f(x) - f(x^*)}{|f(x^*)|}
-#
-# and the distance to the optimal point
+# which can be rewritten as a preconditioned gradient descent step with
+# diagonal preconditioner :math:`D = \operatorname{diag}(x / (A^H 1))`:
 #
 # .. math::
-#    \frac{\|x - x^*\|}{\|x^*\|}.
+#     x^+ = x - D \, \nabla_x f(x).
 #
-#
-# We setup a function that calculates a single MLEM/OSEM
-# update given the current solution, a linear forward operator,
-# data, contamination and the adjoint of ones.
+# We implement this as a single function used by both MLEM and OSEM.
 
 
 def em_update(
@@ -278,19 +278,18 @@ def em_update(
 
 
 # %%
-# Run the OSEM iterations
-# -----------------------
+# Setup of objective functions and sensitivity images
+# ---------------------------------------------------
 #
-# Note that the OSEM iterations are almost the same as the MLEM iterations.
-# The only difference is that in every subset update, we pass an operator
-# that projects a subset, a subset of the data and a subset of the contamination.
+# We define one :class:`.C2AffineObjective` per subset (for OSEM and SVRG)
+# and one for the full data (for MLEM and objective evaluation).
+# The sensitivity image :math:`A^H 1` and its per-subset counterparts
+# :math:`(A^k)^H 1` are precomputed once.
 #
-# .. math::
-#     x^+ = \frac{x}{(A^k)^H 1} (A^k)^H \frac{y^k}{A^k x + s^k}
-#
-# The "sensitivity" images are also calculated separately for each subset.
+# We choose the number of OSEM/SVRG epochs so that the total number of
+# subset gradient evaluations matches ``num_epochs_mlem`` full MLEM iterations
+# (each MLEM iteration = one full data pass = ``num_subsets`` subset passes).
 
-# number of epochs (iterations) for OSEM and SVRG
 num_epochs_mlem = 1200
 num_epochs = num_epochs_mlem // num_subsets
 
@@ -310,13 +309,11 @@ subset_data_fidelities = [
 
 full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
 
-# run 1 OSEM epoch as a common warm-start for both algorithms
+# run 1 OSEM epoch as a common warm-start for MLEM, OSEM and SVRG
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 for k in range(len(subset_slices)):
     print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
-    x_init = em_update(
-        x_init, subset_data_fidelities[k], subset_adjoint_ones[k], step_size=1.0
-    )
+    x_init = em_update(x_init, subset_data_fidelities[k], subset_adjoint_ones[k])
 
 # full sensitivity image: A^H 1 = sum of all subset adjoint ones
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
@@ -325,7 +322,13 @@ df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev)
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
 # %%
-# MLEM iterations (full data, no subsets) starting from x_init
+# MLEM
+# ----
+#
+# One MLEM iteration uses the full data (:math:`A`, :math:`y`, :math:`s`)
+# and the full sensitivity image :math:`A^H 1`.  It is guaranteed to
+# converge to the maximum-likelihood solution but requires one full data
+# pass per iteration.
 x_mlem = xp.asarray(x_init, copy=True)
 for i in range(num_epochs_mlem):
     print(f"MLEM iteration {(i + 1):03} / {num_epochs_mlem:03}", end="\r")
@@ -333,7 +336,13 @@ for i in range(num_epochs_mlem):
     df_mlem[i] = full_data_fidelity(x_mlem)
 
 # %%
-# OSEM iterations starting from x_init
+# OSEM
+# ----
+#
+# One OSEM epoch cycles through all :math:`m` subsets, each using the
+# subset operator :math:`A^k`, subset data :math:`y^k`, contamination
+# :math:`s^k`, and subset sensitivity :math:`(A^k)^H 1`.  Fast empirical
+# convergence but no convergence guarantee.
 x_osem = xp.asarray(x_init, copy=True)
 for i in range(num_epochs):
     for k in range(len(subset_slices)):
@@ -343,18 +352,32 @@ for i in range(num_epochs):
     df_osem[i] = full_data_fidelity(x_osem)
 
 # %%
-# Run the SVRG iterations
-# -----------------------
+# SVRG
+# ----
 #
 # Each SVRG epoch consists of two phases:
 #
-# 1. Anchor phase: compute and store all subset gradients at the current point
-# 2. Subset updates: for each subset, use the variance-reduced gradient
+# 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
+#    subset gradients at the current point :math:`\tilde{x}`, then take a
+#    full gradient step.
+# 2. **Variance-reduced subset updates**: for each subset :math:`k`, form
+#    the variance-reduced gradient
 #
-# .. math::
-#     g^{VR} = m \left( \nabla f_k(x) - \tilde{g}_k \right) + \sum_{k=1}^m \tilde{g}_k
+#    .. math::
+#        g^{VR}_k = m \left( \nabla f_k(x) - \tilde{g}_k \right)
+#                   + \sum_{j=1}^m \tilde{g}_j
 #
-# where :math:`\tilde{g}_k` are the stored subset gradients at the anchor point.
+#    where :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` are the stored
+#    anchor gradients.
+#
+# .. note::
+#     The anchor phase requires one full pass through all subsets to
+#     compute :math:`\tilde{g}_1, \ldots, \tilde{g}_m`.  Therefore, each
+#     SVRG epoch that includes an anchor phase costs **two full data
+#     passes** (one for the snapshot, one for the :math:`m` subset
+#     updates), compared to one full data pass for OSEM or MLEM.
+#     The epoch axis in the convergence plot understates SVRG's
+#     computational cost relative to OSEM by a factor of roughly two.
 
 
 def svrg_calc_snapshot_gradients(
@@ -370,7 +393,7 @@ def svrg_calc_snapshot_gradients(
     full_grad : Array, shape x_cur.shape
         Sum of all subset gradients.
     """
-    m = len(subset_data_fidelities)
+    m = len(subset_obj_functions)
     stored_grads = xp.zeros((m,) + x_cur.shape, dtype=x_cur.dtype, device=dev)
     for k, df in enumerate(subset_obj_functions):
         stored_grads[k] = df.gradient(x_cur)
@@ -429,29 +452,92 @@ for epoch in range(num_epochs):
     df_svrg[epoch] = full_data_fidelity(x_svrg)
 
 # %%
-# Plot the convergence of MLEM, OSEM and SVRG
-# --------------------------------------------
+# Convergence comparison
+# ----------------------
+#
+# We plot the negative Poisson log-likelihood vs epoch for OSEM and SVRG,
+# and overlay two horizontal reference lines showing where MLEM stands after
+# ``num_epochs`` and ``num_epochs_mlem`` iterations respectively.
+# One epoch of OSEM or SVRG corresponds to one cycle through all subsets
+# (roughly one full data pass for OSEM, roughly two for SVRG).
 
-epochs = np.arange(1, df_osem.shape[0] + 1)
+# data-pass counts
+# OSEM:  1 full data pass per epoch
+# SVRG:  2 passes on anchor epochs (snapshot + subset updates),
+#         1 pass on non-anchor epochs (subset updates only)
+# MLEM:  1 pass per iteration
+epochs = np.arange(1, num_epochs + 1)
+osem_passes = epochs.copy()
+
+svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
+svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
+
+max_passes = int(svrg_cumulative_passes[-1])
+df_mlem_trimmed = to_numpy_array(df_mlem[:max_passes])
 
 df_min = min(float(xp.min(df_mlem)), float(xp.min(df_osem)), float(xp.min(df_svrg)))
 df_max = float(df_osem[0])  # use first OSEM epoch as upper limit
 
-fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
-ax.plot(epochs, to_numpy_array(df_osem), label=f"OSEM {num_subsets}ss", marker="o")
-ax.plot(
-    epochs,
-    to_numpy_array(df_svrg),
-    label=f"SVRG {num_subsets}ss, {svrg_step_size:.1f}",
-    marker="o",
+osem_label = f"OSEM ({num_subsets} subsets)"
+svrg_label = f"SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})"
+mlem_label = "MLEM"
+
+fig, axs = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
+
+# --- left: vs epoch ---
+axs[0].plot(epochs, to_numpy_array(df_osem), label=osem_label, marker="o")
+axs[0].plot(epochs, to_numpy_array(df_svrg), label=svrg_label, marker="o")
+axs[0].axhline(
+    float(df_mlem[50 - 1]),
+    label=f"{mlem_label} (50 iter.)",
+    ls="--",
+    color="gray",
 )
-ax.axhline(float(df_mlem[99]), label=f"MLEM {100} ep.", ls="--", color="gray")
-ax.axhline(
-    float(df_mlem[-1]), label=f"MLEM {num_epochs_mlem} ep.", ls="--", color="black"
+axs[0].axhline(
+    float(df_mlem[100 - 1]),
+    label=f"{mlem_label} (100 iter.)",
+    ls="--",
+    color="gray",
 )
-ax.set_ylim(df_min, df_max)
-ax.legend()
-ax.grid(ls=":")
-ax.set_xlabel("Epoch")
-ax.set_ylabel("Negative Poisson Log-Likelihood")
+axs[0].axhline(
+    float(df_mlem[-1]),
+    label=f"{mlem_label} ({num_epochs_mlem} iter.)",
+    ls="--",
+    color="black",
+)
+axs[0].set_ylim(df_min, df_max)
+axs[0].set_xlabel("Epoch")
+axs[0].set_ylabel("Negative Poisson log-likelihood")
+axs[0].legend()
+axs[0].grid(ls=":")
+
+# --- right: vs full data passes ---
+axs[1].plot(osem_passes, to_numpy_array(df_osem), label=osem_label, marker="o")
+axs[1].plot(
+    svrg_cumulative_passes, to_numpy_array(df_svrg), label=svrg_label, marker="o"
+)
+axs[1].axhline(
+    float(df_mlem[50 - 1]),
+    label=f"{mlem_label} (50 iter.)",
+    ls="--",
+    color="gray",
+)
+axs[1].axhline(
+    float(df_mlem[100 - 1]),
+    label=f"{mlem_label} (100 iter.)",
+    ls="--",
+    color="gray",
+)
+axs[1].axhline(
+    float(df_mlem[-1]),
+    label=f"{mlem_label} ({num_epochs_mlem} iter.)",
+    ls="--",
+    color="black",
+)
+axs[1].set_ylim(df_min, df_max)
+axs[1].set_xlabel("Full data passes")
+axs[1].set_ylabel("Negative Poisson log-likelihood")
+axs[1].legend()
+axs[1].grid(ls=":")
+
 fig.show()
