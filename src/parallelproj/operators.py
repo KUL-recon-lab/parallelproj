@@ -205,6 +205,59 @@ class LinearOperator(abc.ABC):
 
         return float(xp.sqrt(norm_squared))
 
+    @property
+    def H(self) -> AdjointLinearOperator:
+        """adjoint operator :math:`A^H`"""
+        return AdjointLinearOperator(self)
+
+
+class AdjointLinearOperator(LinearOperator):
+    """Adjoint of a linear operator
+
+    Wraps an existing :class:`LinearOperator` so that ``__call__`` applies
+    :math:`A^H` and ``adjoint`` applies :math:`A`.  The scale of this operator
+    is always the complex conjugate of the wrapped operator's scale; setting
+    the scale on either one propagates to the other.
+
+    Use the :attr:`LinearOperator.H` property rather than constructing this
+    class directly.
+    """
+
+    def __init__(self, operator: LinearOperator) -> None:
+        """init method
+
+        Parameters
+        ----------
+        operator : LinearOperator
+            the operator whose adjoint is to be represented
+        """
+        super().__init__()
+        self._operator = operator
+
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        return self._operator.out_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        return self._operator.in_shape
+
+    @property
+    def scale(self) -> float | complex:
+        """conjugate of the wrapped operator's scale"""
+        return self._operator.scale.conjugate()
+
+    @scale.setter
+    def scale(self, value: float | complex):
+        # setting A.H.scale = α sets A.scale = conj(α)
+        self._operator.scale = value.conjugate()
+
+    def _apply(self, x: Array) -> Array:
+        return self._operator._adjoint(x)
+
+    def _adjoint(self, y: Array) -> Array:
+        return self._operator._apply(y)
+
 
 class MatrixOperator(LinearOperator):
     """Linear Operator defined by dense matrix multiplication
