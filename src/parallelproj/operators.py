@@ -563,7 +563,7 @@ class VstackOperator(LinearOperator):
         self._operators = operators
         self._in_shape = self._operators[0].in_shape
         self._out_shapes = tuple([x.out_shape for x in operators])
-        self._raveled_out_shapes = tuple([np.prod(x) for x in self._out_shapes])
+        self._raveled_out_shapes = tuple([int(np.prod(x)) for x in self._out_shapes])
         self._out_shape = (sum(self._raveled_out_shapes),)
 
         # setup the slices for slicing the raveled output array
@@ -665,7 +665,10 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
     def adjoint(self, y: list[Array]) -> Array:
         """:math:`\\sum_i (A^i)^H y^i` for all :math:`i`"""
 
-        return sum([op.adjoint(y[i]) for (i, op) in enumerate(self)])
+        result = self._operators[0].adjoint(y[0])
+        for i, op in enumerate(self._operators[1:], start=1):
+            result = result + op.adjoint(y[i])
+        return result
 
     def norms(self, xp: ModuleType, dev: str) -> list[float]:
         """:math:`\\text{norm}(A^i)` for all :math:`i`"""
