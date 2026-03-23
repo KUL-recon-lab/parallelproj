@@ -5,11 +5,6 @@
 This example demonstrates the run 2D filtered back projection (FBP)
 on pre-corrected Poisson emission data.
 
-.. tip::
-    parallelproj is python array API compatible meaning it supports different
-    array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
-    Choose your preferred array API ``xp`` and device ``dev`` below.
-
 .. image:: https://mybinder.org/badge_logo.svg
  :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """

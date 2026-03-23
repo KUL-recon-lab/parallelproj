@@ -19,11 +19,6 @@ using the linear forward model
 .. math::
     \\bar{d}(x) = A x + s
 
-.. tip::
-    parallelproj is python array API compatible meaning it supports different
-    array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
-    Choose your preferred array API ``xp`` and device ``dev`` below.
-
 .. warning::
     Running this example using GPU arrays (e.g. using cupy as array backend)
     is highly recommended due to "longer" execution times with CPU arrays

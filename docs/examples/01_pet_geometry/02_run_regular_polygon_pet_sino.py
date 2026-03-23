@@ -7,11 +7,6 @@ between two LOR endpoints can be sorted into a sinogram containing a radial,
 view and plane dimension.
 This example shows how this can be done using the :class:`.RegularPolygonPETLORDescriptor`
 
-.. tip::
-    parallelproj is python array API compatible meaning it supports different
-    array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
-    Choose your preferred array API ``xp`` and device ``dev`` below.
-
 .. image:: https://mybinder.org/badge_logo.svg
  :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
