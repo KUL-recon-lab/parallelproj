@@ -233,7 +233,9 @@ for i in range(num_subsets):
         if subset_proj.tof
         else att_sino[subset_slices_non_tof[i]]
     )
-    subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values_k)
+    subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+        att_values_k
+    )
 
     pet_subset_linop_seq.append(
         parallelproj.operators.CompositeLinearOperator(
@@ -493,8 +495,9 @@ axs[1].grid(ls=":")
 fig.show()
 
 # %%
-fig2, ax2 = plt.subplots(1, 3, figsize=(12, 4), layout="constrained")
-ax2[0].imshow(to_numpy_array(x_init[:, :, 4]))
-ax2[1].imshow(to_numpy_array(x_sgd[:, :, 4]))
-ax2[2].imshow(to_numpy_array(x_svrg[:, :, 4]))
-fig2.show()
+from utils import show_3d_cuts
+
+fig, axs, widgets = show_3d_cuts(
+    to_numpy_array(x_sgd), voxel_size=voxel_size, fig_title="SGD result"
+)
+fig.show()

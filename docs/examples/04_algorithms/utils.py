@@ -4,6 +4,9 @@ from collections.abc import Sequence
 import abc
 import itertools
 import math
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, TextBox
 
 from array_api_compat import device, to_device
 from parallelproj import Array
@@ -611,3 +614,151 @@ class RDP(SmoothFunctionWithDiagonalHessian):
             tmp *= self._weights
 
         return 2 * tmp.sum(axis=0)
+
+
+def show_3d_cuts(
+    vol: np.ndarray,
+    voxel_size: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    fig_title: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    cmap: str = "Greys",
+    figsize: tuple[int, int] = (12, 6),
+) -> tuple:
+    """Display interactive 2D cuts through a 3D volume along all three axes.
+
+    Controls below the images:
+
+    * Three sliders to scroll through cuts along x, y, z.
+    * Two text boxes to update the colour scale limits (vmin / vmax).
+    * One text box to change the colormap (any valid matplotlib name).
+
+    Non-uniform voxel sizes are respected: each image is displayed with the
+    correct pixel aspect ratio so that physical distances are represented
+    accurately.
+
+    Parameters
+    ----------
+    vol : np.ndarray, shape (nx, ny, nz)
+        3-D volume to visualise.
+    voxel_size : tuple of three floats, optional
+        Physical size ``(dx, dy, dz)`` of one voxel.  Default ``(1, 1, 1)``.
+    fig_title : str or None, optional
+        Overall figure title.
+    vmin, vmax : float or None, optional
+        Initial colour scale limits.  Defaults to the global min / max of
+        ``vol``.
+    cmap : str, optional
+        Initial matplotlib colormap name.  Default ``"Greys"``.
+    figsize : tuple, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    axs : list of three Axes (image panels)
+    widgets : dict
+        All interactive widgets keyed by name (``"sx"``, ``"sy"``, ``"sz"``,
+        ``"tb_vmin"``, ``"tb_vmax"``, ``"tb_cmap"``).  Keep a reference to
+        this dict to prevent garbage collection of the callbacks.
+    """
+    assert vol.ndim == 3, "vol must be a 3-D array"
+    nx, ny, nz = vol.shape
+    dx, dy, dz = voxel_size
+
+    if vmin is None:
+        vmin = float(vol.min())
+    if vmax is None:
+        vmax = float(vol.max())
+
+    ix0, iy0, iz0 = nx // 2, ny // 2, nz // 2
+
+    # --- layout via GridSpec ---
+    # row 0: images  |  row 1: slice sliders  |  row 2: vmin / vmax / cmap boxes
+    fig = plt.figure(figsize=figsize)
+    if fig_title is not None:
+        fig.suptitle(fig_title)
+
+    gs = fig.add_gridspec(
+        3, 3,
+        height_ratios=[8, 1, 1],
+        hspace=0.5,
+        wspace=0.35,
+    )
+
+    ax_im = [fig.add_subplot(gs[0, c]) for c in range(3)]
+    ax_sl = [fig.add_subplot(gs[1, c]) for c in range(3)]
+    ax_tb = [fig.add_subplot(gs[2, c]) for c in range(3)]
+
+    # --- images ---
+    # cut along x: shows (y, z) plane  → aspect = dz / dy
+    # cut along y: shows (x, z) plane  → aspect = dz / dx
+    # cut along z: shows (x, y) plane  → aspect = dy / dx
+    aspects = [dz / dy, dz / dx, dy / dx]
+    labels  = [("y", "z"), ("x", "z"), ("x", "y")]
+
+    imkw = dict(vmin=vmin, vmax=vmax, cmap=cmap, origin="lower")
+    ims = [
+        ax_im[0].imshow(vol[ix0, :, :].T, aspect=aspects[0], **imkw),
+        ax_im[1].imshow(vol[:, iy0, :].T, aspect=aspects[1], **imkw),
+        ax_im[2].imshow(vol[:, :, iz0].T, aspect=aspects[2], **imkw),
+    ]
+    titles = [f"x = {ix0}", f"y = {iy0}", f"z = {iz0}"]
+    for i, ax in enumerate(ax_im):
+        ax.set_xlabel(labels[i][0])
+        ax.set_ylabel(labels[i][1])
+        ax.set_title(titles[i])
+
+    # --- slice sliders ---
+    sx = Slider(ax_sl[0], "x", 0, nx - 1, valinit=ix0, valstep=1)
+    sy = Slider(ax_sl[1], "y", 0, ny - 1, valinit=iy0, valstep=1)
+    sz = Slider(ax_sl[2], "z", 0, nz - 1, valinit=iz0, valstep=1)
+
+    def update_slices(_):
+        ix, iy, iz = int(sx.val), int(sy.val), int(sz.val)
+        ims[0].set_data(vol[ix, :, :].T)
+        ims[1].set_data(vol[:, iy, :].T)
+        ims[2].set_data(vol[:, :, iz].T)
+        ax_im[0].set_title(f"x = {ix}")
+        ax_im[1].set_title(f"y = {iy}")
+        ax_im[2].set_title(f"z = {iz}")
+        fig.canvas.draw_idle()
+
+    sx.on_changed(update_slices)
+    sy.on_changed(update_slices)
+    sz.on_changed(update_slices)
+
+    # --- vmin / vmax text boxes ---
+    tb_vmin = TextBox(ax_tb[0], "vmin", initial=f"{vmin:.4g}")
+    tb_vmax = TextBox(ax_tb[1], "vmax", initial=f"{vmax:.4g}")
+
+    def update_clim(_):
+        try:
+            lo = float(tb_vmin.text)
+            hi = float(tb_vmax.text)
+        except ValueError:
+            return
+        for im in ims:
+            im.set_clim(lo, hi)
+        fig.canvas.draw_idle()
+
+    tb_vmin.on_submit(update_clim)
+    tb_vmax.on_submit(update_clim)
+
+    # --- colormap text box ---
+    tb_cmap = TextBox(ax_tb[2], "cmap", initial=cmap)
+
+    def update_cmap(name):
+        try:
+            cm = plt.get_cmap(name.strip())
+        except (ValueError, KeyError):
+            tb_cmap.set_val(ims[0].cmap.name)  # revert to current
+            return
+        for im in ims:
+            im.set_cmap(cm)
+        fig.canvas.draw_idle()
+
+    tb_cmap.on_submit(update_cmap)
+
+    widgets = dict(sx=sx, sy=sy, sz=sz, tb_vmin=tb_vmin, tb_vmax=tb_vmax, tb_cmap=tb_cmap)
+    return fig, ax_im, widgets
