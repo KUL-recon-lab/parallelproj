@@ -16,7 +16,7 @@ else:
     Array = np.ndarray  # Default at runtime
 
 
-def to_numpy_array(x) -> np.ndarray:
+def to_numpy_array(x: Array) -> np.ndarray:
     if array_api_compat.is_cupy_array(x):
         cp = array_api_compat.get_namespace(x)
 

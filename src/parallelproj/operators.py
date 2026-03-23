@@ -945,12 +945,12 @@ class GradientFieldProjectionOperator(LinearOperator):
         return self._out_shape
 
     @property
-    def xp(self):
+    def xp(self) -> ModuleType:
         """array module of the operator"""
         return self._xp
 
     @property
-    def dev(self):
+    def dev(self) -> str:
         """device of the operator"""
         return self._dev
 
@@ -960,7 +960,7 @@ class GradientFieldProjectionOperator(LinearOperator):
         return self._eta
 
     @property
-    def normalized_gradient_field(self):
+    def normalized_gradient_field(self) -> Array:
         """normalized gradient field"""
         return self._normalized_gradient_field
 

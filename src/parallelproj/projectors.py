@@ -677,7 +677,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         return st
 
-    def _apply(self, x):
+    def _apply(self, x: Array) -> Array:
         """nonTOF forward projection of input image x including image based resolution model"""
 
         dev = array_api_compat.device(x)
@@ -728,7 +728,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         return x_fwd
 
-    def _adjoint(self, y):
+    def _adjoint(self, y: Array) -> Array:
         """nonTOF back projection of sinogram y"""
         dev = array_api_compat.device(y)
 
@@ -1283,7 +1283,7 @@ class EqualBlockPETProjector(LinearOperator):
         """voxel size"""
         return self._voxel_size
 
-    def _apply(self, x):
+    def _apply(self, x: Array) -> Array:
         """nonTOF forward projection of input image x including image based resolution model"""
 
         dev = array_api_compat.device(x)
@@ -1330,7 +1330,7 @@ class EqualBlockPETProjector(LinearOperator):
 
         return x_fwd
 
-    def _adjoint(self, y):
+    def _adjoint(self, y: Array) -> Array:
         """nonTOF back projection of sinogram y"""
         dev = array_api_compat.device(y)
 
