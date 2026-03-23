@@ -120,14 +120,15 @@ proj.tof_parameters = parallelproj.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-# setup the attenuation multiplication operator which is different
-# for TOF and non-TOF since the attenuation sinogram is always non-TOF
-if proj.tof:
-    att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-        proj.out_shape, att_sino
-    )
-else:
-    att_op = parallelproj.ElementwiseMultiplicationOperator(att_sino)
+# For TOF, att_sino has no TOF-bins dimension while the projector output does.
+# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
+# the TOF-bins axis without copying data (zero-stride view).
+att_values = (
+    xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
+    if proj.tof
+    else att_sino
+)
+att_op = parallelproj.ElementwiseMultiplicationOperator(att_values)
 
 res_model = parallelproj.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)

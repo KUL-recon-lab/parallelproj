@@ -125,15 +125,17 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(num_tofbins=9)
 # Combining resolution model, TOF projector and attenuation model
 # ---------------------------------------------------------------
 #
-# Since the attenuation sinogram is a non-TOF sinogram with shape = (161, 90, 7) and
-# the output of the projector is a TOF sinogram with shape = (161, 90, 7, num_tofbins),
-# we have to use the :class:`.TOFNonTOFElementwiseMultiplicationOperator` to add the
-# attenuation model to the forward model.
+# The attenuation sinogram is non-TOF with shape = (161, 90, 7) while the projector
+# output is a TOF sinogram with shape = (161, 90, 7, num_tofbins).
+# We use broadcast_to to add a trailing singleton dimension to att_sino and broadcast
+# it over the TOF-bins axis without copying data (zero-stride view).
 
 print(f"atten. sino shape {att_sino.shape}")
 print(f"proj output shape {proj.out_shape}")
 
-att_op = parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator(proj.out_shape, att_sino)
+att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+    xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
+)
 
 # setup a forward projector containing the attenuation and resolution
 proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
