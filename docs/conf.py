@@ -48,7 +48,7 @@ sphinx_gallery_conf = {
     "backreferences_dir": "auto_examples/backreferences",
     "doc_module": ("parallelproj",),
     "filename_pattern": r"[\\/]\d{2,3}_run_.*\.py$",
-    "ignore_pattern": r"(^|[\\/])(vis|utils)\.py$",
+    "ignore_pattern": r"(^|[\\/])(vis|utils|img)\.py$",
     "plot_gallery": True,
     "within_subsection_order": FileNameSortKey,
 }
