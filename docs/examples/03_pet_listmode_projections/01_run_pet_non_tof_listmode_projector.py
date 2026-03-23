@@ -6,9 +6,6 @@ In this example we will show how to setup and use a non-TOF
 PET listmode projector including geometrical forward projection
 in listmode, image-based resolution model and a listmode
 attenuation model.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

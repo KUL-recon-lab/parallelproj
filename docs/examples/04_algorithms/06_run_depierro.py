@@ -17,9 +17,6 @@ using the linear forward model
 
 .. math::
     \\bar{y}(x) = A x + s
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

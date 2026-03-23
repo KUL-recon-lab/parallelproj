@@ -24,9 +24,6 @@ subject to :math:`x \\geq 0`:
     :math:`m` variance-reduced subset updates.  The epoch axis in the
     convergence plot therefore understates the true computational cost of
     SVRG relative to OSEM by a factor of roughly two.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

@@ -6,9 +6,6 @@ In this example, we show how to define a custom pytorch layer that can be used
 to define a feed forward neural network that includes a parallelproj forward and back
 backward projections (or any :class:`.LinearOperator`) that can be used with pytorch's
 autograd engine.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

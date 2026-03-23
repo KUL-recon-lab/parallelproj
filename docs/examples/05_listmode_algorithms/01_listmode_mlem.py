@@ -18,9 +18,6 @@ using the listmode linear forward model
     \\bar{y}_{LM}(x) = A_{LM} x + s
 
 and data stored in listmode format (event by event).
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

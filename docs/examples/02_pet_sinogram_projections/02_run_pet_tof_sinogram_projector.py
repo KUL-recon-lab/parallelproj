@@ -5,9 +5,6 @@ PET TOF sinogram projector
 In this example we will show how to setup and use a TOF PET sinogram projector
 consisting of a geometrical TOF forward projector (Joseph's method),
 a resolution model and a correction for attenuation.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

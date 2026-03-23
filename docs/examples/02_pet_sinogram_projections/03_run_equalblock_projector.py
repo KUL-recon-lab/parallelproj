@@ -5,9 +5,6 @@ Non-TOF and TOF projections using a modularized (block) PET scanner geometry
 In this example, we show how to perform non-TOF and TOF projections using a
 PET scanner consisting of multiple block modules where each block module
 consists of a regular grid of LOR endpoints.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

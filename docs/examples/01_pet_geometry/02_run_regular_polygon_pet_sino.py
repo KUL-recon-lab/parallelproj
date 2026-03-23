@@ -6,9 +6,6 @@ In a scanner with "cylindrical symmetry", all possible lines of response (LORs)
 between two LOR endpoints can be sorted into a sinogram containing a radial,
 view and plane dimension.
 This example shows how this can be done using the :class:`.RegularPolygonPETLORDescriptor`
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

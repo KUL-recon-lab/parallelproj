@@ -4,9 +4,6 @@
 
 This example demonstrates the run 2D filtered back projection (FBP)
 on pre-corrected Poisson emission data.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

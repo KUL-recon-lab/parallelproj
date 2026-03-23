@@ -4,9 +4,6 @@ Regular polygon PET scanner geometry
 
 This example shows how to create and visualize PET scanners where the LOR
 endpoints can be modeled as a stack of regular polygons.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

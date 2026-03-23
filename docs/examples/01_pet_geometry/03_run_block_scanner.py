@@ -7,9 +7,6 @@ of multiple block modules where each block module consists of a regular
 grid of LOR endpoints.
 We also show how to define a LOR descriptor for this geometry using
 a description of which block pairs are in coincidence.
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%

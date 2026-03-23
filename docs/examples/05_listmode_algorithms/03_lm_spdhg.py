@@ -22,9 +22,6 @@ using the linear forward model
 .. warning::
     Running this example using GPU arrays (e.g. using cupy as array backend)
     is highly recommended due to "longer" execution times with CPU arrays
-
-.. image:: https://mybinder.org/badge_logo.svg
- :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
 
 # %%
