@@ -25,6 +25,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 from array_api_compat import size
 from vis import show_vol_cuts
+from img import elliptic_cylinder_phantom
 import numpy as np
 
 import parallelproj.operators
@@ -99,18 +100,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-# setup a simple test image containing a few "hot rods"
-x_true = xp.ones(proj.in_shape, device=dev, dtype=xp.float32)
-c0 = proj.in_shape[0] // 2
-c1 = proj.in_shape[1] // 2
-x_true[(c0 - 2) : (c0 + 2), (c1 - 2) : (c1 + 2), :] = 5.0
-x_true[4, c1, 2:] = 5.0
-x_true[c0, 4, :-2] = 5.0
-
-x_true[:2, :, :] = 0
-x_true[-2:, :, :] = 0
-x_true[:, :2, :] = 0
-x_true[:, -2:, :] = 0
+x_true = elliptic_cylinder_phantom(xp, dev)
 
 
 # %%
