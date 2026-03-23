@@ -15,9 +15,18 @@ where the quadratic penalty is
 .. math::
     R(x) = \\frac{1}{2} \\| G x \\|_2^2
 
-and :math:`G` is the finite forward-difference operator:
+and :math:`G` is the finite forward-difference operator.
+The objective is decomposed into :math:`m` subset functions
 
-* **SGD (OSEM)** — stochastic gradient descent using ordered subsets;
+.. math::
+    f_k(x) = \\underbrace{\\sum_{i \\in S_k} \\bar{y}_i - y_i \\log \\bar{y}_i}_{\\text{subset data fidelity}}
+             + \\frac{\\beta}{m} R(x),
+    \\qquad k = 1, \\ldots, m,
+
+so that :math:`F(x) = \\sum_{k=1}^m f_k(x)` exactly.  Both algorithms below
+exploit this splitting:
+
+* **SGD** — stochastic gradient descent using ordered subsets;
   one epoch = :math:`m` subset updates ≈ one full data pass; fast empirical
   convergence but *no* convergence guarantee.
 * **SVRG** — stochastic variance-reduced gradient with subsets; one epoch =
@@ -238,20 +247,20 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 )
 
 # %%
-# Regularisation
-# --------------
+# Regularisation and subset objective functions
+# ---------------------------------------------
 #
-# The quadratic penalty
+# The quadratic penalty :math:`R(x) = \frac{1}{2} \| G x \|_2^2` is built
+# from the :class:`.FiniteForwardDifference` operator :math:`G`.
+# The full regulariser ``reg`` (weight :math:`\beta`) is used only for
+# the total objective evaluation.  Each subset function
 #
 # .. math::
-#     R(x) = \\frac{1}{2} \\| G x \\|_2^2
+#     f_k(x) = \text{data\_fidelity}_k(x) + \frac{\beta}{m} R(x)
 #
-# is set up as a :class:`.C2AffineObjective` that composes the
-# :class:`.HalfSquaredL2Deviation` loss with the
-# :class:`.FiniteForwardDifference` operator :math:`G`.
-# The weight ``beta`` is passed directly to :class:`.HalfSquaredL2Deviation`
-# so that ``reg(x)`` evaluates :math:`\\beta R(x)` and ``reg.gradient(x)``
-# returns :math:`\\beta G^T G x`.
+# is formed by adding a :class:`.HalfSquaredL2Deviation` scaled by
+# :math:`\beta / m` to the subset data fidelity, so that
+# :math:`\sum_k f_k(x) = F(x)`.
 
 G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
 reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta), G)
@@ -260,8 +269,8 @@ reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta), G)
 # Setup of objective functions and sensitivity images
 # ---------------------------------------------------
 #
-# We define one :class:`.C2AffineObjective` per subset (data fidelity only)
-# and one for the full data.
+# We define one subset objective :math:`f_k` per subset and one full
+# objective :math:`F` for evaluation.
 # The sensitivity image :math:`A^H 1` and per-subset counterparts are
 # precomputed once and summed to obtain the full sensitivity image.
 
@@ -273,8 +282,13 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
-subset_data_fidelities = [
+# reg/m term shared by all subset objectives
+reg_per_subset = C2AffineObjective(HalfSquaredL2Deviation(beta=beta / num_subsets), G)
+
+# f_k = data_fidelity_k + (beta/m) * R(x)
+subset_objectives = [
     C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
+    + reg_per_subset
     for k, sl in enumerate(subset_slices)
 ]
 
@@ -285,7 +299,7 @@ adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
 
 
 def total_objective(x: Array) -> float:
-    """Total objective: negative Poisson log-likelihood + beta * R(x)."""
+    """Total objective F(x) = sum_k f_k(x) = data fidelity + beta * R(x)."""
     return full_data_fidelity(x) + reg(x)
 
 
@@ -293,33 +307,36 @@ def total_objective(x: Array) -> float:
 # Warm start
 # ----------
 #
-# Run one SGD (OSEM) epoch without regularisation as a common warm-start.
+# Run one SGD epoch with regularisation as a common warm-start.
 
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 for k in range(num_subsets):
     print(f"warm-start SGD subset {(k+1):03} / {num_subsets:03}", end="\r")
-    precond = x_init / subset_adjoint_ones[k]
+    init_precond = x_init / (
+        adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
+    )
     x_init = xp.clip(
-        x_init - precond * subset_data_fidelities[k].gradient(x_init), 0, None
+        x_init - init_precond * (num_subsets * subset_objectives[k].gradient(x_init)),
+        0,
+        None,
     )
 print()
 
 # %%
-# SGD (OSEM) with regularisation
-# --------------------------------
+# SGD with regularisation
+# -----------------------
 #
-# Each SGD epoch cycles through all :math:`m` subsets.  For each subset
-# :math:`k`, the full gradient is approximated as
+# Each SGD epoch cycles through all :math:`m` subsets.  Because
+# :math:`F(x) = \sum_k f_k(x)`, the full gradient is approximated as
 #
 # .. math::
-#     \\nabla F(x) \\approx m\\,\\nabla f_k(x) + \\beta G^T G x
+#     \nabla F(x) \approx m\,\nabla f_k(x)
 #
-# and a preconditioned gradient step with :math:`D = \\operatorname{diag}(x / (A^H 1))`
+# and a preconditioned gradient step with :math:`D = \operatorname{diag}(x / (A^H 1))`
 # is taken:
 #
 # .. math::
-#     x^+ = \\operatorname{clip}\\!\\left(x - D\\bigl(m\\,\\nabla f_k(x)
-#           + \\beta G^T G x\\bigr),\\, 0,\\, \\infty\\right).
+#     x^+ = \operatorname{clip}\!\left(x - D\, m\,\nabla f_k(x),\, 0,\, \infty\right).
 
 df_sgd = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 x_sgd = xp.asarray(x_init, copy=True)
@@ -334,9 +351,7 @@ for i in range(num_epochs):
             f"SGD epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
             end="\r",
         )
-        approx_grad = num_subsets * subset_data_fidelities[k].gradient(
-            x_sgd
-        ) + reg.gradient(x_sgd)
+        approx_grad = num_subsets * subset_objectives[k].gradient(x_sgd)
         x_sgd = xp.clip(x_sgd - step_size * sgd_precond * approx_grad, 0, None)
 
     df_sgd[i] = total_objective(x_sgd)
@@ -349,20 +364,19 @@ print()
 # Each SVRG epoch consists of two phases:
 #
 # 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
-#    subset gradients of :math:`f` at the current point :math:`\\tilde{x}`,
-#    then take a full gradient step.
+#    subset gradients :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` at the
+#    current point :math:`\tilde{x}`, then take a full gradient step using
+#    :math:`\nabla F(\tilde{x}) = \sum_k \tilde{g}_k`.
 # 2. **Variance-reduced subset updates**: for each subset :math:`k`, form
 #    the variance-reduced gradient
 #
 #    .. math::
-#        g^{VR}_k = m \\left( \\nabla f_k(x) - \\tilde{g}_k \\right)
-#                   + \\sum_{j=1}^m \\tilde{g}_j
-#                   + \\beta G^T G x
+#        g^{VR}_k = m \left( \nabla f_k(x) - \tilde{g}_k \right)
+#                   + \sum_{j=1}^m \tilde{g}_j
 #
-#    where :math:`\\tilde{g}_k = \\nabla f_k(\\tilde{x})` are the stored
-#    anchor gradients.  The regularisation gradient :math:`\\beta G^T G x`
-#    is evaluated exactly at the *current* iterate :math:`x`, not at the
-#    anchor point, exploiting the fact that it is cheap to compute.
+#    where :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` already includes the
+#    :math:`\beta/m` regularisation contribution, so no separate treatment
+#    of the prior is needed.
 
 
 def svrg_calc_snapshot_gradients(
@@ -383,18 +397,14 @@ def svrg_update(
     subset_idx: int,
     subset_obj_functions: Sequence[C1Function],
     stored_subset_gradients: Array,
-    full_data_gradient: Array,
-    regulariser: C1Function,
+    full_gradient: Array,
     precond: Array,
     step_size: float = 1.0,
 ) -> Array:
-    """Single SVRG subset update with variance-reduced data gradient and exact regularisation."""
+    """Single SVRG subset update with variance-reduced gradient."""
     m = len(subset_obj_functions)
     grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
-    vr_data_grad = (
-        m * (grad_k - stored_subset_gradients[subset_idx]) + full_data_gradient
-    )
-    approx_grad = vr_data_grad + regulariser.gradient(x_cur)
+    approx_grad = m * (grad_k - stored_subset_gradients[subset_idx]) + full_gradient
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
@@ -409,10 +419,9 @@ for epoch in range(num_epochs):
                 adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg, x_svrg)
             )
 
-        stored_grads, full_data_grad = svrg_calc_snapshot_gradients(
-            x_svrg, subset_data_fidelities
+        stored_grads, full_grad = svrg_calc_snapshot_gradients(
+            x_svrg, subset_objectives
         )
-        full_grad = full_data_grad + reg.gradient(x_svrg)
         x_svrg = xp.clip(x_svrg - step_size * svrg_precond * full_grad, 0, None)
 
     for k in range(num_subsets):
@@ -423,10 +432,9 @@ for epoch in range(num_epochs):
         x_svrg = svrg_update(
             x_svrg,
             k,
-            subset_data_fidelities,
+            subset_objectives,
             stored_grads,
-            full_data_grad,
-            reg,
+            full_grad,
             svrg_precond,
             step_size=step_size,
         )
@@ -482,7 +490,8 @@ axs[1].grid(ls=":")
 fig.show()
 
 # %%
-fig2, ax2 = plt.subplots(1, 2, figsize=(5, 5), layout="constrained")
-ax2[0].imshow(to_numpy_array(x_sgd[:, :, 4]))
-ax2[1].imshow(to_numpy_array(x_svrg[:, :, 4]))
+fig2, ax2 = plt.subplots(1, 3, figsize=(12, 4), layout="constrained")
+ax2[0].imshow(to_numpy_array(x_init[:, :, 4]))
+ax2[1].imshow(to_numpy_array(x_sgd[:, :, 4]))
+ax2[2].imshow(to_numpy_array(x_svrg[:, :, 4]))
 fig2.show()
