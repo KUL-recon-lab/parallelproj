@@ -25,11 +25,6 @@ subject to :math:`x \\geq 0`:
     convergence plot therefore understates the true computational cost of
     SVRG relative to OSEM by a factor of roughly two.
 
-.. tip::
-    parallelproj is python array API compatible meaning it supports different
-    array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
-    Choose your preferred array API ``xp`` and device ``dev`` below.
-
 .. image:: https://mybinder.org/badge_logo.svg
  :target: https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples
 """
@@ -69,9 +64,17 @@ else:
 
 print(f"Using array API: {xp.__name__}, device: {dev}")
 
+# %%
+
+# number of subsets for OSEM and SVRG
+num_subsets = 24
+
+# if run on a CPU limit the number of "OSEM / SVRG epochs"
+num_epochs_mlem = 480 if dev == "cpu" else 1200
+num_epochs = num_epochs_mlem // num_subsets
+
 # run MLEM only on GPU – it is too slow on CPU for the number of iterations used here
 run_mlem = dev != "cpu"
-
 
 # %%
 # Setup of the forward model :math:`\bar{y}(x) = A x + s`
@@ -201,8 +204,6 @@ y = xp.asarray(
 # a subset of views. The slices can be used to extract the corresponding subsets
 # from full data or corrections sinograms.
 
-num_subsets = 24
-
 subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
 )
@@ -288,13 +289,6 @@ def em_update(
 # and one for the full data (for MLEM and objective evaluation).
 # The sensitivity image :math:`A^H 1` and its per-subset counterparts
 # :math:`(A^k)^H 1` are precomputed once.
-#
-# We choose the number of OSEM/SVRG epochs so that the total number of
-# subset gradient evaluations matches ``num_epochs_mlem`` full MLEM iterations
-# (each MLEM iteration = one full data pass = ``num_subsets`` subset passes).
-
-num_epochs_mlem = 960
-num_epochs = num_epochs_mlem // num_subsets
 
 # calculate A_k^H 1 for all subsets k, stored as (num_subsets, *in_shape)
 subset_adjoint_ones = xp.zeros(
@@ -317,12 +311,10 @@ x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 for k in range(len(subset_slices)):
     print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
     x_init = em_update(x_init, subset_data_fidelities[k], subset_adjoint_ones[k])
+print()
 
 # full sensitivity image: A^H 1 = sum of all subset adjoint ones
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
-
-df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev) if run_mlem else None
-df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
 # %%
 # MLEM
@@ -337,11 +329,13 @@ df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 #     MLEM is only run when ``run_mlem`` is ``True`` (i.e. on CUDA devices).
 #     On CPU it is skipped because the large number of iterations is too slow.
 if run_mlem:
+    df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev)
     x_mlem = xp.asarray(x_init, copy=True)
     for i in range(num_epochs_mlem):
-        print(f"MLEM iteration {(i + 1):03} / {num_epochs_mlem:03}", end="\r")
+        print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
         x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones)
         df_mlem[i] = full_data_fidelity(x_mlem)
+    print()
 
 # %%
 # OSEM
@@ -351,13 +345,19 @@ if run_mlem:
 # subset operator :math:`A^k`, subset data :math:`y^k`, contamination
 # :math:`s^k`, and subset sensitivity :math:`(A^k)^H 1`.  Fast empirical
 # convergence but no convergence guarantee.
+
+df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 x_osem = xp.asarray(x_init, copy=True)
 for i in range(num_epochs):
     for k in range(len(subset_slices)):
-        print(f"OSEM iteration {(k+1):03} / {(i + 1):03} / {num_epochs:03}", end="\r")
+        print(
+            f"OSEM epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
+            end="\r",
+        )
         x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k])
 
     df_osem[i] = full_data_fidelity(x_osem)
+print()
 
 # %%
 # SVRG
@@ -444,7 +444,7 @@ for epoch in range(num_epochs):
 
     for k in range(num_subsets):
         print(
-            f"SVRG epoch {(epoch+1):03} / {num_epochs:03}, subset {(k+1):03} / {num_subsets:03}",
+            f"SVRG epoch {(epoch+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
             end="\r",
         )
         x_svrg = svrg_update(
@@ -533,7 +533,7 @@ if run_mlem:
     axs[1].axhline(
         float(df_mlem[50 - 1]),
         label=f"{mlem_label} (50 iter.)",
-        ls="--",
+        ls=":",
         color="gray",
     )
     axs[1].axhline(
