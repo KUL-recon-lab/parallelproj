@@ -263,7 +263,7 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # the total objective evaluation.  Each subset function
 #
 # .. math::
-#     f_k(x) = \text{data\_fidelity}_k(x) + \frac{\beta}{m} R(x)
+#     f_k(x) = \sum_{i \in S_k} \left( \bar{y}_i(x) - y_i \log \bar{y}_i(x) \right) + \frac{\beta}{m} R(x)
 #
 # is formed by adding a :class:`.HalfSquaredL2Deviation` scaled by
 # :math:`\beta / m` to the subset data fidelity, so that
@@ -273,21 +273,16 @@ G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
 reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta), G)
 
 # %%
-# Setup of objective functions and sensitivity images
-# ---------------------------------------------------
+# Setup of objective functions and sensitivity image
+# --------------------------------------------------
 #
 # We define one subset objective :math:`f_k` per subset and one full
-# objective :math:`F` for evaluation.
-# The sensitivity image :math:`A^H 1` and per-subset counterparts are
-# precomputed once and summed to obtain the full sensitivity image.
+# objective :math:`F` for evaluation, as well as the sensitivity image :math:`A^H 1`
 
-subset_adjoint_ones = xp.zeros(
-    (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
+# sensitivity image (adjoint of all-ones vector)
+adjoint_ones = pet_lin_op.adjoint(
+    xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
-for k, op in enumerate(pet_subset_linop_seq):
-    subset_adjoint_ones[k] = op.adjoint(
-        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
-    )
 
 # reg/m term shared by all subset objectives
 reg_per_subset = C2AffineObjective(HalfSquaredL2Deviation(beta=beta / num_subsets), G)
@@ -301,13 +296,9 @@ subset_objectives = [
 
 full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
 
-# full sensitivity image: A^H 1 = sum of all subset adjoint ones
-adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
 
-
-def total_objective(x: Array) -> float:
-    """Total objective F(x) = sum_k f_k(x) = data fidelity + beta * R(x)."""
-    return full_data_fidelity(x) + reg(x)
+# also setup the full objective F for evaluation of the iterates
+total_objective = full_data_fidelity + reg
 
 
 # %%
@@ -339,11 +330,10 @@ print()
 # .. math::
 #     \nabla F(x) \approx m\,\nabla f_k(x)
 #
-# and a preconditioned gradient step with :math:`D = \operatorname{diag}(x / (A^H 1))`
-# is taken:
+# and a gradient step with a diagonal preconditioner :math:`D` is taken:
 #
 # .. math::
-#     x^+ = \operatorname{clip}\!\left(x - D\, m\,\nabla f_k(x),\, 0,\, \infty\right).
+#     x^+ = \left(x - D\, m\,\nabla f_k(x)\right)_+.
 
 df_sgd = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 x_sgd = xp.asarray(x_init, copy=True)
@@ -381,9 +371,6 @@ print()
 #        g^{VR}_k = m \left( \nabla f_k(x) - \tilde{g}_k \right)
 #                   + \sum_{j=1}^m \tilde{g}_j
 #
-#    where :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` already includes the
-#    :math:`\beta/m` regularisation contribution, so no separate treatment
-#    of the prior is needed.
 
 
 def svrg_calc_snapshot_gradients(
@@ -403,15 +390,18 @@ def svrg_update(
     x_cur: Array,
     subset_idx: int,
     subset_obj_functions: Sequence[C1Function],
-    stored_subset_gradients: Array,
-    full_gradient: Array,
+    stored_snapshot_subset_gradients: Array,
+    full_snapshot_gradient: Array,
     precond: Array,
     step_size: float = 1.0,
 ) -> Array:
     """Single SVRG subset update with variance-reduced gradient."""
     m = len(subset_obj_functions)
     grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
-    approx_grad = m * (grad_k - stored_subset_gradients[subset_idx]) + full_gradient
+    approx_grad = (
+        m * (grad_k - stored_snapshot_subset_gradients[subset_idx])
+        + full_snapshot_gradient
+    )
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
