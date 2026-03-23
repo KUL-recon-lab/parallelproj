@@ -1,0 +1,480 @@
+"""
+Convergence comparison: SGD vs SVRG with quadratic regularization
+=================================================================
+
+This example compares the convergence speed (per epoch) of two algorithms
+for minimising the regularised negative Poisson log-likelihood
+
+.. math::
+    F(x) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i
+           + \\beta \\, R(x),
+    \\qquad \\bar{y}(x) = A x + s
+
+where the quadratic penalty is
+
+.. math::
+    R(x) = \\frac{1}{2} \\| G x \\|_2^2
+
+and :math:`G` is the finite forward-difference operator:
+
+* **SGD (OSEM)** — stochastic gradient descent using ordered subsets;
+  one epoch = :math:`m` subset updates ≈ one full data pass; fast empirical
+  convergence but *no* convergence guarantee.
+* **SVRG** — stochastic variance-reduced gradient with subsets; one epoch =
+  :math:`m` variance-reduced subset updates; provably convergent while
+  achieving the fast per-epoch progress of SGD.
+
+.. note::
+    For SVRG, one epoch requires **two** full data passes: one to compute
+    the snapshot gradients at the anchor point, and one for the
+    :math:`m` variance-reduced subset updates.  The epoch axis in the
+    convergence plot therefore understates the true computational cost of
+    SVRG relative to SGD by a factor of roughly two.
+"""
+
+# %%
+from __future__ import annotations
+from collections.abc import Sequence
+import matplotlib.pyplot as plt
+from copy import copy
+import numpy as np
+
+import parallelproj.operators
+import parallelproj.tof
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
+from parallelproj import to_numpy_array, Array
+from parallelproj.functions import (
+    NegPoissonLogL,
+    HalfSquaredL2Deviation,
+    C2AffineObjective,
+    C1Function,
+)
+
+# %%
+from importlib import import_module, util
+import parallelproj_core as ppc
+
+
+# choose array backend and a device (CPU or CUDA GPU)
+if util.find_spec("torch") is not None:
+    xp = import_module("array_api_compat.torch")
+    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
+elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
+    xp = import_module("array_api_compat.cupy")
+    dev = xp.cuda.Device(0)
+else:
+    xp = import_module("array_api_compat.numpy")
+    dev = "cpu"
+
+print(f"Using array API: {xp.__name__}, device: {dev}")
+
+# %%
+
+# number of subsets for SGD and SVRG
+num_subsets = 24
+
+# if run on a CPU limit the number of epochs
+num_epochs = (480 if dev == "cpu" else 1200) // num_subsets
+
+# regularisation weight beta
+beta = 1.0
+
+# %%
+# Setup of the forward model :math:`\bar{y}(x) = A x + s`
+# --------------------------------------------------------
+#
+# We setup a linear forward operator :math:`A` consisting of an
+# image-based resolution model, a non-TOF PET projector and an attenuation model.
+
+num_rings = 5
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=65.0,
+    num_sides=16,
+    num_lor_endpoints_per_side=12,
+    lor_spacing=2.3,
+    ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
+    symmetry_axis=2,
+)
+
+# %%
+# setup the LOR descriptor that defines the sinogram
+
+img_shape = (40, 40, 8)
+voxel_size = (2.0, 2.0, 2.0)
+
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+    scanner,
+    radial_trim=10,
+    max_ring_difference=2,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
+)
+
+proj = parallelproj.projectors.RegularPolygonPETProjector(
+    lor_desc, img_shape=img_shape, voxel_size=voxel_size
+)
+
+# setup a simple test image containing a few "hot rods"
+x_true = xp.ones(proj.in_shape, device=dev, dtype=xp.float32)
+c0 = proj.in_shape[0] // 2
+c1 = proj.in_shape[1] // 2
+x_true[(c0 - 2) : (c0 + 2), (c1 - 2) : (c1 + 2), :] = 5.0
+x_true[4, c1, 2:] = 5.0
+x_true[c0, 4, :-2] = 5.0
+
+x_true[:2, :, :] = 0
+x_true[-2:, :, :] = 0
+x_true[:, :2, :] = 0
+x_true[:, -2:, :] = 0
+
+# %%
+# Attenuation image and sinogram setup
+# ------------------------------------
+
+x_att = 0.01 * xp.astype(x_true > 0, xp.float32)
+att_sino = xp.exp(-proj(x_att))
+
+# %%
+# Complete PET forward model setup
+# --------------------------------
+#
+# We combine an image-based resolution model,
+# a non-TOF or TOF PET projector and an attenuation model
+# into a single linear operator.
+
+# enable TOF - comment if you want to run non-TOF
+proj.tof_parameters = parallelproj.tof.TOFParameters(
+    num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
+)
+
+if proj.tof:
+    att_op = parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator(
+        proj.out_shape, att_sino
+    )
+else:
+    att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
+
+res_model = parallelproj.operators.GaussianFilterOperator(
+    proj.in_shape, sigma=2.0 / (2.35 * proj.voxel_size)
+)
+
+pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
+
+# %%
+# Simulation of projection data
+# -----------------------------
+#
+# We setup an arbitrary ground truth :math:`x_{true}` and simulate
+# noisy data :math:`y` by adding Poisson noise.
+
+noise_free_data = pet_lin_op(x_true)
+
+contamination = xp.full(
+    noise_free_data.shape,
+    0.5 * float(xp.mean(noise_free_data)),
+    device=dev,
+    dtype=xp.float32,
+)
+
+noise_free_data += contamination
+
+np.random.seed(1)
+y = xp.asarray(
+    np.random.poisson(to_numpy_array(noise_free_data)),
+    device=dev,
+    dtype=xp.float32,
+)
+
+# %%
+# Splitting of the forward model into subsets :math:`A^k`
+# -------------------------------------------------------
+#
+# Calculate the view numbers and slices for each subset.
+
+subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
+    num_subsets, len(proj.out_shape)
+)
+
+_, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
+    num_subsets, 3
+)
+
+proj.clear_cached_lor_endpoints()
+pet_subset_linop_seq = []
+
+for i in range(num_subsets):
+    subset_proj = copy(proj)
+    subset_proj.views = subset_views[i]
+
+    if subset_proj.tof:
+        subset_att_op = (
+            parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator(
+                subset_proj.out_shape, att_sino[subset_slices_non_tof[i]]
+            )
+        )
+    else:
+        subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+            att_sino[subset_slices_non_tof[i]]
+        )
+
+    pet_subset_linop_seq.append(
+        parallelproj.operators.CompositeLinearOperator(
+            [
+                subset_att_op,
+                subset_proj,
+                res_model,
+            ]
+        )
+    )
+
+pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
+    pet_subset_linop_seq
+)
+
+# %%
+# Regularisation
+# --------------
+#
+# The quadratic penalty
+#
+# .. math::
+#     R(x) = \\frac{1}{2} \\| G x \\|_2^2
+#
+# is set up as a :class:`.C2AffineObjective` that composes the
+# :class:`.HalfSquaredL2Deviation` loss with the
+# :class:`.FiniteForwardDifference` operator :math:`G`.
+# The weight ``beta`` is passed directly to :class:`.HalfSquaredL2Deviation`
+# so that ``reg(x)`` evaluates :math:`\\beta R(x)` and ``reg.gradient(x)``
+# returns :math:`\\beta G^T G x`.
+
+G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
+reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta), G)
+
+# %%
+# Setup of objective functions and sensitivity images
+# ---------------------------------------------------
+#
+# We define one :class:`.C2AffineObjective` per subset (data fidelity only)
+# and one for the full data.
+# The sensitivity image :math:`A^H 1` and per-subset counterparts are
+# precomputed once and summed to obtain the full sensitivity image.
+
+subset_adjoint_ones = xp.zeros(
+    (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
+)
+for k, op in enumerate(pet_subset_linop_seq):
+    subset_adjoint_ones[k] = op.adjoint(
+        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
+    )
+
+subset_data_fidelities = [
+    C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
+    for k, sl in enumerate(subset_slices)
+]
+
+full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
+
+# full sensitivity image: A^H 1 = sum of all subset adjoint ones
+adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
+
+
+def total_objective(x: Array) -> float:
+    """Total objective: negative Poisson log-likelihood + beta * R(x)."""
+    return full_data_fidelity(x) + reg(x)
+
+
+# %%
+# Warm start
+# ----------
+#
+# Run one SGD (OSEM) epoch without regularisation as a common warm-start.
+
+x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+for k in range(num_subsets):
+    print(f"warm-start SGD subset {(k+1):03} / {num_subsets:03}", end="\r")
+    precond = x_init / subset_adjoint_ones[k]
+    x_init = xp.clip(
+        x_init - precond * subset_data_fidelities[k].gradient(x_init), 0, None
+    )
+print()
+
+# %%
+# SGD (OSEM) with regularisation
+# --------------------------------
+#
+# Each SGD epoch cycles through all :math:`m` subsets.  For each subset
+# :math:`k`, the full gradient is approximated as
+#
+# .. math::
+#     \\nabla F(x) \\approx m\\,\\nabla f_k(x) + \\beta G^T G x
+#
+# and a preconditioned gradient step with :math:`D = \\operatorname{diag}(x / (A^H 1))`
+# is taken:
+#
+# .. math::
+#     x^+ = \\operatorname{clip}\\!\\left(x - D\\bigl(m\\,\\nabla f_k(x)
+#           + \\beta G^T G x\\bigr),\\, 0,\\, \\infty\\right).
+
+df_sgd = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
+x_sgd = xp.asarray(x_init, copy=True)
+
+for i in range(num_epochs):
+    for k in range(num_subsets):
+        print(
+            f"SGD epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
+            end="\r",
+        )
+        precond = x_sgd / adjoint_ones
+        approx_grad = num_subsets * subset_data_fidelities[k].gradient(
+            x_sgd
+        ) + reg.gradient(x_sgd)
+        x_sgd = xp.clip(x_sgd - precond * approx_grad, 0, None)
+
+    df_sgd[i] = total_objective(x_sgd)
+print()
+
+# %%
+# SVRG with regularisation
+# -------------------------
+#
+# Each SVRG epoch consists of two phases:
+#
+# 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
+#    subset gradients of :math:`f` at the current point :math:`\\tilde{x}`,
+#    then take a full gradient step.
+# 2. **Variance-reduced subset updates**: for each subset :math:`k`, form
+#    the variance-reduced gradient
+#
+#    .. math::
+#        g^{VR}_k = m \\left( \\nabla f_k(x) - \\tilde{g}_k \\right)
+#                   + \\sum_{j=1}^m \\tilde{g}_j
+#                   + \\beta G^T G x
+#
+#    where :math:`\\tilde{g}_k = \\nabla f_k(\\tilde{x})` are the stored
+#    anchor gradients.  The regularisation gradient :math:`\\beta G^T G x`
+#    is evaluated exactly at the *current* iterate :math:`x`, not at the
+#    anchor point, exploiting the fact that it is cheap to compute.
+
+
+def svrg_calc_snapshot_gradients(
+    x_cur: Array,
+    subset_obj_functions: Sequence[C1Function],
+) -> tuple[Array, Array]:
+    """Store all subset gradients at the current anchor point and return their sum."""
+    m = len(subset_obj_functions)
+    stored_grads = xp.zeros((m,) + x_cur.shape, dtype=x_cur.dtype, device=dev)
+    for k, df in enumerate(subset_obj_functions):
+        stored_grads[k] = df.gradient(x_cur)
+    full_grad = xp.sum(stored_grads, axis=0)
+    return stored_grads, full_grad
+
+
+def svrg_update(
+    x_cur: Array,
+    subset_idx: int,
+    subset_obj_functions: Sequence[C1Function],
+    stored_subset_gradients: Array,
+    full_data_gradient: Array,
+    regulariser: C1Function,
+    precond: Array,
+    step_size: float = 1.0,
+) -> Array:
+    """Single SVRG subset update with variance-reduced data gradient and exact regularisation."""
+    m = len(subset_obj_functions)
+    grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
+    vr_data_grad = (
+        m * (grad_k - stored_subset_gradients[subset_idx]) + full_data_gradient
+    )
+    approx_grad = vr_data_grad + regulariser.gradient(x_cur)
+    return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
+
+
+x_svrg = xp.asarray(x_init, copy=True)
+
+svrg_step_size = 1.0
+df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
+
+for epoch in range(num_epochs):
+    if epoch % 2 == 0:
+        if epoch <= 4:
+            svrg_precond = x_svrg / adjoint_ones
+
+        stored_grads, full_data_grad = svrg_calc_snapshot_gradients(
+            x_svrg, subset_data_fidelities
+        )
+        full_grad = full_data_grad + reg.gradient(x_svrg)
+        x_svrg = xp.clip(x_svrg - svrg_step_size * svrg_precond * full_grad, 0, None)
+
+    for k in range(num_subsets):
+        print(
+            f"SVRG epoch {(epoch+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
+            end="\r",
+        )
+        x_svrg = svrg_update(
+            x_svrg,
+            k,
+            subset_data_fidelities,
+            stored_grads,
+            full_data_grad,
+            reg,
+            svrg_precond,
+            step_size=svrg_step_size,
+        )
+
+    df_svrg[epoch] = total_objective(x_svrg)
+
+# %%
+# Convergence comparison
+# ----------------------
+#
+# We plot the total objective :math:`F(x)` vs epoch (left) and vs
+# full data passes (right).  One epoch of SGD corresponds to one cycle
+# through all subsets (roughly one full data pass).  One SVRG epoch on
+# an anchor phase costs two full data passes (snapshot + subset updates),
+# and one full pass otherwise.
+
+epochs = np.arange(1, num_epochs + 1)
+osem_passes = epochs.copy()
+
+svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
+svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
+
+df_min = min(float(xp.min(df_sgd)), float(xp.min(df_svrg)))
+df_max = float(df_sgd[0])
+
+sgd_label = f"SGD/OSEM ({num_subsets} subsets)"
+svrg_label = f"SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})"
+
+fig, axs = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
+
+# --- left: vs epoch ---
+axs[0].plot(epochs, to_numpy_array(df_sgd), label=sgd_label, marker="o")
+axs[0].plot(epochs, to_numpy_array(df_svrg), label=svrg_label, marker="o")
+axs[0].set_ylim(df_min, df_max)
+axs[0].set_xlabel("Epoch")
+axs[0].set_ylabel(r"$F(x) = \sum_i(\bar{y}_i - y_i \log \bar{y}_i) + \beta R(x)$")
+axs[0].set_title(rf"Convergence vs epoch ($\beta={beta}$)")
+axs[0].legend()
+axs[0].grid(ls=":")
+
+# --- right: vs full data passes ---
+axs[1].plot(osem_passes, to_numpy_array(df_sgd), label=sgd_label, marker="o")
+axs[1].plot(
+    svrg_cumulative_passes, to_numpy_array(df_svrg), label=svrg_label, marker="o"
+)
+axs[1].set_ylim(df_min, df_max)
+axs[1].set_xlabel("Full data passes")
+axs[1].set_ylabel(r"$F(x) = \sum_i(\bar{y}_i - y_i \log \bar{y}_i) + \beta R(x)$")
+axs[1].set_title(rf"Convergence vs data passes ($\beta={beta}$)")
+axs[1].legend()
+axs[1].grid(ls=":")
+
+fig.show()
+
+# %%
+fig2, ax2 = plt.subplots(figsize=(5, 5), layout="constrained")
+ax2.imshow(to_numpy_array(x_svrg[:, :, 4]))
+fig2.show()
