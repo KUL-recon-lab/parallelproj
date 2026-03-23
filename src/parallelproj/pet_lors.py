@@ -19,12 +19,7 @@ from .pet_scanners import (
 
 
 class SinogramSpatialAxisOrder(enum.Enum):
-    """order of spatial axis in a sinogram R (radial), V (view), P (plane)
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.pet_lors.SinogramSpatialAxisOrder
-    """
+    """order of spatial axis in a sinogram R (radial), V (view), P (plane)"""
 
     RVP = enum.auto()
     """[radial,view,plane]"""
@@ -76,12 +71,7 @@ class PETLORDescriptor(abc.ABC):
 
 class EqualBlockPETLORDescriptor(PETLORDescriptor):
     """LOR descriptor for scanner consisting of block modules where each
-    block module has the same number of LOR endpoints
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.pet_lors.EqualBlockPETLORDescriptor
-    """
+    block module has the same number of LOR endpoints"""
 
     def __init__(
         self, scanner: ModularizedPETScannerGeometry, all_block_pairs: Array
@@ -230,12 +220,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     """LOR descriptor for a regular polygon PET scanner where
     we have coincidences within and between "rings (polygons of modules)"
     The geometrical LORs can be sorted into a sinogram having a
-    "plane", "view" and "radial" axis.
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.pet_lors.RegularPolygonPETLORDescriptor
-    """
+    "plane", "view" and "radial" axis."""
 
     def __init__(
         self,

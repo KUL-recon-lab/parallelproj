@@ -19,12 +19,7 @@ from .tof import TOFParameters
 
 
 class ParallelViewProjector2D(LinearOperator):
-    """2D non-TOF parallel view projector
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.projectors.ParallelViewProjector2D
-    """
+    """2D non-TOF parallel view projector"""
 
     def __init__(
         self,
@@ -276,12 +271,7 @@ class ParallelViewProjector2D(LinearOperator):
 
 
 class ParallelViewProjector3D(LinearOperator):
-    """3D non-TOF parallel view projector
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.projectors.ParallelViewProjector3D
-    """
+    """3D non-TOF parallel view projector"""
 
     def __init__(
         self,
@@ -493,12 +483,7 @@ class ParallelViewProjector3D(LinearOperator):
 
 
 class RegularPolygonPETProjector(LinearOperator):
-    """geometric non-TOF and TOF sinogram projector for regular polygon PET scanners
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.projectors.RegularPolygonPETProjector
-    """
+    """geometric non-TOF and TOF sinogram projector for regular polygon PET scanners"""
 
     def __init__(
         self,
@@ -945,12 +930,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
 
 class ListmodePETProjector(LinearOperator):
-    """non-TOF and TOF listmode projector for regular polygon PET scanners
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.projectors.ListmodePETProjector
-    """
+    """non-TOF and TOF listmode projector for regular polygon PET scanners"""
 
     def __init__(
         self,
@@ -1170,12 +1150,7 @@ class ListmodePETProjector(LinearOperator):
 
 
 class EqualBlockPETProjector(LinearOperator):
-    """geometric non-TOF and TOF sinogram projector for equal block PET scanners
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.projectors.EqualBlockPETProjector
-    """
+    """geometric non-TOF and TOF sinogram projector for equal block PET scanners"""
 
     def __init__(
         self,

@@ -260,13 +260,7 @@ class AdjointLinearOperator(LinearOperator):
 
 
 class MatrixOperator(LinearOperator):
-    """Linear Operator defined by dense matrix multiplication
-
-    Examples
-    --------
-
-    .. minigallery:: parallelproj.operators.MatrixOperator
-    """
+    """Linear Operator defined by dense matrix multiplication"""
 
     def __init__(self, A: Array) -> None:
         """init method
@@ -326,10 +320,6 @@ class CompositeLinearOperator(LinearOperator):
 
     .. math::
         A(x) = A^0( A^1( ... ( A^{n-1}(x) ) ) )
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.CompositeLinearOperator
     """
 
     def __init__(self, operators: Sequence[LinearOperator]):
@@ -374,12 +364,7 @@ class CompositeLinearOperator(LinearOperator):
 
 
 class ElementwiseMultiplicationOperator(LinearOperator):
-    """Element-wise multiplication operator (multiplication with a diagonal matrix)
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.ElementwiseMultiplicationOperator
-    """
+    """Element-wise multiplication operator (multiplication with a diagonal matrix)"""
 
     def __init__(self, values: Array):
         """init method
@@ -428,12 +413,7 @@ class ElementwiseMultiplicationOperator(LinearOperator):
 
 
 class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
-    """Element-wise multiplication operator between a non-TOF and TOF sinogram
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator
-    """
+    """Element-wise multiplication operator between a non-TOF and TOF sinogram"""
 
     def __init__(self, in_shape: tuple[int, ...], values: Array):
         """init method
@@ -499,12 +479,7 @@ def _sigma_for_cupy(sigma):
 
 
 class GaussianFilterOperator(LinearOperator):
-    """Gaussian filter operator
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.GaussianFilterOperator
-    """
+    """Gaussian filter operator"""
 
     def __init__(self, in_shape: tuple[int, ...], sigma: float | Array, **kwargs):
         """init method
@@ -598,12 +573,7 @@ class GaussianFilterOperator(LinearOperator):
 
 
 class VstackOperator(LinearOperator):
-    """Stacking operator for stacking multiple linear operators vertically
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.VstackOperator
-    """
+    """Stacking operator for stacking multiple linear operators vertically"""
 
     def __init__(self, operators: tuple[LinearOperator, ...]) -> None:
         """init method
@@ -667,11 +637,6 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
        A^0, A^1 \\ldots, A^{n-1}
 
     that can be evaluated independently.
-
-    Examples
-    --------
-
-    .. minigallery:: parallelproj.operators.LinearOperatorSequence
     """
 
     def __init__(self, operators: Sequence[LinearOperator]) -> None:
@@ -747,12 +712,7 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
 
 
 class FiniteForwardDifference(LinearOperator):
-    """finite difference gradient operator
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.FiniteForwardDifference
-    """
+    """finite difference gradient operator"""
 
     def __init__(self, in_shape: tuple[int, ...]) -> None:
         if len(in_shape) > 4:
@@ -895,10 +855,6 @@ class GradientFieldProjectionOperator(LinearOperator):
        \\xi_n = g_n / \\| g_n \\|_{\\eta}
 
     for the joint gradient field :math:`g_n`
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.operators.GradientFieldProjectionOperator
     """
 
     def __init__(self, gradient_field: Array, eta: float = 0.0):

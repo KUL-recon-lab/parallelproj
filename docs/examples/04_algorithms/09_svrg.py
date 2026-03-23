@@ -69,6 +69,9 @@ else:
 
 print(f"Using array API: {xp.__name__}, device: {dev}")
 
+# run MLEM only on GPU – it is too slow on CPU for the number of iterations used here
+run_mlem = dev != "cpu"
+
 
 # %%
 # Setup of the forward model :math:`\bar{y}(x) = A x + s`
@@ -290,7 +293,7 @@ def em_update(
 # subset gradient evaluations matches ``num_epochs_mlem`` full MLEM iterations
 # (each MLEM iteration = one full data pass = ``num_subsets`` subset passes).
 
-num_epochs_mlem = 1200
+num_epochs_mlem = 960
 num_epochs = num_epochs_mlem // num_subsets
 
 # calculate A_k^H 1 for all subsets k, stored as (num_subsets, *in_shape)
@@ -318,7 +321,7 @@ for k in range(len(subset_slices)):
 # full sensitivity image: A^H 1 = sum of all subset adjoint ones
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
 
-df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev)
+df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev) if run_mlem else None
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
 # %%
@@ -329,11 +332,16 @@ df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 # and the full sensitivity image :math:`A^H 1`.  It is guaranteed to
 # converge to the maximum-likelihood solution but requires one full data
 # pass per iteration.
-x_mlem = xp.asarray(x_init, copy=True)
-for i in range(num_epochs_mlem):
-    print(f"MLEM iteration {(i + 1):03} / {num_epochs_mlem:03}", end="\r")
-    x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones)
-    df_mlem[i] = full_data_fidelity(x_mlem)
+#
+# .. note::
+#     MLEM is only run when ``run_mlem`` is ``True`` (i.e. on CUDA devices).
+#     On CPU it is skipped because the large number of iterations is too slow.
+if run_mlem:
+    x_mlem = xp.asarray(x_init, copy=True)
+    for i in range(num_epochs_mlem):
+        print(f"MLEM iteration {(i + 1):03} / {num_epochs_mlem:03}", end="\r")
+        x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones)
+        df_mlem[i] = full_data_fidelity(x_mlem)
 
 # %%
 # OSEM
@@ -473,9 +481,13 @@ svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
 svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
 
 max_passes = int(svrg_cumulative_passes[-1])
-df_mlem_trimmed = to_numpy_array(df_mlem[:max_passes])
+if run_mlem:
+    df_mlem_trimmed = to_numpy_array(df_mlem[:max_passes])
 
-df_min = min(float(xp.min(df_mlem)), float(xp.min(df_osem)), float(xp.min(df_svrg)))
+if run_mlem:
+    df_min = min(float(xp.min(df_mlem)), float(xp.min(df_osem)), float(xp.min(df_svrg)))
+else:
+    df_min = min(float(xp.min(df_osem)), float(xp.min(df_svrg)))
 df_max = float(df_osem[0])  # use first OSEM epoch as upper limit
 
 osem_label = f"OSEM ({num_subsets} subsets)"
@@ -487,24 +499,25 @@ fig, axs = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
 # --- left: vs epoch ---
 axs[0].plot(epochs, to_numpy_array(df_osem), label=osem_label, marker="o")
 axs[0].plot(epochs, to_numpy_array(df_svrg), label=svrg_label, marker="o")
-axs[0].axhline(
-    float(df_mlem[50 - 1]),
-    label=f"{mlem_label} (50 iter.)",
-    ls="--",
-    color="gray",
-)
-axs[0].axhline(
-    float(df_mlem[100 - 1]),
-    label=f"{mlem_label} (100 iter.)",
-    ls="--",
-    color="gray",
-)
-axs[0].axhline(
-    float(df_mlem[-1]),
-    label=f"{mlem_label} ({num_epochs_mlem} iter.)",
-    ls="--",
-    color="black",
-)
+if run_mlem:
+    axs[0].axhline(
+        float(df_mlem[50 - 1]),
+        label=f"{mlem_label} (50 iter.)",
+        ls="--",
+        color="gray",
+    )
+    axs[0].axhline(
+        float(df_mlem[100 - 1]),
+        label=f"{mlem_label} (100 iter.)",
+        ls="--",
+        color="gray",
+    )
+    axs[0].axhline(
+        float(df_mlem[-1]),
+        label=f"{mlem_label} ({num_epochs_mlem} iter.)",
+        ls="--",
+        color="black",
+    )
 axs[0].set_ylim(df_min, df_max)
 axs[0].set_xlabel("Epoch")
 axs[0].set_ylabel("Negative Poisson log-likelihood")
@@ -516,24 +529,25 @@ axs[1].plot(osem_passes, to_numpy_array(df_osem), label=osem_label, marker="o")
 axs[1].plot(
     svrg_cumulative_passes, to_numpy_array(df_svrg), label=svrg_label, marker="o"
 )
-axs[1].axhline(
-    float(df_mlem[50 - 1]),
-    label=f"{mlem_label} (50 iter.)",
-    ls="--",
-    color="gray",
-)
-axs[1].axhline(
-    float(df_mlem[100 - 1]),
-    label=f"{mlem_label} (100 iter.)",
-    ls="--",
-    color="gray",
-)
-axs[1].axhline(
-    float(df_mlem[-1]),
-    label=f"{mlem_label} ({num_epochs_mlem} iter.)",
-    ls="--",
-    color="black",
-)
+if run_mlem:
+    axs[1].axhline(
+        float(df_mlem[50 - 1]),
+        label=f"{mlem_label} (50 iter.)",
+        ls="--",
+        color="gray",
+    )
+    axs[1].axhline(
+        float(df_mlem[100 - 1]),
+        label=f"{mlem_label} (100 iter.)",
+        ls="--",
+        color="gray",
+    )
+    axs[1].axhline(
+        float(df_mlem[-1]),
+        label=f"{mlem_label} ({num_epochs_mlem} iter.)",
+        ls="--",
+        color="black",
+    )
 axs[1].set_ylim(df_min, df_max)
 axs[1].set_xlabel("Full data passes")
 axs[1].set_ylabel("Negative Poisson log-likelihood")

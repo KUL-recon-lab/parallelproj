@@ -20,10 +20,6 @@ class TOFParameters:
         number of sigmas after which TOF kernel is truncated
     tofcenter_offset: float
         offset of center of central TOF bin from LOR center in spatial units (mm)
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.tof.TOFParameters
     """
 
     num_tofbins: int = 29

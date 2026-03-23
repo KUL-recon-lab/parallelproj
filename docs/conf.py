@@ -3,6 +3,8 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import os
+
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_version
 
@@ -76,3 +78,22 @@ autoclass_content = "both"
 autodoc_typehints = "both"
 
 suppress_warnings = ["config.cache"]
+
+
+def _auto_minigallery(app, what, name, obj, options, lines):
+    """Append a minigallery directive if sphinx-gallery has backreferences for this object."""
+    if what not in ("class", "function", "method", "attribute"):
+        return
+
+    gallery_conf = app.config.sphinx_gallery_conf
+    backrefs_dir = os.path.join(
+        app.srcdir, gallery_conf.get("backreferences_dir", "auto_examples/backreferences")
+    )
+    stub = os.path.join(backrefs_dir, f"{name}.examples")
+
+    if os.path.isfile(stub) and not any("minigallery" in line for line in lines):
+        lines += ["", ".. rubric:: Examples", "", f".. minigallery:: {name}", ""]
+
+
+def setup(app):
+    app.connect("autodoc-process-docstring", _auto_minigallery)
