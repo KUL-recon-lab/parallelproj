@@ -666,8 +666,8 @@ class RegularPolygonPETProjector(LinearOperator):
             )
         )
 
-        if self.tof:
-            st += f", {self.tof_parameters.num_tofbins} TOF bins"
+        if self.tof and self._tof_parameters is not None:
+            st += f", {self._tof_parameters.num_tofbins} TOF bins"
 
         st += ")"
 
@@ -699,6 +699,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 xstart, xend, x, self._img_origin, self._voxel_size, x_fwd
             )
         else:
+            assert self._tof_parameters is not None
             parallelproj_core.joseph3d_tof_sino_fwd(
                 xstart,
                 xend,
@@ -753,6 +754,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 y,
             )
         else:
+            assert self._tof_parameters is not None
             parallelproj_core.joseph3d_tof_sino_back(
                 xstart,
                 xend,
@@ -857,8 +859,8 @@ class RegularPolygonPETProjector(LinearOperator):
             (num_events, 3), device=self._dev, dtype=self.xp.float32
         )
 
-        if self.tof:
-            num_tofbins = self.tof_parameters.num_tofbins
+        if self.tof and self._tof_parameters is not None:
+            num_tofbins = self._tof_parameters.num_tofbins
             event_tofbins = self.xp.empty(
                 (num_events,), device=self._dev, dtype=self.xp.int16
             )
@@ -886,7 +888,7 @@ class RegularPolygonPETProjector(LinearOperator):
             )
 
             for it in range(num_tofbins):
-                if self.tof:
+                if self.tof and self._tof_parameters is not None:
                     ss = sino_view[..., it]
                 else:
                     ss = sino_view
@@ -909,7 +911,7 @@ class RegularPolygonPETProjector(LinearOperator):
                     self.xp.take(xend, event_sino_inds, axis=0)
                 )
 
-                if self.tof:
+                if self.tof and self._tof_parameters is not None:
                     event_tofbins[event_offset : (event_offset + num_events_ss)] = (
                         self.xp.full(
                             num_events_ss,
@@ -1082,6 +1084,8 @@ class ListmodePETProjector(LinearOperator):
                 x_fwd,
             )
         else:
+            assert self._tof_parameters is not None
+            assert self._tofbin is not None
             parallelproj_core.joseph3d_tof_lm_fwd(
                 self._xstart,
                 self._xend,
@@ -1121,6 +1125,8 @@ class ListmodePETProjector(LinearOperator):
                 y,
             )
         else:
+            assert self._tof_parameters is not None
+            assert self._tofbin is not None
             parallelproj_core.joseph3d_tof_lm_back(
                 self._xstart,
                 self._xend,
@@ -1222,8 +1228,8 @@ class EqualBlockPETProjector(LinearOperator):
             self._lor_descriptor.num_lors_per_block_pair,
         ]
 
-        if self.tof:
-            out_shape += [self.tof_parameters.num_tofbins]
+        if self.tof and self._tof_parameters is not None:
+            out_shape += [self._tof_parameters.num_tofbins]
 
         return tuple(out_shape)
 
@@ -1291,6 +1297,7 @@ class EqualBlockPETProjector(LinearOperator):
                     x_fwd[i, ...],
                 )
             else:
+                assert self._tof_parameters is not None
                 parallelproj_core.joseph3d_tof_sino_fwd(
                     xstart,
                     xend,
@@ -1335,6 +1342,7 @@ class EqualBlockPETProjector(LinearOperator):
                     y[i, ...],
                 )
             else:
+                assert self._tof_parameters is not None
                 parallelproj_core.joseph3d_tof_sino_back(
                     xstart,
                     xend,
