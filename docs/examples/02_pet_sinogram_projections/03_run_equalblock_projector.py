@@ -187,7 +187,9 @@ fig4.show()
 #
 # Now that the LOR descriptor is defined, we can setup the projector.
 
-proj_tof = parallelproj.projectors.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
+proj_tof = parallelproj.projectors.EqualBlockPETProjector(
+    lor_desc, img_shape, voxel_size
+)
 proj_tof.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0, num_sigmas=3.0
 )
@@ -219,6 +221,7 @@ ax5.set_xlabel("TOF bin")
 ax5.set_title("TOF profile of LOR 0 in block pair 0")
 fig5.show()
 
+# %%
 fig6, _, widgets6 = show_vol_cuts(
     to_numpy_array(ones_back_tof), fig_title="TOF back projection of ones"
 )

@@ -41,6 +41,8 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 from parallelproj.functions import NegPoissonLogL, C2AffineObjective, C1Function
 
+from vis import show_vol_cuts
+
 # %%
 from importlib import import_module, util
 import parallelproj_core as ppc
@@ -232,7 +234,9 @@ for i in range(num_subsets):
         if subset_proj.tof
         else att_sino[subset_slices_non_tof[i]]
     )
-    subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values_k)
+    subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+        att_values_k
+    )
 
     # add the resolution model and multiplication with a subset of the attenuation sinogram
     pet_subset_linop_seq.append(
@@ -553,3 +557,14 @@ axs[1].legend()
 axs[1].grid(ls=":")
 
 fig.show()
+
+# %%
+fig, axs, widgets = show_vol_cuts(
+    to_numpy_array(x_osem), voxel_size=voxel_size, fig_title="OSEM result"
+)
+fig.show()
+
+fig2, axs2, widgets2 = show_vol_cuts(
+    to_numpy_array(x_svrg), voxel_size=voxel_size, fig_title="SVRG result"
+)
+fig2.show()

@@ -501,3 +501,9 @@ fig, axs, widgets = show_vol_cuts(
     to_numpy_array(x_sgd), voxel_size=voxel_size, fig_title="SGD result"
 )
 fig.show()
+
+# %%
+fig2, axs2, widgets = show_vol_cuts(
+    to_numpy_array(x_svrg), voxel_size=voxel_size, fig_title="SVRG result"
+)
+fig2.show()

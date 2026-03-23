@@ -139,7 +139,9 @@ att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
 )
 
 # setup a forward projector containing the attenuation and resolution
-proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
+proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator(
+    (att_op, proj, res_model)
+)
 
 
 # %%
@@ -167,11 +169,14 @@ x_fwd_back = proj_with_att_and_res_model.adjoint(x_fwd)
 # TOF sinogram shape is (r, v, p, t) — transpose to (t, r, v, p) so the
 # TOF-bin axis becomes the leading slider in the 4-D viewer
 x_fwd_np = to_numpy_array(x_fwd).transpose(3, 0, 1, 2)
+
+# %%
 fig, _, widgets = show_vol_cuts(
     x_fwd_np, axis_labels=("t", "r", "v", "p"), fig_title="TOF sinogram"
 )
 fig.show()
 
+# %%
 # visualize the back projection
 fig2, _, widgets2 = show_vol_cuts(
     to_numpy_array(x_fwd_back), fig_title="back projection"

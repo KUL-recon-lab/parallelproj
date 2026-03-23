@@ -124,9 +124,7 @@ fig, _, widgets = show_vol_cuts(
 fig.show()
 
 # visualize the image
-fig2, _, widgets2 = show_vol_cuts(
-    to_numpy_array(x), fig_title="image"
-)
+fig2, _, widgets2 = show_vol_cuts(to_numpy_array(x), fig_title="image")
 fig2.show()
 
 
@@ -164,7 +162,8 @@ x_fwd2_back = proj_with_res_model.adjoint(x_fwd2)
 
 # visualize the forward projection including the resolution model
 fig, _, widgets = show_vol_cuts(
-    to_numpy_array(x_fwd2), axis_labels=("r", "v", "p"),
+    to_numpy_array(x_fwd2),
+    axis_labels=("r", "v", "p"),
     fig_title="sinogram with resolution model",
 )
 fig.show()
@@ -193,7 +192,9 @@ att_sino = xp.exp(-x_att_fwd)
 att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_sino)
 
 # setup a forward projector containing the attenuation and resolution
-proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
+proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator(
+    (att_op, proj, res_model)
+)
 
 # forward project with resolution and attenuation model
 x_fwd3 = proj_with_att_and_res_model(x)
@@ -202,13 +203,16 @@ x_fwd3 = proj_with_att_and_res_model(x)
 # attenuation model
 x_fwd3_back = proj_with_att_and_res_model.adjoint(x_fwd3)
 
+# %%
 # visualize the forward projection including the attenuation and resolution model
 fig, _, widgets = show_vol_cuts(
-    to_numpy_array(x_fwd3), axis_labels=("r", "v", "p"),
+    to_numpy_array(x_fwd3),
+    axis_labels=("r", "v", "p"),
     fig_title="sinogram with attenuation and resolution model",
 )
 fig.show()
 
+# %%
 # visualize the back projection including the attenuation and resolution model
 fig2, _, widgets2 = show_vol_cuts(
     to_numpy_array(x_fwd3_back), fig_title="back projection"

@@ -48,7 +48,7 @@ sphinx_gallery_conf = {
     "backreferences_dir": "auto_examples/backreferences",
     "doc_module": ("parallelproj",),
     "filename_pattern": r"[\\/]\d{2,3}_run_.*\.py$",
-    "ignore_pattern": r"utils.py",
+    "ignore_pattern": r"(^|[\\/])(vis|utils)\.py$",
     "plot_gallery": True,
     "within_subsection_order": FileNameSortKey,
 }
@@ -91,7 +91,8 @@ def _auto_minigallery(app, what, name, obj, options, lines):
 
     gallery_conf = app.config.sphinx_gallery_conf
     backrefs_dir = os.path.join(
-        app.srcdir, gallery_conf.get("backreferences_dir", "auto_examples/backreferences")
+        app.srcdir,
+        gallery_conf.get("backreferences_dir", "auto_examples/backreferences"),
     )
     stub = os.path.join(backrefs_dir, f"{name}.examples")
 
