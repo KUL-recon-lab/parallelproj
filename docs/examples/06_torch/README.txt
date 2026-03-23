@@ -1,2 +1,0 @@
-Parallelproj pytorch examples
------------------------------

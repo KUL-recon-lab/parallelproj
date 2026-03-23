@@ -1,2 +1,2 @@
-High-level PET listmode projector examples
+Custom parallelproj pytorch layer examples
 ------------------------------------------

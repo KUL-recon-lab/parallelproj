@@ -1,2 +1,2 @@
-High-level PET sinogram projector examples
-------------------------------------------
+PET sinogram and listmode projector examples
+--------------------------------------------
