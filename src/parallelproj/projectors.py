@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import array_api_compat.numpy as np
+import numpy as np
 import parallelproj_core
 from parallelproj import Array, to_numpy_array, empty_cuda_cache
 import array_api_compat
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure, Axes
 from matplotlib.patches import Rectangle
 from types import ModuleType
 from array_api_compat import device, get_namespace, size
@@ -177,7 +178,7 @@ class ParallelViewProjector2D(LinearOperator):
 
     def show_views(
         self, views_to_show: None | Array = None, image: None | Array = None, **kwargs
-    ) -> plt.Figure:
+    ) -> Figure:
         """visualize the geometry of certrain projection views
 
         Parameters
@@ -196,6 +197,8 @@ class ParallelViewProjector2D(LinearOperator):
         """
         if views_to_show is None:
             views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)
+
+        assert views_to_show is not None
 
         num_cols = len(views_to_show)
         fig, ax = plt.subplots(1, num_cols, figsize=(num_cols * 3, 3))
@@ -779,7 +782,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     def show_geometry(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         edgecolor: str = "grey",
         alpha: float = 0.1,
@@ -911,7 +914,11 @@ class RegularPolygonPETProjector(LinearOperator):
                     self.xp.take(xend, event_sino_inds, axis=0)
                 )
 
-                if self.tof and self._tof_parameters is not None:
+                if (
+                    self.tof
+                    and self._tof_parameters is not None
+                    and event_tofbins is not None
+                ):
                     event_tofbins[event_offset : (event_offset + num_events_ss)] = (
                         self.xp.full(
                             num_events_ss,
@@ -1222,7 +1229,7 @@ class EqualBlockPETProjector(LinearOperator):
         return self._img_shape
 
     @property
-    def out_shape(self) -> tuple[int, int, int]:
+    def out_shape(self) -> tuple[int, ...]:
         out_shape = [
             self._lor_descriptor.num_block_pairs,
             self._lor_descriptor.num_lors_per_block_pair,
@@ -1369,7 +1376,7 @@ class EqualBlockPETProjector(LinearOperator):
 
     def show_geometry(
         self,
-        ax: plt.Axes,
+        ax: Axes,
         color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         edgecolor: str = "grey",
         alpha: float = 0.1,
