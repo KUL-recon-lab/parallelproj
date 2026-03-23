@@ -564,6 +564,7 @@ fig, axs, widgets = show_vol_cuts(
 )
 fig.show()
 
+# %%
 fig2, axs2, widgets2 = show_vol_cuts(
     to_numpy_array(x_svrg), voxel_size=voxel_size, fig_title="SVRG result"
 )
