@@ -1173,6 +1173,7 @@ class EqualBlockPETProjector(LinearOperator):
         img_shape: tuple[int, int, int],
         voxel_size: tuple[float, float, float],
         img_origin: None | Array = None,
+        num_chunks: int = 1,
     ) -> None:
         """
         Parameters
@@ -1186,6 +1187,11 @@ class EqualBlockPETProjector(LinearOperator):
         img_origin : None | Array, optional
             the origin of the image to be projected, by default None
             means that the center of the image is at world coordinate (0,0,0)
+        num_chunks : int, optional
+            number of chunks to split the block pairs into during projection,
+            by default 1 (all block pairs processed in a single call).
+            Increase this value to reduce peak memory usage at the cost of
+            more projection kernel calls.
         """
 
         super().__init__()
@@ -1214,6 +1220,7 @@ class EqualBlockPETProjector(LinearOperator):
 
         self._tof_parameters = None
         self._tof = False
+        self._num_chunks = num_chunks
 
     @property
     def xp(self) -> ModuleType:
@@ -1283,17 +1290,29 @@ class EqualBlockPETProjector(LinearOperator):
         """voxel size"""
         return self._voxel_size
 
+    @property
+    def num_chunks(self) -> int:
+        """number of chunks to split the block pairs into during projection"""
+        return self._num_chunks
+
+    @num_chunks.setter
+    def num_chunks(self, value: int) -> None:
+        self._num_chunks = value
+
     def _apply(self, x: Array) -> Array:
-        """nonTOF forward projection of input image x including image based resolution model"""
+        """forward projection of input image x"""
 
         dev = array_api_compat.device(x)
 
         x_fwd = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=dev)
 
-        for i in range(self.lor_descriptor.num_block_pairs):
-            xstart, xend = self.lor_descriptor.get_lor_coordinates(
-                self.xp.asarray([i], device=dev)
-            )
+        num_bp = self.lor_descriptor.num_block_pairs
+        chunk_size = -(-num_bp // self._num_chunks)  # ceiling division
+
+        for chunk_start in range(0, num_bp, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, num_bp)
+            bp_chunk = self.xp.arange(chunk_start, chunk_end, device=dev)
+            xstart, xend = self.lor_descriptor.get_lor_coordinates(bp_chunk)
 
             if not self.tof:
                 parallelproj_core.joseph3d_fwd(
@@ -1302,7 +1321,7 @@ class EqualBlockPETProjector(LinearOperator):
                     x,
                     self._img_origin,
                     self._voxel_size,
-                    x_fwd[i, ...],
+                    self.xp.reshape(x_fwd[chunk_start:chunk_end, ...], (-1,)),
                 )
             else:
                 assert self._tof_parameters is not None
@@ -1312,7 +1331,10 @@ class EqualBlockPETProjector(LinearOperator):
                     x,
                     self._img_origin,
                     self._voxel_size,
-                    x_fwd[i, ...],
+                    self.xp.reshape(
+                        x_fwd[chunk_start:chunk_end, ...],
+                        (-1, self._tof_parameters.num_tofbins),
+                    ),
                     self._tof_parameters.tofbin_width,
                     self.xp.asarray(
                         [self._tof_parameters.sigma_tof],
@@ -1331,15 +1353,19 @@ class EqualBlockPETProjector(LinearOperator):
         return x_fwd
 
     def _adjoint(self, y: Array) -> Array:
-        """nonTOF back projection of sinogram y"""
+        """back projection of sinogram y"""
         dev = array_api_compat.device(y)
 
         y_back = self.xp.zeros(self.in_shape, dtype=self.xp.float32, device=dev)
 
-        for i in range(self.lor_descriptor.num_block_pairs):
-            xstart, xend = self.lor_descriptor.get_lor_coordinates(
-                self.xp.asarray([i], device=dev)
-            )
+        num_bp = self.lor_descriptor.num_block_pairs
+        chunk_size = -(-num_bp // self._num_chunks)  # ceiling division
+
+        for chunk_start in range(0, num_bp, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, num_bp)
+            bp_chunk = self.xp.arange(chunk_start, chunk_end, device=dev)
+            xstart, xend = self.lor_descriptor.get_lor_coordinates(bp_chunk)
+
             if not self.tof:
                 parallelproj_core.joseph3d_back(
                     xstart,
@@ -1347,7 +1373,7 @@ class EqualBlockPETProjector(LinearOperator):
                     y_back,
                     self._img_origin,
                     self._voxel_size,
-                    y[i, ...],
+                    self.xp.reshape(y[chunk_start:chunk_end, ...], (-1,)),
                 )
             else:
                 assert self._tof_parameters is not None
@@ -1357,7 +1383,10 @@ class EqualBlockPETProjector(LinearOperator):
                     y_back,
                     self._img_origin,
                     self._voxel_size,
-                    y[i, ...],
+                    self.xp.reshape(
+                        y[chunk_start:chunk_end, ...],
+                        (-1, self._tof_parameters.num_tofbins),
+                    ),
                     self._tof_parameters.tofbin_width,
                     self.xp.asarray(
                         [self._tof_parameters.sigma_tof],

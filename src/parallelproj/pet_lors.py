@@ -104,7 +104,7 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
 
         super().__init__(scanner)
         self._scanner = scanner
-        self._all_block_pairs = all_block_pairs
+        self._all_block_pairs = self.xp.asarray(all_block_pairs, device=self.dev)
         self._num_lorendpoints_per_block = self.scanner.modules[0].num_lor_endpoints
         self._num_lors_per_block_pair = self._num_lorendpoints_per_block**2
 
@@ -164,40 +164,36 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
 
         assert block_pair_nums is not None
 
-        xstart = self.xp.zeros(
-            (block_pair_nums.shape[0], self._num_lors_per_block_pair, 3),
-            device=self.dev,
-            dtype=self.xp.float32,
+        num_selected = block_pair_nums.shape[0]
+
+        # get start and end block indices for all selected block pairs
+        bp = self.xp.take(self._all_block_pairs, block_pair_nums, axis=0)  # (num_selected, 2)
+        start_blocks = bp[:, 0]  # (num_selected,)
+        end_blocks = bp[:, 1]  # (num_selected,)
+
+        # build the within-block endpoint index pairs via meshgrid (computed once)
+        tmp = self.xp.arange(self._num_lorendpoints_per_block, device=self.dev)
+        a, b = self.xp.meshgrid(tmp, tmp, indexing="ij")
+        a = self.xp.reshape(a, (-1,))  # (num_lors_per_block_pair,)
+        b = self.xp.reshape(b, (-1,))  # (num_lors_per_block_pair,)
+
+        # flat index over all (block_pair, lor) combinations
+        lor_idx = self.xp.arange(
+            num_selected * self._num_lors_per_block_pair, device=self.dev
         )
+        within_pair_idx = lor_idx % self._num_lors_per_block_pair
+        pair_idx = lor_idx // self._num_lors_per_block_pair
 
-        xend = self.xp.zeros(
-            (block_pair_nums.shape[0], self._num_lors_per_block_pair, 3),
-            device=self.dev,
-            dtype=self.xp.float32,
-        )
+        # tile endpoint indices and repeat block indices across all LORs
+        a_all = self.xp.take(a, within_pair_idx, axis=0)
+        b_all = self.xp.take(b, within_pair_idx, axis=0)
+        start_blocks_all = self.xp.take(start_blocks, pair_idx, axis=0)
+        end_blocks_all = self.xp.take(end_blocks, pair_idx, axis=0)
 
-        for i, block_pair_num in enumerate(block_pair_nums):
-            bs = int(self._all_block_pairs[block_pair_num, 0])
-            be = int(self._all_block_pairs[block_pair_num, 1])
+        xstart = self.scanner.get_lor_endpoints(start_blocks_all, a_all)
+        xend = self.scanner.get_lor_endpoints(end_blocks_all, b_all)
 
-            eps = self.scanner.get_lor_endpoints(
-                self.xp.asarray([bs], device=self.dev),
-                self.xp.arange(self._num_lorendpoints_per_block, device=self.dev),
-            )
-            epe = self.scanner.get_lor_endpoints(
-                self.xp.asarray([be], device=self.dev),
-                self.xp.arange(self._num_lorendpoints_per_block, device=self.dev),
-            )
-
-            tmp = self.xp.arange(self._num_lorendpoints_per_block, device=self.dev)
-            a, b = self.xp.meshgrid(tmp, tmp, indexing="ij")
-            a = self.xp.reshape(a, (-1,))
-            b = self.xp.reshape(b, (-1,))
-
-            xstart[i, ...] = self.xp.take(eps, a, axis=0)
-            xend[i, ...] = self.xp.take(epe, b, axis=0)
-
-        return self.xp.reshape(xstart, (-1, 3)), self.xp.reshape(xend, (-1, 3))
+        return xstart, xend
 
     def show_block_pair_lors(
         self, ax: Axes, block_pair_nums: Array, lw: float = 0.2, **kwargs

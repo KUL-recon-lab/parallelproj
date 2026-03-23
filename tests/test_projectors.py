@@ -340,6 +340,10 @@ def test_equalblock_projector(xp, dev, verbose=True):
     assert allclose(
         proj.voxel_size, xp.asarray(voxel_size, dtype=xp.float32, device=dev)
     )
+    assert proj.num_chunks == 1
+    proj.num_chunks = 2
+    assert proj.num_chunks == 2
+    proj.num_chunks = 1
 
     img_fwd = proj(img)
     ones_back = proj.adjoint(xp.ones_like(img_fwd))
