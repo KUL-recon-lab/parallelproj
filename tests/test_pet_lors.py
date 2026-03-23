@@ -308,9 +308,20 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     assert bool(xp.sum(lor_desc_13.plane_multiplicity) == 167)
 
     seg_13 = lor_desc_13.plane_segment
-    assert bool(xp.sum(xp.astype(seg_13 == xp.asarray(0, device=dev, dtype=xp.int32), xp.int32)) == 25)
-    assert bool(xp.sum(xp.astype(seg_13 == xp.asarray(1, device=dev, dtype=xp.int32), xp.int32)) == 15)
-    assert bool(xp.sum(xp.astype(seg_13 == xp.asarray(-1, device=dev, dtype=xp.int32), xp.int32)) == 15)
+    assert bool(
+        xp.sum(xp.astype(seg_13 == xp.asarray(0, device=dev, dtype=xp.int32), xp.int32))
+        == 25
+    )
+    assert bool(
+        xp.sum(xp.astype(seg_13 == xp.asarray(1, device=dev, dtype=xp.int32), xp.int32))
+        == 15
+    )
+    assert bool(
+        xp.sum(
+            xp.astype(seg_13 == xp.asarray(-1, device=dev, dtype=xp.int32), xp.int32)
+        )
+        == 15
+    )
 
     def _check_plane(idx, exp_sz, exp_ez, exp_mult, exp_seg):
         assert bool(xp.abs(lor_desc_13.start_plane_z[idx] - exp_sz) < 1e-5)
@@ -318,14 +329,14 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
         assert bool(lor_desc_13.plane_multiplicity[idx] == exp_mult)
         assert bool(lor_desc_13.plane_segment[idx] == exp_seg)
 
-    _check_plane( 0, 0.0,  0.0,  1,  0)
-    _check_plane( 4, 2.0,  2.0,  5,  0)
-    _check_plane(12, 6.0,  6.0,  5,  0)
-    _check_plane(24, 12.0, 12.0, 1,  0)
-    _check_plane(25, 0.0,  5.0,  1,  1)
-    _check_plane(31, 1.5,  9.5,  4,  1)
-    _check_plane(40, 5.0,  0.0,  1, -1)
-    _check_plane(46, 9.5,  1.5,  4, -1)
+    _check_plane(0, 0.0, 0.0, 1, 0)
+    _check_plane(4, 2.0, 2.0, 5, 0)
+    _check_plane(12, 6.0, 6.0, 5, 0)
+    _check_plane(24, 12.0, 12.0, 1, 0)
+    _check_plane(25, 0.0, 5.0, 1, 1)
+    _check_plane(31, 1.5, 9.5, 4, 1)
+    _check_plane(40, 5.0, 0.0, 1, -1)
+    _check_plane(46, 9.5, 1.5, 4, -1)
 
 
 def test_show_michelogram(xp: ModuleType, dev: str) -> None:

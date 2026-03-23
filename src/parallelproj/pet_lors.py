@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import abc
 import enum
-import array_api_compat.numpy as np
+import numpy as np
 from parallelproj import Array, to_numpy_array
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -127,11 +127,6 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
     def num_lors_per_block_pair(self) -> int:
         """number of LORs per block pair"""
         return self._num_lors_per_block_pair
-
-    @property
-    def scanner(self) -> ModularizedPETScannerGeometry:
-        """the scanner for which coincidences are described"""
-        return self._scanner
 
     @property
     def xp(self) -> ModuleType:
