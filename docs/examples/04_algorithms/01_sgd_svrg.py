@@ -61,6 +61,8 @@ from parallelproj.functions import (
     C1Function,
 )
 
+from utils import show_3d_cuts
+
 # %%
 from importlib import import_module, util
 import parallelproj_core as ppc
@@ -495,8 +497,6 @@ axs[1].grid(ls=":")
 fig.show()
 
 # %%
-from utils import show_3d_cuts
-
 fig, axs, widgets = show_3d_cuts(
     to_numpy_array(x_sgd), voxel_size=voxel_size, fig_title="SGD result"
 )

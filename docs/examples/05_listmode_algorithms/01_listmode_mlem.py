@@ -224,7 +224,9 @@ contamination_list = xp.full(
     dtype=xp.float32,
 )
 
-lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
+lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
+    (lm_att_op, lm_proj, res_model)
+)
 
 # %%
 # LM MLEM reconstruction
@@ -317,5 +319,7 @@ ax[0].set_title(f"true image - plane {0:02}")
 ax[1].set_title(f"LM MLEM iteration {num_iter} - plane {0:02}")
 fig.tight_layout()
 if plt.get_backend() != "agg":
-    ani = animation.FuncAnimation(fig, _update_img, x_np.shape[2], interval=200, blit=False)
+    ani = animation.FuncAnimation(
+        fig, _update_img, x_np.shape[2], interval=200, blit=False
+    )
     fig.show()

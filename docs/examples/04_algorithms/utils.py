@@ -674,21 +674,25 @@ def show_3d_cuts(
     ix0, iy0, iz0 = nx // 2, ny // 2, nz // 2
 
     # --- layout via GridSpec ---
-    # row 0: images  |  row 1: slice sliders  |  row 2: vmin / vmax / cmap boxes
+    # row 0: images
+    # row 1: slice sliders
+    # row 2: vmin / vmax / cmap text boxes
+    # row 3: horizontal colorbar (spans all columns)
     fig = plt.figure(figsize=figsize)
     if fig_title is not None:
         fig.suptitle(fig_title)
 
     gs = fig.add_gridspec(
-        3, 3,
-        height_ratios=[8, 1, 1],
-        hspace=0.5,
+        4, 3,
+        height_ratios=[8, 1, 1, 0.5],
+        hspace=0.6,
         wspace=0.35,
     )
 
     ax_im = [fig.add_subplot(gs[0, c]) for c in range(3)]
     ax_sl = [fig.add_subplot(gs[1, c]) for c in range(3)]
     ax_tb = [fig.add_subplot(gs[2, c]) for c in range(3)]
+    ax_cb = fig.add_subplot(gs[3, :])
 
     # --- images ---
     # cut along x: shows (y, z) plane  → aspect = dz / dy
@@ -728,6 +732,9 @@ def show_3d_cuts(
     sy.on_changed(update_slices)
     sz.on_changed(update_slices)
 
+    # --- colorbar ---
+    cb = fig.colorbar(ims[0], cax=ax_cb, orientation="horizontal")
+
     # --- vmin / vmax text boxes ---
     tb_vmin = TextBox(ax_tb[0], "vmin", initial=f"{vmin:.4g}")
     tb_vmax = TextBox(ax_tb[1], "vmax", initial=f"{vmax:.4g}")
@@ -740,6 +747,7 @@ def show_3d_cuts(
             return
         for im in ims:
             im.set_clim(lo, hi)
+        cb.update_normal(ims[0])
         fig.canvas.draw_idle()
 
     tb_vmin.on_submit(update_clim)
@@ -756,6 +764,7 @@ def show_3d_cuts(
             return
         for im in ims:
             im.set_cmap(cm)
+        cb.update_normal(ims[0])
         fig.canvas.draw_idle()
 
     tb_cmap.on_submit(update_cmap)
