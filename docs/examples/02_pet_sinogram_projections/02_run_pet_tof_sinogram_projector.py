@@ -9,6 +9,7 @@ a resolution model and a correction for attenuation.
 
 # %%
 import matplotlib.pyplot as plt
+from vis import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -163,40 +164,16 @@ x_fwd_back = proj_with_att_and_res_model.adjoint(x_fwd)
 # visualize the forward and the back projection
 # ---------------------------------------------
 
-fig, ax = plt.subplots(7, 9, figsize=(1.4 * 9, 1.2 * 7), sharex=True, sharey=True)
-vmax = float(xp.max(x_fwd))
-for i in range(7):
-    for j in range(9):
-        ax[i, j].imshow(
-            to_numpy_array(x_fwd[:, :, i, j].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        if i == 0:
-            ax[i, j].set_title(
-                f"tof bin {j - proj.tof_parameters.num_tofbins//2}", fontsize="medium"
-            )
-        if j == 0:
-            ax[i, j].set_ylabel(f"sino pl. {i}", fontsize="medium")
-        # ax[i,j].set_axis_off()
-fig.tight_layout()
+# TOF sinogram shape is (r, v, p, t) — transpose to (t, r, v, p) so the
+# TOF-bin axis becomes the leading slider in the 4-D viewer
+x_fwd_np = to_numpy_array(x_fwd).transpose(3, 0, 1, 2)
+fig, _, widgets = show_vol_cuts(
+    x_fwd_np, axis_labels=("t", "r", "v", "p"), fig_title="TOF sinogram"
+)
 fig.show()
 
-
-# visualize the back projection including the attenuation resolution model
-fig2, ax2 = plt.subplots(3, 3, figsize=(8, 8))
-vmax = float(xp.max(x_fwd_back))
-for i, axx in enumerate(ax2.ravel()):
-    if i < x_fwd_back.shape[1]:
-        axx.imshow(
-            to_numpy_array(x_fwd_back[:, i, :].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        axx.set_title(f"img plane {i}", fontsize="medium")
-    else:
-        axx.set_axis_off()
-fig2.tight_layout()
+# visualize the back projection
+fig2, _, widgets2 = show_vol_cuts(
+    to_numpy_array(x_fwd_back), fig_title="back projection"
+)
 fig2.show()

@@ -27,6 +27,7 @@ using the linear forward model
 # %%
 from __future__ import annotations
 import matplotlib.pyplot as plt
+from vis import show_vol_cuts
 import numpy as np
 import math
 from array_api_compat import size
@@ -577,32 +578,19 @@ x_pdhg_np = to_numpy_array(x_pdhg)
 x_pdhg_early_np = to_numpy_array(x_pdhg_early)
 x_lmspdhg_np = to_numpy_array(x_lmspdhg)
 
-pl2 = x_true_np.shape[2] // 2
-pl1 = x_true_np.shape[1] // 2
-pl0 = x_true_np.shape[0] // 2
-
-fig, ax = plt.subplots(2, 5, figsize=(12, 4), tight_layout=True)
 vmax = 1.2 * x_true_np.max()
-ax[0, 0].imshow(x_true_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
-ax[0, 1].imshow(x_mlem_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
-ax[0, 2].imshow(x_pdhg_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
-ax[0, 3].imshow(x_lmspdhg_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
-ax[0, 4].imshow(x_pdhg_early_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
 
-ax[1, 0].imshow(x_true_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-ax[1, 1].imshow(x_mlem_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-ax[1, 2].imshow(x_pdhg_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-ax[1, 3].imshow(x_lmspdhg_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-ax[1, 4].imshow(x_pdhg_early_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-
-ax[0, 0].set_title("true img", fontsize="medium")
-ax[0, 1].set_title("init img", fontsize="medium")
-ax[0, 2].set_title(f"PDHG {num_iter_pdhg} it. (ref)", fontsize="medium")
-ax[0, 3].set_title(
-    f"LM-SPDHG {num_iter_spdhg} it. / {num_subsets} subsets", fontsize="medium"
-)
-ax[0, 4].set_title(f"PDHG {num_iter_spdhg} it.", fontsize="medium")
-fig.show()
+for vol_np, title in [
+    (x_true_np,       "true image"),
+    (x_mlem_np,       "init image (MLEM)"),
+    (x_pdhg_np,       f"PDHG {num_iter_pdhg} it. (reference)"),
+    (x_lmspdhg_np,    f"LM-SPDHG {num_iter_spdhg} it. / {num_subsets} subsets"),
+    (x_pdhg_early_np, f"PDHG {num_iter_spdhg} it."),
+]:
+    fig_i, _, widgets_i = show_vol_cuts(
+        vol_np, voxel_size=voxel_size, vmin=0, vmax=vmax, fig_title=title
+    )
+    fig_i.show()
 
 # %%
 

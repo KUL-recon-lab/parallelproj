@@ -10,6 +10,7 @@ attenuation model.
 
 # %%
 import matplotlib.pyplot as plt
+from vis import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.projectors
@@ -128,21 +129,9 @@ y_back = lm_proj.adjoint(ones_list)
 # Show the backprojected list of ones (events)
 # --------------------------------------------
 
-fig2, ax2 = plt.subplots(3, 3, figsize=(8, 8))
-vmax = float(xp.max(y_back))
-for i in range(ax2.size):
-    if i < y_back.shape[1]:
-        axx = ax2.ravel()[i]
-        axx.imshow(
-            to_numpy_array(y_back[:, i, :].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        axx.set_title(f"img plane {i}", fontsize="medium")
-    else:
-        ax2.ravel()[i].set_axis_off()
-fig2.tight_layout()
+fig2, _, widgets2 = show_vol_cuts(
+    to_numpy_array(y_back), fig_title="back projection of ones"
+)
 fig2.show()
 
 # %%
@@ -172,19 +161,7 @@ y_back2 = lm_proj_with_res_model_and_att.adjoint(ones_list)
 # Show the backprojected list of ones (events)
 # --------------------------------------------
 
-fig3, ax3 = plt.subplots(3, 3, figsize=(8, 8))
-vmax = float(xp.max(y_back2))
-for i in range(ax3.size):
-    if i < y_back.shape[1]:
-        axx = ax3.ravel()[i]
-        axx.imshow(
-            to_numpy_array(y_back2[:, i, :].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        axx.set_title(f"img plane {i}", fontsize="medium")
-    else:
-        ax3.ravel()[i].set_axis_off()
-fig3.tight_layout()
+fig3, _, widgets3 = show_vol_cuts(
+    to_numpy_array(y_back2), fig_title="back projection with resolution and attenuation model"
+)
 fig3.show()

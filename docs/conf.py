@@ -4,11 +4,15 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import os
+import sys
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_version
 
 from sphinx_gallery.sorting import FileNameSortKey
+
+# make shared example utilities (vis.py) importable from all example subdirectories
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples"))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information

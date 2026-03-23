@@ -9,6 +9,7 @@ a resolution model and a correction for attenuation.
 
 # %%
 import matplotlib.pyplot as plt
+from vis import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -117,32 +118,15 @@ x[proj.in_shape[0] // 2, :, 4] = 1.0
 x_fwd = proj(x)
 
 # visualize the forward projection
-fig, ax = plt.subplots(4, 5, figsize=(2 * 5, 2 * 4))
-vmax = float(xp.max(x_fwd))
-for i in range(20):
-    axx = ax.ravel()[i]
-    if i < proj.lor_descriptor.num_planes:
-        axx.imshow(
-            to_numpy_array(x_fwd[:, :, i].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        axx.set_title(f"sino plane {i}", fontsize="medium")
-    else:
-        axx.set_axis_off()
-fig.tight_layout()
+fig, _, widgets = show_vol_cuts(
+    to_numpy_array(x_fwd), axis_labels=("r", "v", "p"), fig_title="sinogram"
+)
 fig.show()
 
-# visualize the back projection including the attenuation resolution model
-fig2, ax2 = plt.subplots(3, 3, figsize=(8, 8))
-vmax = float(xp.max(x))
-for i in range(8):
-    axx = ax2.ravel()[i]
-    axx.imshow(to_numpy_array(x[:, i, :].T), cmap="Greys", vmin=0, vmax=vmax)
-    axx.set_title(f"img plane {i}", fontsize="medium")
-ax2.ravel()[-1].set_axis_off()
-fig2.tight_layout()
+# visualize the image
+fig2, _, widgets2 = show_vol_cuts(
+    to_numpy_array(x), fig_title="image"
+)
 fig2.show()
 
 
@@ -179,21 +163,10 @@ x_fwd2 = proj_with_res_model(x)
 x_fwd2_back = proj_with_res_model.adjoint(x_fwd2)
 
 # visualize the forward projection including the resolution model
-fig, ax = plt.subplots(4, 5, figsize=(2 * 5, 2 * 4))
-vmax = float(xp.max(x_fwd2))
-for i in range(20):
-    axx = ax.ravel()[i]
-    if i < proj.lor_descriptor.num_planes:
-        axx.imshow(
-            to_numpy_array(x_fwd2[:, :, i].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        axx.set_title(f"sino plane {i}", fontsize="medium")
-    else:
-        axx.set_axis_off()
-fig.tight_layout()
+fig, _, widgets = show_vol_cuts(
+    to_numpy_array(x_fwd2), axis_labels=("r", "v", "p"),
+    fig_title="sinogram with resolution model",
+)
 fig.show()
 
 
@@ -229,36 +202,15 @@ x_fwd3 = proj_with_att_and_res_model(x)
 # attenuation model
 x_fwd3_back = proj_with_att_and_res_model.adjoint(x_fwd3)
 
-# visualize the forward projection including the attenuation resolution model
-fig, ax = plt.subplots(4, 5, figsize=(2 * 5, 2 * 4))
-vmax = float(xp.max(x_fwd3))
-for i in range(20):
-    axx = ax.ravel()[i]
-    if i < proj.lor_descriptor.num_planes:
-        axx.imshow(
-            to_numpy_array(x_fwd3[:, :, i].T),
-            cmap="Greys",
-            vmin=0,
-            vmax=vmax,
-        )
-        axx.set_title(f"sino plane {i}", fontsize="medium")
-    else:
-        axx.set_axis_off()
-fig.tight_layout()
+# visualize the forward projection including the attenuation and resolution model
+fig, _, widgets = show_vol_cuts(
+    to_numpy_array(x_fwd3), axis_labels=("r", "v", "p"),
+    fig_title="sinogram with attenuation and resolution model",
+)
 fig.show()
 
-# visualize the back projection including the attenuation resolution model
-fig2, ax2 = plt.subplots(3, 3, figsize=(8, 8))
-vmax = float(xp.max(x_fwd3_back))
-for i in range(8):
-    axx = ax2.ravel()[i]
-    axx.imshow(
-        to_numpy_array(x_fwd3_back[:, i, :].T),
-        cmap="Greys",
-        vmin=0,
-        vmax=vmax,
-    )
-    axx.set_title(f"img plane {i}", fontsize="medium")
-ax2.ravel()[-1].set_axis_off()
-fig2.tight_layout()
+# visualize the back projection including the attenuation and resolution model
+fig2, _, widgets2 = show_vol_cuts(
+    to_numpy_array(x_fwd3_back), fig_title="back projection"
+)
 fig2.show()

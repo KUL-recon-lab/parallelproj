@@ -10,6 +10,7 @@ consists of a regular grid of LOR endpoints.
 # %%
 import math
 import matplotlib.pyplot as plt
+from vis import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -175,17 +176,9 @@ ax3.set_ylabel("block pair")
 ax3.set_title("forward projection of ones")
 fig3.show()
 
-fig4, ax4 = plt.subplots(1, 3, figsize=(7, 3), tight_layout=True)
-vmin = float(xp.min(ones_back))
-vmax = float(xp.max(ones_back))
-for i in range(3):
-    ax4[i].imshow(
-        to_numpy_array(ones_back[:, :, i]),
-        vmin=vmin,
-        vmax=vmax,
-        cmap="Greys",
-    )
-ax4[1].set_title("back projection of ones")
+fig4, _, widgets4 = show_vol_cuts(
+    to_numpy_array(ones_back), fig_title="back projection of ones"
+)
 fig4.show()
 
 # %%
@@ -226,15 +219,7 @@ ax5.set_xlabel("TOF bin")
 ax5.set_title("TOF profile of LOR 0 in block pair 0")
 fig5.show()
 
-fig6, ax6 = plt.subplots(1, 3, figsize=(7, 3), tight_layout=True)
-vmin = float(xp.min(ones_back_tof))
-vmax = float(xp.max(ones_back_tof))
-for i in range(3):
-    ax6[i].imshow(
-        to_numpy_array(ones_back_tof[:, :, i]),
-        vmin=vmin,
-        vmax=vmax,
-        cmap="Greys",
-    )
-ax6[1].set_title("TOF back projection of ones")
+fig6, _, widgets6 = show_vol_cuts(
+    to_numpy_array(ones_back_tof), fig_title="TOF back projection of ones"
+)
 fig6.show()

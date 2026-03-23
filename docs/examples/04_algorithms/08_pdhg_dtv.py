@@ -29,6 +29,7 @@ see :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details.
 # %%
 from __future__ import annotations
 import matplotlib.pyplot as plt
+from vis import show_vol_cuts
 import numpy as np
 
 import parallelproj.operators
@@ -359,24 +360,23 @@ x_true_np = to_numpy_array(x_true)
 x_struct_np = to_numpy_array(x_struct)
 x_pdhg_np = to_numpy_array(x_pdhg)
 
-pl2 = x_true_np.shape[2] // 2
-pl1 = x_true_np.shape[1] // 2
-pl0 = x_true_np.shape[0] // 2
-
-fig, ax = plt.subplots(2, 3, figsize=(9, 5), tight_layout=True)
 vmax = 1.2 * x_true_np.max()
-ax[0, 0].imshow(x_true_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
-ax[0, 1].imshow(x_pdhg_np[:, :, pl2], cmap="Greys", vmin=0, vmax=vmax)
-ax[0, 2].imshow(x_struct_np[:, :, pl2], cmap="Greys")
 
-ax[1, 0].imshow(x_true_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-ax[1, 1].imshow(x_pdhg_np[pl0, :, :].T, cmap="Greys", vmin=0, vmax=vmax)
-ax[1, 2].imshow(x_struct_np[pl0, :, :].T, cmap="Greys")
+fig_true, _, widgets_true = show_vol_cuts(
+    x_true_np, voxel_size=voxel_size, vmin=0, vmax=vmax, fig_title="true image"
+)
+fig_true.show()
 
-ax[0, 0].set_title("true img", fontsize="medium")
-ax[0, 1].set_title(f"DTV PDHG {num_iter_pdhg} it.", fontsize="medium")
-ax[0, 2].set_title("structural img", fontsize="medium")
-fig.show()
+fig_pdhg, _, widgets_pdhg = show_vol_cuts(
+    x_pdhg_np, voxel_size=voxel_size, vmin=0, vmax=vmax,
+    fig_title=f"DTV PDHG {num_iter_pdhg} iterations",
+)
+fig_pdhg.show()
+
+fig_struct, _, widgets_struct = show_vol_cuts(
+    x_struct_np, voxel_size=voxel_size, fig_title="structural image"
+)
+fig_struct.show()
 
 # %%
 

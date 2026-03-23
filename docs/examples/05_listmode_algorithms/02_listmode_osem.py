@@ -23,8 +23,8 @@ and data stored in listmode format (event by event).
 # %%
 from __future__ import annotations
 import matplotlib.pyplot as plt
-from matplotlib import animation
 from array_api_compat import size
+from vis import show_vol_cuts
 import numpy as np
 
 import parallelproj.operators
@@ -326,26 +326,17 @@ print(
 # ---------------------
 
 
-def _update_img(i):
-    img0.set_data(x_true_np[:, :, i])
-    img1.set_data(x_np[:, :, i])
-    ax[0].set_title(f"true image - plane {i:02}")
-    ax[1].set_title(
-        f"LM OSEM iteration {num_iter} - {num_subsets} subsets - plane {i:02}"
-    )
-    return (img0, img1)
-
-
 x_true_np = to_numpy_array(x_true)
 x_np = to_numpy_array(x)
 
-fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 vmax = x_np.max()
-img0 = ax[0].imshow(x_true_np[:, :, 0], cmap="Greys", vmin=0, vmax=vmax)
-img1 = ax[1].imshow(x_np[:, :, 0], cmap="Greys", vmin=0, vmax=vmax)
-ax[0].set_title(f"true image - plane {0:02}")
-ax[1].set_title(f"LM OSEM iteration {num_iter} - {num_subsets} subsets - plane {0:02}")
-fig.tight_layout()
-if plt.get_backend() != "agg":
-    ani = animation.FuncAnimation(fig, _update_img, x_np.shape[2], interval=200, blit=False)
-    fig.show()
+fig_true, _, widgets_true = show_vol_cuts(
+    x_true_np, vmin=0, vmax=vmax, fig_title="true image"
+)
+fig_true.show()
+
+fig_recon, _, widgets_recon = show_vol_cuts(
+    x_np, vmin=0, vmax=vmax,
+    fig_title=f"LM OSEM — {num_iter} iterations / {num_subsets} subsets",
+)
+fig_recon.show()
