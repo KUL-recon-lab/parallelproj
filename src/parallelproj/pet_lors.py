@@ -8,6 +8,7 @@ import array_api_compat.numpy as np
 from parallelproj import Array, to_numpy_array
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from matplotlib.axes import Axes
 
 from types import ModuleType
 
@@ -166,6 +167,8 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
                 self._all_block_pairs.shape[0], device=self.dev
             )
 
+        assert block_pair_nums is not None
+
         xstart = self.xp.zeros(
             (block_pair_nums.shape[0], self._num_lors_per_block_pair, 3),
             device=self.dev,
@@ -202,7 +205,7 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         return self.xp.reshape(xstart, (-1, 3)), self.xp.reshape(xend, (-1, 3))
 
     def show_block_pair_lors(
-        self, ax: plt.Axes, block_pair_nums: Array, lw: float = 0.2, **kwargs
+        self, ax: Axes, block_pair_nums: Array, lw: float = 0.2, **kwargs
     ) -> None:
         """show all LORs connecting all endpoints between blocks forming a block pairs
 
@@ -287,6 +290,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         self._setup_plane_indices()
         self._setup_view_indices()
+
+    @property
+    def scanner(self) -> RegularPolygonPETScannerGeometry:
+        """the scanner for which coincidences are described"""
+        return self._scanner
 
     @property
     def radial_trim(self) -> int:
@@ -387,7 +395,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self.sinogram_order.name.find("V")
 
     @property
-    def spatial_sinogram_shape(self) -> tuple[int, int, int]:
+    def spatial_sinogram_shape(self) -> tuple[int, ...]:
         """the shape of the sinogram in spatial order"""
         shape = [0, 0, 0]
         shape[self.plane_axis_num] = self.num_planes
@@ -441,19 +449,19 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def _setup_unspanned_plane_indices(self) -> None:
         """setup the start / end plane indices for span=1 (similar to a Michelogram)"""
         self._start_plane_index = self.xp.arange(
-            self.scanner.num_rings, dtype=self.xp.int32, device=self.dev
+            self._scanner.num_rings, dtype=self.xp.int32, device=self.dev
         )
         self._end_plane_index = self.xp.arange(
-            self.scanner.num_rings, dtype=self.xp.int32, device=self.dev
+            self._scanner.num_rings, dtype=self.xp.int32, device=self.dev
         )
 
         for i in range(1, self._max_ring_difference + 1):
             tmp1 = self.xp.arange(
-                self.scanner.num_rings - i, dtype=self.xp.int16, device=self.dev
+                self._scanner.num_rings - i, dtype=self.xp.int16, device=self.dev
             )
             tmp2 = (
                 self.xp.arange(
-                    self.scanner.num_rings - i, dtype=self.xp.int16, device=self.dev
+                    self._scanner.num_rings - i, dtype=self.xp.int16, device=self.dev
                 )
                 + i
             )
@@ -557,7 +565,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     def _setup_view_indices(self) -> None:
         """setup the start / end view indices"""
-        n = self.scanner.num_lor_endpoints_per_ring
+        n = self._scanner.num_lor_endpoints_per_ring
 
         m = 2 * (n // 2)
 
@@ -669,7 +677,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return xstart_3d, xend_3d
 
     def show_views(
-        self, ax: plt.Axes, views: Array, planes: Array, lw: float = 0.2, **kwargs
+        self, ax: Axes, views: Array, planes: Array, lw: float = 0.2, **kwargs
     ) -> None:
         """show all LORs of a single view in a given plane
 

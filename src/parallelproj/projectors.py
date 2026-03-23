@@ -7,7 +7,8 @@ import parallelproj_core
 from parallelproj import Array, to_numpy_array, empty_cuda_cache
 import array_api_compat
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure, Axes
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle
 from types import ModuleType
 from array_api_compat import device, get_namespace, size
