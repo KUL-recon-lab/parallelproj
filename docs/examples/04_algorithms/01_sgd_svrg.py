@@ -79,7 +79,10 @@ num_subsets = 24
 num_epochs = (480 if dev == "cpu" else 1200) // num_subsets
 
 # regularisation weight beta
-beta = 1.0
+beta = 3.0
+
+# step size for SGD and SVRG updates
+step_size = 1.0
 
 # %%
 # Setup of the forward model :math:`\bar{y}(x) = A x + s`
@@ -322,16 +325,19 @@ df_sgd = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 x_sgd = xp.asarray(x_init, copy=True)
 
 for i in range(num_epochs):
+    if i % 2 == 0 and i <= 4:
+        sgd_precond = x_sgd / (
+            adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd, x_sgd)
+        )
     for k in range(num_subsets):
         print(
             f"SGD epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
             end="\r",
         )
-        precond = x_sgd / adjoint_ones
         approx_grad = num_subsets * subset_data_fidelities[k].gradient(
             x_sgd
         ) + reg.gradient(x_sgd)
-        x_sgd = xp.clip(x_sgd - precond * approx_grad, 0, None)
+        x_sgd = xp.clip(x_sgd - step_size * sgd_precond * approx_grad, 0, None)
 
     df_sgd[i] = total_objective(x_sgd)
 print()
@@ -394,19 +400,20 @@ def svrg_update(
 
 x_svrg = xp.asarray(x_init, copy=True)
 
-svrg_step_size = 1.0
 df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond = x_svrg / adjoint_ones
+            svrg_precond = x_svrg / (
+                adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg, x_svrg)
+            )
 
         stored_grads, full_data_grad = svrg_calc_snapshot_gradients(
             x_svrg, subset_data_fidelities
         )
         full_grad = full_data_grad + reg.gradient(x_svrg)
-        x_svrg = xp.clip(x_svrg - svrg_step_size * svrg_precond * full_grad, 0, None)
+        x_svrg = xp.clip(x_svrg - step_size * svrg_precond * full_grad, 0, None)
 
     for k in range(num_subsets):
         print(
@@ -421,7 +428,7 @@ for epoch in range(num_epochs):
             full_data_grad,
             reg,
             svrg_precond,
-            step_size=svrg_step_size,
+            step_size=step_size,
         )
 
     df_svrg[epoch] = total_objective(x_svrg)
@@ -445,8 +452,8 @@ svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
 df_min = min(float(xp.min(df_sgd)), float(xp.min(df_svrg)))
 df_max = float(df_sgd[0])
 
-sgd_label = f"SGD/OSEM ({num_subsets} subsets)"
-svrg_label = f"SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})"
+sgd_label = f"SGD ({num_subsets} subsets, step={step_size:.1f})"
+svrg_label = f"SVRG ({num_subsets} subsets, step={step_size:.1f})"
 
 fig, axs = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
 
@@ -475,6 +482,7 @@ axs[1].grid(ls=":")
 fig.show()
 
 # %%
-fig2, ax2 = plt.subplots(figsize=(5, 5), layout="constrained")
-ax2.imshow(to_numpy_array(x_svrg[:, :, 4]))
+fig2, ax2 = plt.subplots(1, 2, figsize=(5, 5), layout="constrained")
+ax2[0].imshow(to_numpy_array(x_sgd[:, :, 4]))
+ax2[1].imshow(to_numpy_array(x_svrg[:, :, 4]))
 fig2.show()
