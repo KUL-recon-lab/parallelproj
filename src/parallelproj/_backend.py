@@ -8,10 +8,10 @@ from typing import Union, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    import array_api_compat.cupy as cp
-    import array_api_compat.torch as torch
+    from cupy import ndarray as CupyArray
+    from torch import Tensor as TorchTensor
 
-    Array = Union[np.ndarray, cp.ndarray, torch.Tensor]  # Used for type checking
+    Array = Union[np.ndarray, CupyArray, TorchTensor]  # Used for type checking
 else:
     Array = np.ndarray  # Default at runtime
 
