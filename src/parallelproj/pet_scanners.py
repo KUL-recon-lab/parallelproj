@@ -193,7 +193,12 @@ class PETScannerModule(abc.ABC):
 
 
 class BlockPETScannerModule(PETScannerModule):
-    """Block (rectangular cuboid) PET scanner module"""
+    """Block (rectangular cuboid) PET scanner module
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.pet_scanners.BlockPETScannerModule
+    """
 
     def __init__(
         self,
@@ -455,7 +460,12 @@ class RegularPolygonPETScannerModule(PETScannerModule):
 
 
 class ModularizedPETScannerGeometry:
-    """description of a PET scanner geometry consisting of LOR endpoint modules"""
+    """description of a PET scanner geometry consisting of LOR endpoint modules
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.pet_scanners.ModularizedPETScannerGeometry
+    """
 
     def __init__(self, modules: Sequence[PETScannerModule]):
         """
@@ -631,7 +641,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
 
     Examples
     --------
-    .. minigallery:: parallelproj.RegularPolygonPETScannerGeometry
+    .. minigallery:: parallelproj.pet_scanners.RegularPolygonPETScannerGeometry
     """
 
     def __init__(

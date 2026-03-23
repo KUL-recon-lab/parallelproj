@@ -23,7 +23,7 @@ class SinogramSpatialAxisOrder(enum.Enum):
 
     Examples
     --------
-    .. minigallery:: parallelproj.SinogramSpatialAxisOrder
+    .. minigallery:: parallelproj.pet_lors.SinogramSpatialAxisOrder
     """
 
     RVP = enum.auto()
@@ -76,7 +76,12 @@ class PETLORDescriptor(abc.ABC):
 
 class EqualBlockPETLORDescriptor(PETLORDescriptor):
     """LOR descriptor for scanner consisting of block modules where each
-    block module has the same number of LOR endpoints"""
+    block module has the same number of LOR endpoints
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.pet_lors.EqualBlockPETLORDescriptor
+    """
 
     def __init__(
         self, scanner: ModularizedPETScannerGeometry, all_block_pairs: Array
@@ -229,7 +234,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     Examples
     --------
-    .. minigallery:: parallelproj.RegularPolygonPETLORDescriptor
+    .. minigallery:: parallelproj.pet_lors.RegularPolygonPETLORDescriptor
     """
 
     def __init__(

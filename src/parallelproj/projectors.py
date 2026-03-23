@@ -19,7 +19,12 @@ from .tof import TOFParameters
 
 
 class ParallelViewProjector2D(LinearOperator):
-    """2D non-TOF parallel view projector"""
+    """2D non-TOF parallel view projector
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.projectors.ParallelViewProjector2D
+    """
 
     def __init__(
         self,
@@ -271,7 +276,12 @@ class ParallelViewProjector2D(LinearOperator):
 
 
 class ParallelViewProjector3D(LinearOperator):
-    """3D non-TOF parallel view projector"""
+    """3D non-TOF parallel view projector
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.projectors.ParallelViewProjector3D
+    """
 
     def __init__(
         self,
@@ -487,7 +497,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.RegularPolygonPETProjector
+    .. minigallery:: parallelproj.projectors.RegularPolygonPETProjector
     """
 
     def __init__(
@@ -939,7 +949,7 @@ class ListmodePETProjector(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.ListmodePETProjector
+    .. minigallery:: parallelproj.projectors.ListmodePETProjector
     """
 
     def __init__(
@@ -1164,7 +1174,7 @@ class EqualBlockPETProjector(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.EqualBlockPETProjector
+    .. minigallery:: parallelproj.projectors.EqualBlockPETProjector
     """
 
     def __init__(

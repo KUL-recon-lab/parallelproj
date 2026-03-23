@@ -265,7 +265,7 @@ class MatrixOperator(LinearOperator):
     Examples
     --------
 
-    .. minigallery:: parallelproj.MatrixOperator
+    .. minigallery:: parallelproj.operators.MatrixOperator
     """
 
     def __init__(self, A: Array) -> None:
@@ -329,7 +329,7 @@ class CompositeLinearOperator(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.CompositeLinearOperator
+    .. minigallery:: parallelproj.operators.CompositeLinearOperator
     """
 
     def __init__(self, operators: Sequence[LinearOperator]):
@@ -378,7 +378,7 @@ class ElementwiseMultiplicationOperator(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.ElementwiseMultiplicationOperator
+    .. minigallery:: parallelproj.operators.ElementwiseMultiplicationOperator
     """
 
     def __init__(self, values: Array):
@@ -432,7 +432,7 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.TOFNonTOFElementwiseMultiplicationOperator
+    .. minigallery:: parallelproj.operators.TOFNonTOFElementwiseMultiplicationOperator
     """
 
     def __init__(self, in_shape: tuple[int, ...], values: Array):
@@ -503,7 +503,7 @@ class GaussianFilterOperator(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.GaussianFilterOperator
+    .. minigallery:: parallelproj.operators.GaussianFilterOperator
     """
 
     def __init__(self, in_shape: tuple[int, ...], sigma: float | Array, **kwargs):
@@ -602,7 +602,7 @@ class VstackOperator(LinearOperator):
 
     Examples
     --------
-    .. minigallery:: parallelproj.VstackOperator
+    .. minigallery:: parallelproj.operators.VstackOperator
     """
 
     def __init__(self, operators: tuple[LinearOperator, ...]) -> None:
@@ -671,7 +671,7 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
     Examples
     --------
 
-    .. minigallery:: parallelproj.LinearOperatorSequence
+    .. minigallery:: parallelproj.operators.LinearOperatorSequence
     """
 
     def __init__(self, operators: Sequence[LinearOperator]) -> None:
@@ -747,7 +747,12 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
 
 
 class FiniteForwardDifference(LinearOperator):
-    """finite difference gradient operator"""
+    """finite difference gradient operator
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.operators.FiniteForwardDifference
+    """
 
     def __init__(self, in_shape: tuple[int, ...]) -> None:
         if len(in_shape) > 4:
@@ -890,6 +895,10 @@ class GradientFieldProjectionOperator(LinearOperator):
        \\xi_n = g_n / \\| g_n \\|_{\\eta}
 
     for the joint gradient field :math:`g_n`
+
+    Examples
+    --------
+    .. minigallery:: parallelproj.operators.GradientFieldProjectionOperator
     """
 
     def __init__(self, gradient_field: Array, eta: float = 0.0):
