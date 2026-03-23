@@ -136,10 +136,10 @@ def test_tofnontofelemenwise(xp: ModuleType, dev: str):
     x = xp.reshape(xp.arange(3 * 3 * 2, device=dev, dtype=xp.float32), (3, 3, 2))
     v = xp.reshape(xp.arange(3 * 3, device=dev, dtype=xp.float32), (3, 3))
 
-    op = ppo.TOFNonTOFElementwiseMultiplicationOperator(x.shape, v)
-    # test call to norm
-
-    assert xp.all(op.values == v)
+    # broadcast non-TOF v over the trailing TOF-bins dimension
+    op = ppo.ElementwiseMultiplicationOperator(
+        xp.broadcast_to(xp.expand_dims(v, axis=-1), x.shape)
+    )
 
     assert op.adjointness_test(xp, dev)
     assert allclose(v * x[..., 0], op(x)[..., 0])
@@ -170,8 +170,10 @@ def test_tofnontofelemenwise_complex(xp: ModuleType, dev: str):
     v[2, 2] = 3.0 + 2j
     v[1, 2] = -4.0 + 1j
 
-    op = ppo.TOFNonTOFElementwiseMultiplicationOperator(x.shape, v)
-    # test call to norm
+    # broadcast non-TOF v over the trailing TOF-bins dimension
+    op = ppo.ElementwiseMultiplicationOperator(
+        xp.broadcast_to(xp.expand_dims(v, axis=-1), x.shape)
+    )
 
     assert op.adjointness_test(xp, dev, iscomplex=True)
     assert allclose(v * x[..., 0], op(x)[..., 0])
