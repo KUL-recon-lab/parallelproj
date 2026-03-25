@@ -1,23 +1,42 @@
 """
-TOF listmode MLEM with projection data
-======================================
+TOF listmode MLEM using NegPoissonLogLListmode
+==============================================
 
-This example demonstrates the use of the listmode MLEM algorithm to minimize the negative Poisson log-likelihood function.
+This example demonstrates how to run the MLEM reconstruction algorithm
+using listmode (event-by-event) data, and compares it with the equivalent
+sinogram-based reconstruction.
 
-.. math::
-    f(x) = \\sum_{i=1}^m \\bar{y}_i (x) - \\bar{y}_i (x) \\log(y_i)
+Two objective functions from :mod:`parallelproj.functions` are used:
 
-subject to
+- :class:`.NegPoissonLogL` — operates in **prediction space** :math:`\\bar{y}`,
+  wrapped with :class:`.C2AffineObjective` to compose with the sinogram
+  forward model :math:`\\bar{y}(x) = A x + s`:
 
-.. math::
-    x \\geq 0
+  .. math::
 
-using the listmode linear forward model
+      f_{\\text{sino}}(x) = \\sum_i \\bigl[(Ax+s)_i - y_i \\log(Ax+s)_i\\bigr]
 
-.. math::
-    \\bar{y}_{LM}(x) = A_{LM} x + s
+- :class:`.NegPoissonLogLListmode` — operates directly in **image space**
+  :math:`x`, with the listmode forward model built in internally:
 
-and data stored in listmode format (event by event).
+  .. math::
+
+      f_{\\text{LM}}(x) = \\langle A^T \\mathbf{1},\\, x \\rangle + c_{\\text{sino}}
+                          - \\sum_{e=1}^{N_{\\text{ev}}} \\log\\bigl((A_{\\text{LM}}\\,x)_e + s_e\\bigr)
+
+  where :math:`c_{\\text{sino}} = \\sum_i s_i` is the total contamination summed
+  over all sinogram bins.
+
+Both functions are mathematically equivalent (since
+:math:`\\sum_e \\log \\bar{y}_{j_e} = \\sum_i y_i \\log \\bar{y}_i`) and share
+the same :class:`.C1Function` interface, exposing a :meth:`~.C1Function.gradient`
+method that returns the gradient w.r.t. the image :math:`x`.
+
+**Key learning goal:** The MLEM update, written as a preconditioned gradient
+descent step, is *agnostic of the data representation* — the same
+:func:`em_update` function works identically for both sinogram and listmode
+objectives because both implement the :class:`.C1Function` interface with the
+correct gradient w.r.t. :math:`x`.
 """
 
 # %%
@@ -231,21 +250,57 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 )
 
 # %%
-# Setup sinogram and listmode negative Poisson log-likelihood functions
-# ---------------------------------------------------------------------
+# Setup of sinogram and listmode objective functions
+# --------------------------------------------------
+#
+# Both objective functions expose the same :class:`.C1Function` interface
+# (``__call__`` for the function value, ``gradient`` for the gradient w.r.t.
+# the image :math:`x`).
+#
+# The sinogram objective wraps :class:`.NegPoissonLogL` — which operates on
+# predicted counts :math:`\bar{y}` — with :class:`.C2AffineObjective` to
+# pull the gradient back through the forward model :math:`\bar{y}(x) = Ax + s`:
+#
+# .. math::
+#
+#     f_\text{sino}(x) = \sum_i \bigl[(Ax+s)_i - y_i\log(Ax+s)_i\bigr],
+#     \quad \nabla_x f_\text{sino} = A^T\!\left(1 - \tfrac{y}{Ax+s}\right)
+#
+# The listmode objective :class:`.NegPoissonLogLListmode` takes :math:`x`
+# directly and has the forward model built in.  Its gradient is:
+#
+# .. math::
+#
+#     \nabla_x f_\text{LM}(x) = A^T\mathbf{1}
+#         - A_\text{LM}^T\!\left(\frac{1}{A_\text{LM} x + s_\text{LM}}\right)
+#
+# Both gradients are mathematically equivalent because each detected event
+# from sinogram bin :math:`i` contributes the same :math:`\log\bar{y}_i`
+# term, so :math:`\sum_e \log\bar{y}_{j_e} = \sum_i y_i\log\bar{y}_i`.
 
 sinogram_neg_logL = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
 
+# The sensitivity image A^T 1 is required by NegPoissonLogLListmode.
+# It equals the adjoint of the *sinogram* (full) forward model applied to
+# all-ones, and serves as the diagonal of the EM preconditioner.
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
 lm_neg_logL = NegPoissonLogLListmode(
     lm_pet_lin_op, adjoint_ones, contamination_list, float(xp.sum(contamination))
 )
-#
 # %%
-# Calculate the gradients of the negative Poisson log-likelihood functions in sinogram and listmode
-# -------------------------------------------------------------------------------------------------
+# Verify gradient equivalence at a test image
+# -------------------------------------------
+#
+# We evaluate both objectives and their gradients at a flat all-ones image
+# :math:`x_\text{init}` to confirm that sinogram and listmode formulations
+# produce the same (up to floating-point) function values and gradients.
+#
+# The preconditioned gradient :math:`(x / A^T\mathbf{1}) \odot \nabla_x f`
+# is displayed: it equals :math:`x - x_\text{new}`, i.e. the negative of
+# a single EM update step, and highlights where the current iterate would
+# increase or decrease after one MLEM step.
 
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 
@@ -260,6 +315,7 @@ grad_sinogram = sinogram_neg_logL.gradient(x_init)
 grad_lm = lm_neg_logL.gradient(x_init)
 
 # %%
+# Preconditioned gradient of the sinogram objective
 vmax = float(xp.max(xp.abs(x_init / adjoint_ones) * grad_sinogram))
 
 fig_gs, _, widgets_gs = show_vol_cuts(
@@ -271,6 +327,7 @@ fig_gs, _, widgets_gs = show_vol_cuts(
 fig_gs.show()
 
 # %%
+# Preconditioned gradient of the listmode objective (should match the sinogram plot above)
 fig_glm, _, widgets_glm = show_vol_cuts(
     to_numpy_array((x_init / adjoint_ones) * grad_lm),
     vmin=-vmax,
@@ -281,8 +338,27 @@ fig_glm.show()
 
 
 # %%
-# MLEM reconstruction (in sinogram and listmode)
-# ----------------------------------------------
+# MLEM reconstruction (sinogram and listmode)
+# -------------------------------------------
+#
+# The classical MLEM update
+#
+# .. math::
+#
+#     x^{(k+1)} = \frac{x^{(k)}}{A^T \mathbf{1}} \odot A^T\!\left(\frac{y}{A x^{(k)} + s}\right)
+#
+# can equivalently be written as a preconditioned gradient descent step:
+#
+# .. math::
+#
+#     x^{(k+1)} = x^{(k)} - \underbrace{\frac{x^{(k)}}{A^T \mathbf{1}}}_{\text{preconditioner}} \odot \nabla_x f(x^{(k)})
+#
+# This formulation is **data-representation agnostic**: the same
+# :func:`em_update` below works for any objective :math:`f` that provides
+# a gradient :math:`\nabla_x f` via the :class:`.C1Function` interface —
+# whether that objective is :class:`.C2AffineObjective` wrapping
+# :class:`.NegPoissonLogL` (sinogram data) or
+# :class:`.NegPoissonLogLListmode` (listmode data).
 
 
 def em_update(
@@ -290,7 +366,37 @@ def em_update(
     negpoissonlogl: C1Function,
     adj_ones: Array,
 ) -> Array:
-    """EM update re-written as preconditioned GD step"""
+    """One MLEM iteration as a preconditioned gradient descent step.
+
+    Implements
+
+    .. math::
+
+        x^{(k+1)} = x^{(k)} - \\frac{x^{(k)}}{A^T\\mathbf{1}}
+                    \\odot \\nabla_x f(x^{(k)})
+
+    This is equivalent to the standard MLEM multiplicative update and works
+    for *any* objective ``negpoissonlogl`` that implements the
+    :class:`.C1Function` interface — in particular for both
+    :class:`.C2AffineObjective` (sinogram) and
+    :class:`.NegPoissonLogLListmode` (listmode).
+
+    Parameters
+    ----------
+    x_cur:
+        Current image estimate :math:`x^{(k)}`.
+    negpoissonlogl:
+        Negative Poisson log-likelihood objective.  Must provide a
+        ``gradient(x)`` method returning the gradient w.r.t. :math:`x`.
+    adj_ones:
+        Sensitivity image :math:`A^T\\mathbf{1}` used as the diagonal
+        preconditioner.
+
+    Returns
+    -------
+    Array
+        Updated image estimate :math:`x^{(k+1)}`.
+    """
     em_diag_precond = x_cur / adj_ones
 
     return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
@@ -303,7 +409,7 @@ for i in range(num_epochs):
     x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones)
 print()
 
-# run MLEM with listmode data
+# run MLEM with listmode data — identical loop, only the objective changes
 x_mlem_lm = xp.asarray(x_init, copy=True)
 for i in range(num_epochs):
     print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
