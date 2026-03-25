@@ -833,7 +833,7 @@ class RegularPolygonPETProjector(LinearOperator):
         self.lor_descriptor.scanner.show_lor_endpoints(ax)
 
     def convert_sinogram_to_listmode(
-        self, sinogram: Array
+        self, sinogram: Array, shuffle: bool = False
     ) -> tuple[Array, Array, Array | None]:
         """convert a non-TOF or TOF emission sinogram to listmode events
 
@@ -841,6 +841,12 @@ class RegularPolygonPETProjector(LinearOperator):
         ----------
         sinogram : Array
             an integer (TOF or non-TOF) emission sinogram
+        shuffle : bool, optional
+            if True, randomly shuffle the order of the output events,
+            by default False. Shuffling is implemented via
+            ``numpy.random.permutation(num_events)``, which draws from
+            numpy's global random state. Use ``numpy.random.seed()``
+            before calling this method for reproducible results.
 
         Returns
         -------
@@ -932,6 +938,13 @@ class RegularPolygonPETProjector(LinearOperator):
                 )
 
             event_offset += num_events_view
+
+        if shuffle:
+            perm = self.xp.asarray(np.random.permutation(num_events), device=self._dev)
+            event_start_coords = self.xp.take(event_start_coords, perm, axis=0)
+            event_end_coords = self.xp.take(event_end_coords, perm, axis=0)
+            if event_tofbins is not None:
+                event_tofbins = self.xp.take(event_tofbins, perm, axis=0)
 
         return event_start_coords, event_end_coords, event_tofbins
 
