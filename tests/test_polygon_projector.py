@@ -60,6 +60,12 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     y = xp.ones(x_fwd.shape, dtype=xp.float32, device=dev)
     y_back = proj.adjoint(y)
 
+    # test that a non-integer sinogram raises a TypeError
+    with pytest.raises(TypeError):
+        proj.convert_sinogram_to_listmode(
+            xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
+        )
+
     # test conversion to LM
     # LM converter run over views and TOF bins which determines the output order
     # of the events
@@ -73,6 +79,16 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
         event_end_coords,
         event_tofbins,
     ) = proj.convert_sinogram_to_listmode(test_sino)
+
+    # test shuffle=True (non-TOF): output should have same shape, tofbins still None
+    (
+        event_start_coords_sh,
+        event_end_coords_sh,
+        event_tofbins_sh,
+    ) = proj.convert_sinogram_to_listmode(test_sino, shuffle=True)
+    assert event_start_coords_sh.shape == event_start_coords.shape
+    assert event_end_coords_sh.shape == event_end_coords.shape
+    assert event_tofbins_sh is None
 
     assert event_start_coords.shape == (4, 3)
     assert event_end_coords.shape == (4, 3)
@@ -157,6 +173,17 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
             )
         )
     )
+
+    # test shuffle=True (TOF): output should have same shape, tofbins not None
+    (
+        event_start_coords_sh,
+        event_end_coords_sh,
+        event_tofbins_sh,
+    ) = proj.convert_sinogram_to_listmode(test_sino, shuffle=True)
+    assert event_start_coords_sh.shape == event_start_coords.shape
+    assert event_end_coords_sh.shape == event_end_coords.shape
+    assert event_tofbins_sh is not None
+    assert event_tofbins_sh.shape == event_tofbins.shape
 
     # setup a projector with non default image origin and views
     views = xp.asarray([0, 1], device=dev)
