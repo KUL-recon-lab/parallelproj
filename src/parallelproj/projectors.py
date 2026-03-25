@@ -8,8 +8,8 @@ from parallelproj import Array, to_numpy_array, empty_cuda_cache
 import array_api_compat
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle
+from mpl_toolkits.mplot3d import Axes3D
 from types import ModuleType
 from array_api_compat import device, get_namespace, size
 
@@ -778,7 +778,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     def show_geometry(
         self,
-        ax: Axes,
+        ax: Axes3D,
         color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         edgecolor: str = "grey",
         alpha: float = 0.1,
@@ -787,7 +787,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         Parameters
         ----------
-        ax : plt.Axes
+        ax : Axes3D
             matplotlib axes object with projection = '3d'
         color : tuple[float, float, float], optional
             color to use for the FOV cube, by default (1.,0.,0.)
@@ -1398,7 +1398,7 @@ class EqualBlockPETProjector(LinearOperator):
 
     def show_geometry(
         self,
-        ax: Axes,
+        ax: Axes3D,
         color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         edgecolor: str = "grey",
         alpha: float = 0.1,
@@ -1407,7 +1407,7 @@ class EqualBlockPETProjector(LinearOperator):
 
         Parameters
         ----------
-        ax : plt.Axes
+        ax : Axes3D
             matplotlib axes object with projection = '3d'
         color : tuple[float, float, float], optional
             color to use for the FOV cube, by default (1.,0.,0.)
