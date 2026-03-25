@@ -2,8 +2,8 @@
 PDHG, SPDHG and LM-SPHG to optimize the Poisson logL and total variation
 ========================================================================
 
-This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm, 
-the stochastic PDHG (SPDHG) and the listmode SPDHG (LM-SPDHG) to minimize the negative 
+This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm,
+the stochastic PDHG (SPDHG) and the listmode SPDHG (LM-SPDHG) to minimize the negative
 Poisson log-likelihood function combined with a total variation regularizer:
 
 .. math::
@@ -13,14 +13,14 @@ subject to
 
 .. math::
     x \geq 0
-    
+
 using the linear forward model
 
 .. math::
     \\bar{d}(x) = A x + s
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -567,9 +567,7 @@ for i, sl in enumerate(subset_slices_lm):
     # enable TOF in the LM projector
     subset_lm_proj.tof_parameters = proj.tof_parameters
     if proj.tof:
-        # we need to make a copy of the 1D subset event_tofbins array
-        # stupid way of doing this, but torch asarray copy doesn't seem to work
-        subset_lm_proj.event_tofbins = 1 * event_tofbins[sl]
+        subset_lm_proj.event_tofbins = xp.asarray(event_tofbins[sl], copy=True)
         subset_lm_proj.tof = proj.tof
 
     subset_lm_att_op = parallelproj.ElementwiseMultiplicationOperator(subset_att_list)

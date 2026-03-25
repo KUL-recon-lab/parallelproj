@@ -162,7 +162,9 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         num_selected = block_pair_nums.shape[0]
 
         # get start and end block indices for all selected block pairs
-        bp = self.xp.take(self._all_block_pairs, block_pair_nums, axis=0)  # (num_selected, 2)
+        bp = self.xp.take(
+            self._all_block_pairs, block_pair_nums, axis=0
+        )  # (num_selected, 2)
         start_blocks = bp[:, 0]  # (num_selected,)
         end_blocks = bp[:, 1]  # (num_selected,)
 
@@ -640,11 +642,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         # --- (2) stack copies of the plane 0 LOR start / end points for all planes with updated "z" coordinates
 
         for i in range(self.num_planes):
-            # make a copy of the 2D coordinates
-            # stupid way of adding 0, since asarray with torch and cuda does
-            # not seem to work
-            xstart = xstart_2d + 0
-            xend = xend_2d + 0
+            xstart = self.xp.asarray(xstart_2d, copy=True)
+            xend = self.xp.asarray(xend_2d, copy=True)
 
             xstart[..., self._scanner.symmetry_axis] = float(self._start_plane_z[i])
             xend[..., self._scanner.symmetry_axis] = float(self._end_plane_z[i])

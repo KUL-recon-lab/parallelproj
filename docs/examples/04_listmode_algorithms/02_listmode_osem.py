@@ -211,18 +211,23 @@ for i, sl in enumerate(subset_slices):
     # enable TOF in the LM projector
     subset_lm_proj.tof_parameters = proj.tof_parameters
     if proj.tof:
-        # we need to make a copy of the 1D subset event_tofbins array
-        # stupid way of doing this, but torch asarray copy doesn't seem to work
-        subset_lm_proj.event_tofbins = 1 * event_tofbins[sl]
+        assert event_tofbins is not None
+        subset_lm_proj.event_tofbins = xp.asarray(event_tofbins[sl], copy=True)
         subset_lm_proj.tof = proj.tof
 
-    subset_lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(subset_att_list)
-
-    lm_pet_subset_linop_seq.append(
-        parallelproj.operators.CompositeLinearOperator((subset_lm_att_op, subset_lm_proj, res_model))
+    subset_lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+        subset_att_list
     )
 
-lm_pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(lm_pet_subset_linop_seq)
+    lm_pet_subset_linop_seq.append(
+        parallelproj.operators.CompositeLinearOperator(
+            (subset_lm_att_op, subset_lm_proj, res_model)
+        )
+    )
+
+lm_pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
+    lm_pet_subset_linop_seq
+)
 
 # create the contamination list
 contamination_list = xp.full(
@@ -326,7 +331,9 @@ fig_true, _, widgets_true = show_vol_cuts(
 fig_true.show()
 
 fig_recon, _, widgets_recon = show_vol_cuts(
-    x_np, vmin=0, vmax=vmax,
+    x_np,
+    vmin=0,
+    vmax=vmax,
     fig_title=f"LM OSEM — {num_iter} iterations / {num_subsets} subsets",
 )
 fig_recon.show()

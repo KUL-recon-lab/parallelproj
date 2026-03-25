@@ -134,7 +134,9 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-x_true = elliptic_cylinder_phantom(xp, dev, image_shape=img_shape, voxel_size=voxel_size)
+x_true = elliptic_cylinder_phantom(
+    xp, dev, image_shape=img_shape, voxel_size=voxel_size
+)
 
 # scale image to get more counts
 x_true *= img_scale
@@ -393,18 +395,22 @@ for i, sl in enumerate(subset_slices_lm):
     # enable TOF in the LM projector
     subset_lm_proj.tof_parameters = proj.tof_parameters
     if proj.tof:
-        # we need to make a copy of the 1D subset event_tofbins array
-        # stupid way of doing this, but torch asarray copy doesn't seem to work
-        subset_lm_proj.event_tofbins = 1 * event_tofbins[sl]
+        subset_lm_proj.event_tofbins = xp.asarray(event_tofbins[sl], copy=True)
         subset_lm_proj.tof = proj.tof
 
-    subset_lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(subset_att_list)
-
-    lm_pet_subset_linop_seq.append(
-        parallelproj.operators.CompositeLinearOperator((subset_lm_att_op, subset_lm_proj, res_model))
+    subset_lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+        subset_att_list
     )
 
-lm_pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(lm_pet_subset_linop_seq)
+    lm_pet_subset_linop_seq.append(
+        parallelproj.operators.CompositeLinearOperator(
+            (subset_lm_att_op, subset_lm_proj, res_model)
+        )
+    )
+
+lm_pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
+    lm_pet_subset_linop_seq
+)
 
 # create the contamination list
 contamination_list = xp.full(
@@ -570,10 +576,10 @@ x_lmspdhg_np = to_numpy_array(x_lmspdhg)
 vmax = 1.2 * x_true_np.max()
 
 for vol_np, title in [
-    (x_true_np,       "true image"),
-    (x_mlem_np,       "init image (MLEM)"),
-    (x_pdhg_np,       f"PDHG {num_iter_pdhg} it. (reference)"),
-    (x_lmspdhg_np,    f"LM-SPDHG {num_iter_spdhg} it. / {num_subsets} subsets"),
+    (x_true_np, "true image"),
+    (x_mlem_np, "init image (MLEM)"),
+    (x_pdhg_np, f"PDHG {num_iter_pdhg} it. (reference)"),
+    (x_lmspdhg_np, f"LM-SPDHG {num_iter_spdhg} it. / {num_subsets} subsets"),
     (x_pdhg_early_np, f"PDHG {num_iter_spdhg} it."),
 ]:
     fig_i, _, widgets_i = show_vol_cuts(
