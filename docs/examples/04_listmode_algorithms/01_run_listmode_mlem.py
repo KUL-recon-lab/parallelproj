@@ -96,7 +96,10 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # image-based resolution model, a non-TOF PET projector and an attenuation model
 #
 
-num_epochs = 50
+num_epochs_mlem = 72
+num_subsets = 24
+num_epochs = num_epochs_mlem // num_subsets
+
 sens_factor = 0.1
 
 num_rings = 5
@@ -104,8 +107,8 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
     radius=65.0,
-    num_sides=12,
-    num_lor_endpoints_per_side=15,
+    num_sides=16,
+    num_lor_endpoints_per_side=12,
     lor_spacing=2.3,
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
     symmetry_axis=2,
@@ -404,15 +407,15 @@ def em_update(
 
 # run MLEM with sinogram data
 x_mlem_sino = xp.asarray(x_init, copy=True)
-for i in range(num_epochs):
-    print(f"MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
+for i in range(num_epochs_mlem):
+    print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
     x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones)
 print()
 
 # run MLEM with listmode data — identical loop, only the objective changes
 x_mlem_lm = xp.asarray(x_init, copy=True)
-for i in range(num_epochs):
-    print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
+for i in range(num_epochs_mlem):
+    print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
     x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones)
 print()
 
