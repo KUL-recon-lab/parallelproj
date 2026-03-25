@@ -612,7 +612,7 @@ print()
 
 # %%
 # SVRG helper functions
-# ^^^^^^^^^^^^^^^^^^^^^
+# ---------------------
 #
 # Both :func:`svrg_calc_snapshot_gradients` and :func:`svrg_update` operate
 # on any list of :class:`.C1Function` objects, so the same code runs for the
@@ -836,6 +836,7 @@ fig_conv.show()
 
 vmax = float(xp.max(x_mlem_sino if run_mlem else x_osem_sino))
 
+# %%
 if run_mlem:
     fig_xsino, _, widgets_xsino = show_vol_cuts(
         to_numpy_array(x_mlem_sino),
@@ -845,7 +846,8 @@ if run_mlem:
     )
     fig_xsino.show()
 
-    # %%
+# %%
+if run_mlem:
     fig_xlm, _, widgets_xlm = show_vol_cuts(
         to_numpy_array(x_mlem_lm),
         vmin=0,
