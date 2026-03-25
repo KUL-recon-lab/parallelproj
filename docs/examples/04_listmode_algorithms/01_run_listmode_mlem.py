@@ -1,16 +1,15 @@
 """
-Listmode MLEM, OSEM and SVRG
-============================
+Listmode MLEM and OSEM
+======================
 
-This example demonstrates how to run the MLEM reconstruction algorithm
-using listmode (event-by-event) data, and compares it with the equivalent
-sinogram-based reconstruction.
+This example demonstrates how to run MLEM and OSEM using listmode
+(event-by-event) data, and compares both algorithms with their sinogram
+equivalents.
 
-Two objective functions from :mod:`parallelproj.functions` are used:
+**Objective functions** from :mod:`parallelproj.functions`:
 
 - :class:`.NegPoissonLogL` — operates in **prediction space** :math:`\\bar{y}`,
-  wrapped with :class:`.C2AffineObjective` to compose with the sinogram
-  forward model :math:`\\bar{y}(x) = A x + s`:
+  composed with an affine forward model via :class:`.C2AffineObjective`:
 
   .. math::
 
@@ -24,23 +23,36 @@ Two objective functions from :mod:`parallelproj.functions` are used:
       f_{\\text{LM}}(x) = \\langle A^T \\mathbf{1},\\, x \\rangle + c_{\\text{sino}}
                           - \\sum_{e=1}^{N_{\\text{ev}}} \\log\\bigl((A_{\\text{LM}}\\,x)_e + s_e\\bigr)
 
-  where :math:`c_{\\text{sino}} = \\sum_i s_i` is the total contamination summed
-  over all sinogram bins.
+Both are mathematically equivalent (since
+:math:`\\sum_e \\log \\bar{y}_{j_e} = \\sum_i y_i \\log \\bar{y}_i`) and both
+expose the same :class:`.C1Function` interface with a ``gradient`` method
+w.r.t. the image :math:`x`.
 
-Both functions are mathematically equivalent (since
-:math:`\\sum_e \\log \\bar{y}_{j_e} = \\sum_i y_i \\log \\bar{y}_i`) and share
-the same :class:`.C1Function` interface, exposing a :meth:`~.C1Function.gradient`
-method that returns the gradient w.r.t. the image :math:`x`.
+**OSEM subsets:**
 
-**Key learning goal:** The MLEM update, written as a preconditioned gradient
-descent step, is *agnostic of the data representation* — the same
-:func:`em_update` function works identically for both sinogram and listmode
-objectives because both implement the :class:`.C1Function` interface with the
-correct gradient w.r.t. :math:`x`.
+- *Sinogram OSEM*: the sinogram is split into :math:`m` subsets of
+  regularly-spaced views using
+  :meth:`~.RegularPolygonPETLORDescriptor.get_distributed_views_and_slices`.
+  Each subset has its own :class:`.C2AffineObjective` and its own subset
+  sensitivity image :math:`(A^k)^T\\mathbf{1}`.
+
+- *Listmode OSEM*: the event list is split into :math:`m` subsets by
+  taking every :math:`m`-th event — subset :math:`k` uses events at indices
+  :math:`k, k{+}m, k{+}2m, \\ldots`.  The sensitivity image for each subset
+  is approximated as :math:`A^T\\mathbf{1}/m` and each subset gets a separate
+  :class:`.NegPoissonLogLListmode` instance.
+
+**Key learning goal:** The EM update — written as a preconditioned gradient
+descent step — is *agnostic of the data representation and the subset
+partitioning*.  The same :func:`em_update` function is used for all four
+variants (sinogram MLEM, LM-MLEM, sinogram OSEM, LM-OSEM) because every
+objective implements the :class:`.C1Function` interface with the correct
+gradient w.r.t. :math:`x`.
 """
 
 # %%
 from __future__ import annotations
+from copy import copy
 from array_api_compat import size
 from vis import show_vol_cuts
 from img import elliptic_cylinder_phantom
@@ -292,6 +304,118 @@ adjoint_ones = pet_lin_op.adjoint(
 lm_neg_logL = NegPoissonLogLListmode(
     lm_pet_lin_op, adjoint_ones, contamination_list, float(xp.sum(contamination))
 )
+
+# %%
+# Sinogram OSEM — splitting the sinogram into subsets
+# ---------------------------------------------------
+#
+# For OSEM the sinogram is split into ``num_subsets`` subsets of
+# regularly-spaced views using
+# :meth:`~.RegularPolygonPETLORDescriptor.get_distributed_views_and_slices`.
+# Each subset :math:`k` yields a sub-operator :math:`A^k`, sub-data
+# :math:`y^k`, contamination :math:`s^k`, and a separate
+# :class:`.C2AffineObjective`.  The subset sensitivity
+# :math:`(A^k)^T\mathbf{1}` is precomputed for each subset.
+
+subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
+    num_subsets, len(proj.out_shape)
+)
+_, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
+    num_subsets, 3
+)
+
+# clear cached LOR endpoints before copying the projector many times
+proj.clear_cached_lor_endpoints()
+
+sino_subset_linop_list = []
+for k in range(num_subsets):
+    subset_proj = copy(proj)
+    subset_proj.views = subset_views[k]
+    att_values_k = (
+        xp.broadcast_to(
+            xp.expand_dims(att_sino[subset_slices_non_tof[k]], axis=-1),
+            subset_proj.out_shape,
+        )
+        if subset_proj.tof
+        else att_sino[subset_slices_non_tof[k]]
+    )
+    sino_subset_linop_list.append(
+        parallelproj.operators.CompositeLinearOperator(
+            [
+                parallelproj.operators.ElementwiseMultiplicationOperator(
+                    sens_factor * att_values_k
+                ),
+                subset_proj,
+                res_model,
+            ]
+        )
+    )
+
+# compute (A^k)^T 1 for every subset k, stored as (num_subsets, *in_shape)
+subset_adjoint_ones = xp.zeros(
+    (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
+)
+for k, op in enumerate(sino_subset_linop_list):
+    subset_adjoint_ones[k] = op.adjoint(
+        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
+    )
+
+sino_subset_neg_logL = [
+    C2AffineObjective(
+        NegPoissonLogL(y[sl]), sino_subset_linop_list[k], contamination[sl]
+    )
+    for k, sl in enumerate(subset_slices)
+]
+
+# %%
+# Listmode OSEM — splitting the event list into subsets
+# -----------------------------------------------------
+#
+# For LM-OSEM the event list is partitioned into ``num_subsets`` subsets by
+# taking every :math:`m`-th event: subset :math:`k` contains events at
+# indices :math:`k, k{+}m, k{+}2m, \ldots`
+#
+# Since each subset holds approximately :math:`1/m` of the total events,
+# its expected sensitivity is :math:`A^T\mathbf{1} / m`.  The contamination
+# constant is scaled by the same factor.  A separate
+# :class:`.NegPoissonLogLListmode` is created for each subset using a
+# dedicated :class:`.ListmodePETProjector` for that subset's events only.
+
+# shared per-subset sensitivity and contamination constant (both scaled by 1/m)
+lm_subset_adj_ones = adjoint_ones / num_subsets
+lm_subset_contamination_sum = float(xp.sum(contamination)) / num_subsets
+
+lm_subset_neg_logL = []
+for k in range(num_subsets):
+    # every num_subsets-th event starting at index k
+    lm_proj_k = parallelproj.projectors.ListmodePETProjector(
+        xp.asarray(event_start_coords[k::num_subsets], copy=True),
+        xp.asarray(event_end_coords[k::num_subsets], copy=True),
+        img_shape,
+        voxel_size,
+        proj.img_origin,
+    )
+    att_list_k = xp.exp(-lm_proj_k(x_att))  # non-TOF attenuation for this subset
+    lm_att_op_k = parallelproj.operators.ElementwiseMultiplicationOperator(
+        sens_factor * att_list_k
+    )
+    lm_proj_k.tof_parameters = proj.tof_parameters
+    if proj.tof:
+        assert event_tofbins is not None
+        lm_proj_k.event_tofbins = xp.asarray(event_tofbins[k::num_subsets], copy=True)
+        lm_proj_k.tof = proj.tof
+
+    lm_subset_neg_logL.append(
+        NegPoissonLogLListmode(
+            parallelproj.operators.CompositeLinearOperator(
+                (lm_att_op_k, lm_proj_k, res_model)
+            ),
+            lm_subset_adj_ones,
+            contamination_list[k::num_subsets],
+            lm_subset_contamination_sum,
+        )
+    )
+
 # %%
 # Verify gradient equivalence at a test image
 # -------------------------------------------
@@ -420,6 +544,51 @@ for i in range(num_epochs_mlem):
 print()
 
 # %%
+# OSEM reconstruction (sinogram and listmode)
+# -------------------------------------------
+#
+# One OSEM epoch cycles through all :math:`m` subsets in sequence.
+# Each subset step is the same EM update as in MLEM — the same
+# :func:`em_update` function is used — but with the subset objective and
+# the corresponding subset sensitivity image.
+#
+# * *Sinogram OSEM* passes a :class:`.C2AffineObjective` per subset together
+#   with the exact subset sensitivity :math:`(A^k)^T\mathbf{1}`.
+# * *LM-OSEM* passes a :class:`.NegPoissonLogLListmode` per subset together
+#   with the approximated subset sensitivity :math:`A^T\mathbf{1}/m`.
+#
+# The loops are structurally identical, once more demonstrating that
+# :func:`em_update` is agnostic of the underlying data representation.
+
+# sinogram OSEM
+x_osem_sino = xp.asarray(x_init, copy=True)
+for i in range(num_epochs):
+    for k in range(num_subsets):
+        print(
+            f"OSEM epoch {(i + 1):04} / {num_epochs:04}, "
+            f"subset {(k + 1):03} / {num_subsets:03}",
+            end="\r",
+        )
+        x_osem_sino = em_update(
+            x_osem_sino, sino_subset_neg_logL[k], subset_adjoint_ones[k]
+        )
+print()
+
+# listmode OSEM — identical loop structure, objectives and sensitivity differ
+x_osem_lm = xp.asarray(x_init, copy=True)
+for i in range(num_epochs):
+    for k in range(num_subsets):
+        print(
+            f"LM-OSEM epoch {(i + 1):04} / {num_epochs:04}, "
+            f"subset {(k + 1):03} / {num_subsets:03}",
+            end="\r",
+        )
+        x_osem_lm = em_update(x_osem_lm, lm_subset_neg_logL[k], lm_subset_adj_ones)
+print()
+
+# %%
+# Reconstruction results
+# ----------------------
 
 vmax = float(xp.max(x_mlem_sino))
 
@@ -427,6 +596,7 @@ fig_xsino, _, widgets_xsino = show_vol_cuts(
     to_numpy_array(x_mlem_sino),
     vmin=0,
     vmax=vmax,
+    fig_title=f"Sinogram MLEM ({num_epochs_mlem} iterations)",
 )
 fig_xsino.show()
 
@@ -435,5 +605,24 @@ fig_xlm, _, widgets_xlm = show_vol_cuts(
     to_numpy_array(x_mlem_lm),
     vmin=0,
     vmax=vmax,
+    fig_title=f"Listmode MLEM ({num_epochs_mlem} iterations)",
 )
 fig_xlm.show()
+
+# %%
+fig_xosino, _, widgets_xosino = show_vol_cuts(
+    to_numpy_array(x_osem_sino),
+    vmin=0,
+    vmax=vmax,
+    fig_title=f"Sinogram OSEM ({num_subsets} subsets, {num_epochs} epochs)",
+)
+fig_xosino.show()
+
+# %%
+fig_xolm, _, widgets_xolm = show_vol_cuts(
+    to_numpy_array(x_osem_lm),
+    vmin=0,
+    vmax=vmax,
+    fig_title=f"Listmode OSEM ({num_subsets} subsets, {num_epochs} epochs)",
+)
+fig_xolm.show()
