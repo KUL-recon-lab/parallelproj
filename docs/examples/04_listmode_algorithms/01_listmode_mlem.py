@@ -22,7 +22,6 @@ and data stored in listmode format (event by event).
 
 # %%
 from __future__ import annotations
-import matplotlib.pyplot as plt
 from array_api_compat import size
 from vis import show_vol_cuts
 from img import elliptic_cylinder_phantom
@@ -34,6 +33,12 @@ import parallelproj.pet_scanners
 import parallelproj.pet_lors
 import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
+from parallelproj.functions import (
+    NegPoissonLogL,
+    NegPoissonLogLListmode,
+    C2AffineObjective,
+    C1Function,
+)
 
 # %%
 from importlib import import_module, util
@@ -71,6 +76,9 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # We setup a linear forward operator :math:`A` consisting of an
 # image-based resolution model, a non-TOF PET projector and an attenuation model
 #
+
+num_epochs = 50
+sens_factor = 0.1
 
 num_rings = 5
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -133,7 +141,9 @@ att_values = (
     if proj.tof
     else att_sino
 )
-att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values)
+att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+    sens_factor * att_values
+)
 
 res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
@@ -190,15 +200,17 @@ event_start_coords, event_end_coords, event_tofbins = proj.convert_sinogram_to_l
 lm_proj = parallelproj.projectors.ListmodePETProjector(
     event_start_coords,
     event_end_coords,
-    proj.in_shape,
-    proj.voxel_size,
+    img_shape,
+    voxel_size,
     proj.img_origin,
 )
 
 # recalculate the attenuation factor for all LM events
 # this needs to be a non-TOF projection
 att_list = xp.exp(-lm_proj(x_att))
-lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_list)
+lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+    sens_factor * att_list
+)
 
 # enable TOF in the LM projector
 lm_proj.tof_parameters = proj.tof_parameters
@@ -219,87 +231,100 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 )
 
 # %%
-# LM MLEM reconstruction
-# ----------------------
-#
-# The EM update that can be used in LM-MLEM is given by
-#
-# .. math::
-#     x^+ = \frac{x}{A^H 1} A_{LM}^H \frac{1}{A_{LM} x + s_{LM}}
-#
-# to calculate the minimizer of :math:`f(x)` iteratively.
+# Setup sinogram and listmode negative Poisson log-likelihood functions
+# ---------------------------------------------------------------------
 
+sinogram_neg_logL = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
 
-def lm_em_update(
-    x_cur: Array,
-    op: parallelproj.operators.LinearOperator,
-    s: Array,
-    adjoint_ones: Array,
-) -> Array:
-    """LM EM update
-
-    Parameters
-    ----------
-    x_cur : Array
-        current solution
-    op : parallelproj.operators.LinearOperator
-        listmode linear forward operator
-    s : Array
-        contamination list
-    adjoint_ones : Array
-        adjoint of ones of the non-LM (the complete) operator
-
-    Returns
-    -------
-    Array
-    """
-    ybar = op(x_cur) + s
-    return x_cur * op.adjoint(1 / ybar) / adjoint_ones
-
-
-# %%
-# Run LM MLEM iterations
-# ----------------------
-
-# number of MLEM iterations
-num_iter = 10
-
-# initialize x
-x = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-# calculate A^H 1
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
+lm_neg_logL = NegPoissonLogLListmode(
+    lm_pet_lin_op, adjoint_ones, contamination_list, float(xp.sum(contamination))
+)
+#
+# %%
+# Calculate the gradients of the negative Poisson log-likelihood functions in sinogram and listmode
+# -------------------------------------------------------------------------------------------------
 
-for i in range(num_iter):
-    print(f"MLEM iteration {(i + 1):03} / {num_iter:03}", end="\r")
-    x = lm_em_update(x, lm_pet_lin_op, contamination_list, adjoint_ones)
+x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+
+df_sino = sinogram_neg_logL(x_init)
+df_lm = lm_neg_logL(x_init)
+
+print(
+    f"Negative Poisson log-likelihood at x_init: {df_sino:.4E} (sinogram), {df_lm:.4E} (listmode)"
+)
+
+grad_sinogram = sinogram_neg_logL.gradient(x_init)
+grad_lm = lm_neg_logL.gradient(x_init)
 
 # %%
-# Calculate the negative Poisson log-likelihood function of the reconstruction
-# ----------------------------------------------------------------------------
+vmax = float(xp.max(xp.abs(x_init / adjoint_ones) * grad_sinogram))
 
-# calculate the negative Poisson log-likelihood function of the reconstruction
-exp = pet_lin_op(x) + contamination
-# calculate the relative cost and distance to the optimal point
-cost = float(xp.sum(exp - xp.astype(y, xp.float32) * xp.log(exp)))
-print(f"\nMLEM cost {cost:.6E} after {num_iter:03} iterations")
+fig_gs, _, widgets_gs = show_vol_cuts(
+    to_numpy_array((x_init / adjoint_ones) * grad_sinogram),
+    vmin=-vmax,
+    vmax=vmax,
+    cmap="seismic",
+)
+fig_gs.show()
 
 # %%
-# Visualize the results
-# ---------------------
-
-
-x_true_np = to_numpy_array(x_true)
-x_np = to_numpy_array(x)
-
-vmax = x_np.max()
-fig_true, _, widgets_true = show_vol_cuts(
-    x_true_np, vmin=0, vmax=vmax, fig_title="true image"
+fig_glm, _, widgets_glm = show_vol_cuts(
+    to_numpy_array((x_init / adjoint_ones) * grad_lm),
+    vmin=-vmax,
+    vmax=vmax,
+    cmap="seismic",
 )
-fig_true.show()
+fig_glm.show()
 
-fig_recon, _, widgets_recon = show_vol_cuts(
-    x_np, vmin=0, vmax=vmax, fig_title=f"LM MLEM — {num_iter} iterations"
+
+# %%
+# MLEM reconstruction (in sinogram and listmode)
+# ----------------------------------------------
+
+
+def em_update(
+    x_cur: Array,
+    negpoissonlogl: C1Function,
+    adj_ones: Array,
+) -> Array:
+    """EM update re-written as preconditioned GD step"""
+    em_diag_precond = x_cur / adj_ones
+
+    return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
+
+
+# run MLEM with sinogram data
+x_mlem_sino = xp.asarray(x_init, copy=True)
+for i in range(num_epochs):
+    print(f"MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
+    x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones)
+print()
+
+# run MLEM with listmode data
+x_mlem_lm = xp.asarray(x_init, copy=True)
+for i in range(num_epochs):
+    print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
+    x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones)
+print()
+
+# %%
+
+vmax = float(xp.max(x_mlem_sino))
+
+fig_xsino, _, widgets_xsino = show_vol_cuts(
+    to_numpy_array(x_mlem_sino),
+    vmin=0,
+    vmax=vmax,
 )
-fig_recon.show()
+fig_xsino.show()
+
+# %%
+fig_xlm, _, widgets_xlm = show_vol_cuts(
+    to_numpy_array(x_mlem_lm),
+    vmin=0,
+    vmax=vmax,
+)
+fig_xlm.show()

@@ -3,8 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - pip
-  - parallelproj-core
-  - libparallelproj>=2.0
+  - parallelproj-core>=2.0.5
   - sphinx
   - sphinx-gallery
   - sphinx-design

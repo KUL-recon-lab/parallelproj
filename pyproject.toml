@@ -13,7 +13,7 @@ authors = [
   {name = "Georg Schramm"},
 ]
 dependencies = [
-  "parallelproj-core>=2.0.4",
+  "parallelproj-core>=2.0.5",
   "numpy>=1.23",
   "scipy>=1.8",
   "array-api-compat>=1.7",

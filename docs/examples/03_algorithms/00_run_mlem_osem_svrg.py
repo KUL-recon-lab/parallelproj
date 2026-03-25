@@ -268,12 +268,11 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 def em_update(
     x_cur: Array,
     negpoissonlogl: C1Function,
-    adjoint_ones: Array,
-    step_size: float = 1.0,
+    adj_ones: Array,
 ) -> Array:
     """EM update re-written as preconditioned GD step"""
-    em_diag_precond = x_cur / adjoint_ones
-    return x_cur - step_size * em_diag_precond * negpoissonlogl.gradient(x_cur)
+    em_diag_precond = x_cur / adj_ones
+    return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
 
 
 # %%
