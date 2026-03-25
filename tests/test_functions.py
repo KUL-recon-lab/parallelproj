@@ -65,7 +65,7 @@ def test_c2function_not_instantiable(xp: ModuleType, dev: str):
 def test_beta_property_get_set(xp: ModuleType, dev: str):
     """Covers the beta getter (line 35) and setter (line 39)."""
     d = xp.asarray(_Y_NP, device=dev)
-    f = ppf.NegPoissonLogL(d, beta=1.0)
+    f = ppf.NegPoissonLogL(d)
     assert f.beta == 1.0  # getter
     f.beta = 3.0  # setter
     assert f.beta == 3.0
@@ -124,8 +124,9 @@ def test_neg_poisson_logl_beta_scaling(xp: ModuleType, dev: str):
     y = xp.asarray(_Y_NP, device=dev)
     ybar = xp.asarray(_YBAR_NP, device=dev)
 
-    f1 = ppf.NegPoissonLogL(y, beta=1.0)
-    f2 = ppf.NegPoissonLogL(y, beta=2.0)
+    f1 = ppf.NegPoissonLogL(y)
+    f2 = ppf.NegPoissonLogL(y)
+    f2.beta = 2.0
     assert abs(f2(ybar) - 2.0 * f1(ybar)) < 1e-8
     assert allclose(f2.gradient(ybar), 2.0 * f1.gradient(ybar))
 

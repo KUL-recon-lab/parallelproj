@@ -192,12 +192,10 @@ class NegPoissonLogL(C2Function):
     ----------
     data : Array
         Measured data :math:`y`.
-    beta : float, optional
-        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     """
 
-    def __init__(self, data: Array, beta: float = 1.0):
-        super().__init__(beta)
+    def __init__(self, data: Array):
+        super().__init__()
         self._data = data
 
     def _call(self, pred: Array) -> float:
@@ -525,8 +523,6 @@ class NegPoissonLogLListmode(C2Function):
     contamination_sinogram_sum : float
         Scalar sum of the contamination over all sinogram bins,
         :math:`c_{\\text{sino}} = \\sum_i s_i^{\\text{sino}}`.
-    beta : float, optional
-        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     """
 
     def __init__(
@@ -535,9 +531,8 @@ class NegPoissonLogLListmode(C2Function):
         sensitivity_image: Array,
         contamination_list: Array,
         contamination_sinogram_sum: float,
-        beta: float = 1.0,
     ):
-        super().__init__(beta)
+        super().__init__()
         self._lm_op = lm_op
         self._sensitivity_image = sensitivity_image
         self._contamination_sinogram_sum = contamination_sinogram_sum
@@ -666,7 +661,8 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> x = np.ones(4)                # image estimate
     >>> v = np.ones(4)                # direction vector
     >>>
-    >>> loss = NegPoissonLogL(data, beta=0.5)
+    >>> loss = NegPoissonLogL(data)
+    >>> loss.beta = 0.5
     >>> aff_obj = C2AffineObjective(loss, op, s)
     >>>
     >>> fx = aff_obj(x)                                     # scalar function value, scaled by beta=0.5
