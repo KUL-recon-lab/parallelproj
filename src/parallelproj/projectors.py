@@ -849,6 +849,21 @@ class RegularPolygonPETProjector(LinearOperator):
             in case of non-TOF, event_tofbin is None
         """
 
+        integer_dtypes = (
+            self.xp.int8,
+            self.xp.int16,
+            self.xp.int32,
+            self.xp.int64,
+            self.xp.uint8,
+            self.xp.uint16,
+            self.xp.uint32,
+            self.xp.uint64,
+        )
+        if sinogram.dtype not in integer_dtypes:
+            raise TypeError(
+                f"sinogram must have an integer dtype, got {sinogram.dtype}"
+            )
+
         num_events = int(self.xp.sum(sinogram))
 
         event_start_coords = self.xp.empty(
@@ -869,7 +884,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         event_offset = 0
 
-        # we convert view by view and tofbin by tofbin to save memory
+        # we convert view by view to save memory
         for view in range(self.lor_descriptor.num_views):
             xstart, xend = self.lor_descriptor.get_lor_coordinates(
                 views=self.xp.asarray([view], device=self._dev)
@@ -886,45 +901,37 @@ class RegularPolygonPETProjector(LinearOperator):
                 sino_view, axis=self.lor_descriptor.view_axis_num
             )
 
-            for it in range(num_tofbins):
-                if self.tof and self._tof_parameters is not None:
-                    ss = sino_view[..., it]
-                else:
-                    ss = sino_view
+            # flatten all dims (lor dims + optional tofbin last dim) to 1D
+            # for TOF: flat_idx = lor_idx * num_tofbins + tofbin_idx
+            # for non-TOF: num_tofbins == 1, flat_idx == lor_idx
+            ss = self.xp.reshape(sino_view, (size(sino_view),))
 
-                ss = self.xp.reshape(ss, (size(ss),))
+            # array_api_strict does not support repeat with array-valued counts;
+            # we convert back and forth to numpy cpu array as a workaround
+            flat_counts = to_numpy_array(ss).astype(int)
+            event_flat_inds = np.repeat(np.arange(ss.shape[0]), flat_counts)
+            num_events_view = int(event_flat_inds.shape[0])
 
-                # array_api_strict does not support repeat with array-valued counts;
-                # we convert back and forth to numpy cpu array as a workaround
-                event_sino_inds = self.xp.asarray(
-                    np.repeat(np.arange(ss.shape[0]), to_numpy_array(ss)),
-                    device=self._dev,
-                )
+            event_lor_inds = self.xp.asarray(
+                event_flat_inds // num_tofbins, device=self._dev
+            )
 
-                num_events_ss = int(self.xp.sum(ss))
+            event_start_coords[event_offset : (event_offset + num_events_view), :] = (
+                self.xp.take(xstart, event_lor_inds, axis=0)
+            )
+            event_end_coords[event_offset : (event_offset + num_events_view), :] = (
+                self.xp.take(xend, event_lor_inds, axis=0)
+            )
 
-                event_start_coords[event_offset : (event_offset + num_events_ss), :] = (
-                    self.xp.take(xstart, event_sino_inds, axis=0)
-                )
-                event_end_coords[event_offset : (event_offset + num_events_ss), :] = (
-                    self.xp.take(xend, event_sino_inds, axis=0)
-                )
-
-                if (
-                    self.tof
-                    and self._tof_parameters is not None
-                    and event_tofbins is not None
-                ):
-                    event_tofbins[event_offset : (event_offset + num_events_ss)] = (
-                        self.xp.full(
-                            num_events_ss,
-                            it,
-                            device=self._dev,
-                            dtype=self.xp.int16,
-                        )
+            if event_tofbins is not None:
+                event_tofbins[event_offset : (event_offset + num_events_view)] = (
+                    self.xp.asarray(
+                        (event_flat_inds % num_tofbins).astype(np.int16),
+                        device=self._dev,
                     )
+                )
 
-                event_offset += num_events_ss
+            event_offset += num_events_view
 
         return event_start_coords, event_end_coords, event_tofbins
 
