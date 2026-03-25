@@ -1,6 +1,6 @@
 """
-TOF listmode MLEM using NegPoissonLogLListmode
-==============================================
+Listmode MLEM, OSEM and SVRG
+============================
 
 This example demonstrates how to run the MLEM reconstruction algorithm
 using listmode (event-by-event) data, and compares it with the equivalent
