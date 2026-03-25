@@ -604,6 +604,150 @@ def test_c2_affine_objective_beta_scaling(xp: ModuleType, dev: str):
 
 
 # ---------------------------------------------------------------------------
+# NegPoissonLogLListmode
+# ---------------------------------------------------------------------------
+#
+# We build a minimal (2 image voxels, 6 listmode events) system that is the
+# exact listmode equivalent of a 3-bin sinogram with integer counts [2, 1, 3].
+#
+# Sinogram layout:  A_sino (3×2), y_sino = [2, 1, 3], s_sino = [0.1, 0.2, 0.1]
+# Listmode layout:  row e of A_lm  == A_sino[bin_e, :]
+#                   s_lm[e]        == s_sino[bin_e]
+#                   sens           == A_sino^T 1  (full sensitivity image)
+#                   c_sino_sum     == sum(s_sino)
+#
+# Because sum_e log(pred_e) == sum_i y_i log(pred_i) the two formulations are
+# mathematically identical; the tests below verify this numerically.
+
+_A_SINO_LM_NP = _np.asarray([[1.0, 2.0], [3.0, 1.0], [0.5, 2.0]], dtype=_np.float64)
+_X_LM_NP = _np.asarray([0.5, 1.0])
+_V_LM_NP = _np.asarray([1.0, -0.5])
+_S_SINO_LM_NP = _np.asarray([0.1, 0.2, 0.1])
+_Y_LM_SINO_NP = _np.asarray([2, 1, 3])  # integer counts per sinogram bin
+
+_EVENT_BINS_NP = _np.repeat(_np.arange(3), _Y_LM_SINO_NP)  # [0,0,1,2,2,2]
+_A_LM_NP = _A_SINO_LM_NP[_EVENT_BINS_NP]         # (6, 2)
+_S_LM_NP = _S_SINO_LM_NP[_EVENT_BINS_NP]          # (6,)
+_SENS_LM_NP = _A_SINO_LM_NP.T @ _np.ones(3)       # (2,)
+_CONT_SINO_SUM = float(_np.sum(_S_SINO_LM_NP))
+
+
+def _make_lm_obj(xp, dev) -> ppf.NegPoissonLogLListmode:
+    """Construct a NegPoissonLogLListmode on the minimal test system."""
+    A_lm = xp.asarray(_A_LM_NP, device=dev, dtype=xp.float32)
+    s_lm = xp.asarray(_S_LM_NP, device=dev, dtype=xp.float32)
+    sens = xp.asarray(_SENS_LM_NP, device=dev, dtype=xp.float32)
+    op = ppo.MatrixOperator(A_lm)
+    return ppf.NegPoissonLogLListmode(op, sens, s_lm, _CONT_SINO_SUM)
+
+
+def test_neg_poisson_logl_lm_call(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+    f = _make_lm_obj(xp, dev)
+
+    pred_sino = _A_SINO_LM_NP @ _X_LM_NP + _S_SINO_LM_NP
+    expected = float(
+        _np.dot(_SENS_LM_NP, _X_LM_NP)
+        + _CONT_SINO_SUM
+        - _np.sum(_Y_LM_SINO_NP * _np.log(pred_sino))
+    )
+    assert abs(f(x) - expected) < 1e-4
+
+
+def test_neg_poisson_logl_lm_pred_raises_on_nonpositive(xp: ModuleType, dev: str):
+    """_pred must raise ValueError when any predicted count is <= 0."""
+    f = _make_lm_obj(xp, dev)
+    x_neg = xp.asarray(_np.asarray([-10.0, -10.0]), device=dev, dtype=xp.float32)
+    with pytest.raises(ValueError):
+        f(x_neg)
+
+
+def test_neg_poisson_logl_lm_gradient_fd(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+    f = _make_lm_obj(xp, dev)
+
+    grad = f.gradient(x)
+    fd_grad = finite_diff_gradient(f, _X_LM_NP, xp, dev)
+    assert allclose(grad, fd_grad, atol=1e-3, rtol=1e-3)
+
+
+def test_neg_poisson_logl_lm_call_and_gradient(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+    f = _make_lm_obj(xp, dev)
+
+    val, grad = f.call_and_gradient(x)
+    assert abs(val - f(x)) < 1e-6
+    assert allclose(grad, f.gradient(x))
+
+
+def test_neg_poisson_logl_lm_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+    """H_lm(x) v = A_lm^T (A_lm v / pred^2); verify against finite differences of gradient."""
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+    v = xp.asarray(_V_LM_NP, device=dev, dtype=xp.float32)
+    f = _make_lm_obj(xp, dev)
+
+    hv = f.hessian_diag_vec_prod(x, v)
+
+    # finite-difference check: d/dt gradient(x + t*v) |_{t=0}
+    eps = 1e-4
+    xp_v = _X_LM_NP + eps * _V_LM_NP
+    xm_v = _X_LM_NP - eps * _V_LM_NP
+    fd_hv = (
+        f.gradient(xp.asarray(xp_v, device=dev, dtype=xp.float32))
+        - f.gradient(xp.asarray(xm_v, device=dev, dtype=xp.float32))
+    ) / (2 * eps)
+    assert allclose(hv, fd_hv, atol=5e-3, rtol=5e-3)
+
+
+def test_neg_poisson_logl_lm_matches_sinogram_value(xp: ModuleType, dev: str):
+    """NegPoissonLogLListmode and C2AffineObjective(NegPoissonLogL) must agree in value."""
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+
+    f_lm = _make_lm_obj(xp, dev)
+
+    A_sino = xp.asarray(_A_SINO_LM_NP, device=dev, dtype=xp.float32)
+    y_sino = xp.asarray(_Y_LM_SINO_NP, device=dev, dtype=xp.float32)
+    s_sino = xp.asarray(_S_SINO_LM_NP, device=dev, dtype=xp.float32)
+    f_sino = ppf.C2AffineObjective(ppf.NegPoissonLogL(y_sino), ppo.MatrixOperator(A_sino), s_sino)
+
+    assert abs(f_lm(x) - f_sino(x)) < 1e-4
+
+
+def test_neg_poisson_logl_lm_matches_sinogram_gradient(xp: ModuleType, dev: str):
+    """Gradient of NegPoissonLogLListmode must match that of the sinogram objective."""
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+
+    f_lm = _make_lm_obj(xp, dev)
+
+    A_sino = xp.asarray(_A_SINO_LM_NP, device=dev, dtype=xp.float32)
+    y_sino = xp.asarray(_Y_LM_SINO_NP, device=dev, dtype=xp.float32)
+    s_sino = xp.asarray(_S_SINO_LM_NP, device=dev, dtype=xp.float32)
+    f_sino = ppf.C2AffineObjective(ppf.NegPoissonLogL(y_sino), ppo.MatrixOperator(A_sino), s_sino)
+
+    assert allclose(f_lm.gradient(x), f_sino.gradient(x), atol=1e-4, rtol=1e-4)
+
+
+def test_neg_poisson_logl_lm_matches_sinogram_hessian(xp: ModuleType, dev: str):
+    """Hessian-vector product of NegPoissonLogLListmode must match sinogram objective."""
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+    v = xp.asarray(_V_LM_NP, device=dev, dtype=xp.float32)
+
+    f_lm = _make_lm_obj(xp, dev)
+
+    A_sino = xp.asarray(_A_SINO_LM_NP, device=dev, dtype=xp.float32)
+    y_sino = xp.asarray(_Y_LM_SINO_NP, device=dev, dtype=xp.float32)
+    s_sino = xp.asarray(_S_SINO_LM_NP, device=dev, dtype=xp.float32)
+    f_sino = ppf.C2AffineObjective(ppf.NegPoissonLogL(y_sino), ppo.MatrixOperator(A_sino), s_sino)
+
+    assert allclose(
+        f_lm.hessian_diag_vec_prod(x, v),
+        f_sino.hessian_diag_vec_prod(x, v),
+        atol=1e-4,
+        rtol=1e-4,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Gradient finite-difference consistency (random inputs)
 # ---------------------------------------------------------------------------
 
