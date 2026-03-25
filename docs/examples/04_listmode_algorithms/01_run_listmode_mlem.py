@@ -114,6 +114,9 @@ num_epochs_mlem = 2 * 96
 num_subsets = 24
 num_epochs = num_epochs_mlem // num_subsets
 
+# run full MLEM only on GPU — too slow on CPU for the number of iterations used here
+run_mlem = dev != "cpu"
+
 sens_factor = 1.0
 
 num_rings = 5
@@ -539,25 +542,26 @@ fig_glm.show()
 # epochs at which to record the MLEM objective value
 mlem_checkpoints = [num_epochs_mlem // 2, num_epochs_mlem]
 
-# run MLEM with sinogram data
-df_mlem_sino: dict[int, float] = {}
-x_mlem_sino = xp.asarray(x_init, copy=True)
-for i in range(num_epochs_mlem):
-    print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-    x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones)
-    if (i + 1) in mlem_checkpoints:
-        df_mlem_sino[i + 1] = float(sinogram_neg_logL(x_mlem_sino))
-print()
+if run_mlem:
+    # run MLEM with sinogram data
+    df_mlem_sino: dict[int, float] = {}
+    x_mlem_sino = xp.asarray(x_init, copy=True)
+    for i in range(num_epochs_mlem):
+        print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
+        x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones)
+        if (i + 1) in mlem_checkpoints:
+            df_mlem_sino[i + 1] = float(sinogram_neg_logL(x_mlem_sino))
+    print()
 
-# run MLEM with listmode data — identical loop, only the objective changes
-df_mlem_lm: dict[int, float] = {}
-x_mlem_lm = xp.asarray(x_init, copy=True)
-for i in range(num_epochs_mlem):
-    print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-    x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones)
-    if (i + 1) in mlem_checkpoints:
-        df_mlem_lm[i + 1] = float(sinogram_neg_logL(x_mlem_lm))
-print()
+    # run MLEM with listmode data — identical loop, only the objective changes
+    df_mlem_lm: dict[int, float] = {}
+    x_mlem_lm = xp.asarray(x_init, copy=True)
+    for i in range(num_epochs_mlem):
+        print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
+        x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones)
+        if (i + 1) in mlem_checkpoints:
+            df_mlem_lm[i + 1] = float(sinogram_neg_logL(x_mlem_lm))
+    print()
 
 # %%
 # OSEM reconstruction (sinogram and listmode)
@@ -800,23 +804,24 @@ for ax, xvals_osem, xvals_svrg, xlabel in (
         label=f"LM-SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})",
         marker="v",
     )
-    for ep, style, color in (
-        (mlem_checkpoints[0], "--", "gray"),
-        (mlem_checkpoints[1], "-.", "black"),
-    ):
-        ax.axhline(
-            df_mlem_sino[ep],
-            label=f"Sino-MLEM ({ep} iter.)",
-            ls=style,
-            color=color,
-        )
-        ax.axhline(
-            df_mlem_lm[ep],
-            label=f"LM-MLEM ({ep} iter.)",
-            ls=style,
-            color=color,
-            alpha=0.5,
-        )
+    if run_mlem:
+        for ep, style, color in (
+            (mlem_checkpoints[0], "--", "gray"),
+            (mlem_checkpoints[1], "-.", "black"),
+        ):
+            ax.axhline(
+                df_mlem_sino[ep],
+                label=f"Sino-MLEM ({ep} iter.)",
+                ls=style,
+                color=color,
+            )
+            ax.axhline(
+                df_mlem_lm[ep],
+                label=f"LM-MLEM ({ep} iter.)",
+                ls=style,
+                color=color,
+                alpha=0.5,
+            )
     ax.set_ylim(df_min, df_max)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("Negative Poisson log-likelihood")
@@ -829,24 +834,25 @@ fig_conv.show()
 # Reconstruction results
 # ----------------------
 
-vmax = float(xp.max(x_mlem_sino))
+vmax = float(xp.max(x_mlem_sino if run_mlem else x_osem_sino))
 
-fig_xsino, _, widgets_xsino = show_vol_cuts(
-    to_numpy_array(x_mlem_sino),
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Sinogram MLEM ({num_epochs_mlem} iterations)",
-)
-fig_xsino.show()
+if run_mlem:
+    fig_xsino, _, widgets_xsino = show_vol_cuts(
+        to_numpy_array(x_mlem_sino),
+        vmin=0,
+        vmax=vmax,
+        fig_title=f"Sinogram MLEM ({num_epochs_mlem} iterations)",
+    )
+    fig_xsino.show()
 
-# %%
-fig_xlm, _, widgets_xlm = show_vol_cuts(
-    to_numpy_array(x_mlem_lm),
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Listmode MLEM ({num_epochs_mlem} iterations)",
-)
-fig_xlm.show()
+    # %%
+    fig_xlm, _, widgets_xlm = show_vol_cuts(
+        to_numpy_array(x_mlem_lm),
+        vmin=0,
+        vmax=vmax,
+        fig_title=f"Listmode MLEM ({num_epochs_mlem} iterations)",
+    )
+    fig_xlm.show()
 
 # %%
 fig_xosino, _, widgets_xosino = show_vol_cuts(
