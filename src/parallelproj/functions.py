@@ -462,6 +462,123 @@ class SumC2Function(C2Function, SumC1Function):
         return result
 
 
+class NegPoissonLogLListmode(C2Function):
+    """Negative Poisson log-likelihood for listmode (event-by-event) data.
+
+    Implements the listmode equivalent of :class:`NegPoissonLogL` with an
+    affine forward model :math:`\\bar{y}_e = (A_{\\text{LM}}\\, x)_e + s_e`.
+    The function value is
+
+    .. math::
+
+        f(x) = \\langle \\text{sens},\\, x \\rangle + c_{\\text{sino}}
+                - \\sum_{e=1}^{N_{\\text{ev}}} \\log\\bigl((A_{\\text{LM}}\\,x)_e + s_e\\bigr)
+
+    where
+
+    - :math:`\\text{sens} = A_{\\text{full}}^T \\mathbf{1}` is the sensitivity
+      image (backprojection of all-ones from the full sinogram),
+    - :math:`c_{\\text{sino}} = \\sum_i s_i^{\\text{sino}}` is the scalar sum
+      of the contamination over all sinogram bins, and
+    - the sum runs over all :math:`N_{\\text{ev}}` detected events.
+
+    This is mathematically equivalent to the sinogram :class:`NegPoissonLogL`
+    because :math:`\\sum_e \\log \\bar{y}_{j_e} = \\sum_i y_i \\log \\bar{y}_i`
+    (each event from bin :math:`i` contributes :math:`\\log \\bar{y}_i` and
+    there are :math:`y_i` such events).
+
+    The gradient with respect to the image :math:`x` is
+
+    .. math::
+
+        \\nabla_x f(x) = \\text{sens}
+            - A_{\\text{LM}}^T \\!\\left(\\frac{1}{A_{\\text{LM}}\\,x + s_{\\text{LM}}}\\right)
+
+    and the diagonal Hessian-vector product is
+
+    .. math::
+
+        \\operatorname{diag}(H_f(x)) \\odot v
+            = A_{\\text{LM}}^T \\!\\left(
+                \\frac{A_{\\text{LM}}\\, v}{(A_{\\text{LM}}\\,x + s_{\\text{LM}})^2}
+              \\right).
+
+    .. note::
+
+        Unlike :class:`NegPoissonLogL`, this class operates directly in
+        **image space** (it takes :math:`x` as input, not the predicted counts
+        :math:`\\bar{y}`).  It therefore cannot be composed with
+        :class:`C2AffineObjective`; the forward model is built in internally.
+
+    Parameters
+    ----------
+    lm_op : LinearOperator
+        Listmode forward projector :math:`A_{\\text{LM}}` mapping an image
+        (shape: ``n_voxels``) to per-event predicted counts
+        (shape: ``n_events``).
+    sensitivity_image : Array
+        Sensitivity image :math:`A_{\\text{full}}^T \\mathbf{1}` (same shape
+        as the image :math:`x`).
+    contamination_list : Array
+        Per-event additive contamination :math:`s_{\\text{LM}}` (same shape
+        as the listmode output, i.e. ``n_events``).
+    contamination_sinogram_sum : float
+        Scalar sum of the contamination over all sinogram bins,
+        :math:`c_{\\text{sino}} = \\sum_i s_i^{\\text{sino}}`.
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    """
+
+    def __init__(
+        self,
+        lm_op: LinearOperator,
+        sensitivity_image: Array,
+        contamination_list: Array,
+        contamination_sinogram_sum: float,
+        beta: float = 1.0,
+    ):
+        super().__init__(beta)
+        self._lm_op = lm_op
+        self._sensitivity_image = sensitivity_image
+        self._contamination_sinogram_sum = contamination_sinogram_sum
+        self._contamination_list = contamination_list
+
+    def _pred(self, x: Array) -> Array:
+        """Compute per-event predicted counts :math:`A_{\\text{LM}} x + s_{\\text{LM}}`."""
+        pred = self._lm_op(x) + self._contamination_list
+        xp = get_namespace(pred)
+        if float(xp.min(pred)) <= 0:
+            raise ValueError("Per-event predicted counts must be strictly positive. ")
+        return pred
+
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        pred = self._pred(x)
+        norm = (
+            float(xp.sum(self._sensitivity_image * x))
+            + self._contamination_sinogram_sum
+        )
+        return norm - float(xp.sum(xp.log(pred)))
+
+    def _gradient(self, x: Array) -> Array:
+        return self._sensitivity_image - self._lm_op.adjoint(1.0 / self._pred(x))
+
+    def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
+        pred = self._pred(x)
+        xp = get_namespace(x)
+        norm = (
+            float(xp.sum(self._sensitivity_image * x))
+            + self._contamination_sinogram_sum
+        )
+        value = norm - float(xp.sum(xp.log(pred)))
+        grad = self._sensitivity_image - self._lm_op.adjoint(1.0 / pred)
+        return value, grad
+
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        pred = self._pred(x)
+        return self._lm_op.adjoint(self._lm_op(v) / pred**2)
+
+
 class C1AffineObjective(C1Function):
     """Composes a prediction-space :class:`C1Function` with an affine forward model.
 
