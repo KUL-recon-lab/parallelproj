@@ -20,8 +20,11 @@ class FunctionWithConjProx(ABC):
     instead.
 
     The public :meth:`prox_convex_conj` handles the :math:`\\beta` scaling
-    automatically.  Subclasses implement only the *unscaled* private method
-    :meth:`_prox_convex_conj`.
+    automatically.  Subclasses implement only the *unscaled* private methods
+    :meth:`_call` and :meth:`_prox_convex_conj`.
+
+    A default :meth:`prox` is provided via Moreau's identity for convenience;
+    subclasses may override it with a more efficient closed-form if available.
 
     Parameters
     ----------
@@ -42,9 +45,25 @@ class FunctionWithConjProx(ABC):
         self._beta = value
 
     @abstractmethod
-    def __call__(self, x: Array) -> float:
-        """Evaluate :math:`\\beta f(x)`."""
+    def _call(self, x: Array) -> float:
+        """Unscaled function value f(x) (implemented by subclasses)."""
         ...
+
+    def __call__(self, x: Array) -> float:
+        """Evaluate :math:`\\beta f(x)`.
+
+        Parameters
+        ----------
+        x : Array
+            Point at which to evaluate the function.
+
+        Returns
+        -------
+        float
+            Scaled scalar function value :math:`\\beta f(x)`.
+        """
+        v = self._call(x)
+        return v if self._beta == 1.0 else self._beta * v
 
     @abstractmethod
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
@@ -94,6 +113,159 @@ class FunctionWithConjProx(ABC):
         if self._beta == 1.0:
             return self._prox_convex_conj(y, sigma)
         return self._beta * self._prox_convex_conj(y / self._beta, sigma / self._beta)
+
+    def prox(self, x: Array, sigma: float | Array) -> Array:
+        """Proximal operator of :math:`\\beta f` via Moreau's identity.
+
+        .. math::
+
+            \\text{prox}_{\\sigma (\\beta f)}(x)
+            = x - \\sigma \\, \\text{prox}_{(\\beta f)^* / \\sigma}(x / \\sigma)
+
+        Subclasses with a cheaper closed-form direct prox may override this.
+
+        Parameters
+        ----------
+        x : Array
+            Input array.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\text{prox}_{\\sigma (\\beta f)}(x)`.
+        """
+        return x - sigma * self.prox_convex_conj(x / sigma, 1.0 / sigma)
+
+
+class FunctionWithProx(ABC):
+    """Abstract base class for functions with a closed-form proximal operator.
+
+    This class is a standalone root — it does **not** require the function to
+    be differentiable.  Functions (e.g. indicator functions, L1 norm) that
+    admit a closed-form :math:`\\text{prox}_{\\sigma f}` should inherit
+    directly from this class.
+
+    The public :meth:`prox` handles the :math:`\\beta` scaling automatically.
+    Subclasses implement only the *unscaled* private methods :meth:`_call` and
+    :meth:`_prox`.
+
+    A default :meth:`prox_convex_conj` is provided via Moreau's identity for
+    convenience; subclasses may override it with a more efficient closed-form
+    if available.
+
+    Parameters
+    ----------
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    """
+
+    def __init__(self, beta: float = 1.0):
+        self._beta = beta
+
+    @property
+    def beta(self) -> float:
+        """Multiplicative scale factor :math:`\\beta`."""
+        return self._beta
+
+    @beta.setter
+    def beta(self, value: float) -> None:
+        self._beta = value
+
+    @abstractmethod
+    def _call(self, x: Array) -> float:
+        """Unscaled function value f(x) (implemented by subclasses)."""
+        ...
+
+    def __call__(self, x: Array) -> float:
+        """Evaluate :math:`\\beta f(x)`.
+
+        Parameters
+        ----------
+        x : Array
+            Point at which to evaluate the function.
+
+        Returns
+        -------
+        float
+            Scaled scalar function value :math:`\\beta f(x)`.
+        """
+        v = self._call(x)
+        return v if self._beta == 1.0 else self._beta * v
+
+    @abstractmethod
+    def _prox(self, x: Array, sigma: float | Array) -> Array:
+        """Unscaled proximal operator.
+
+        Computes :math:`\\text{prox}_{\\sigma f}(x)` for the *unscaled*
+        function :math:`f` (i.e. with :math:`\\beta = 1`).
+
+        Parameters
+        ----------
+        x : Array
+            Input array.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\text{prox}_{\\sigma f}(x)`.
+        """
+        ...
+
+    def prox(self, x: Array, sigma: float | Array) -> Array:
+        """Proximal operator of :math:`\\beta f`.
+
+        .. math::
+
+            \\text{prox}_{\\sigma (\\beta f)}(x)
+            = \\text{prox}_{(\\sigma \\beta) f}(x)
+
+        so the effective step size passed to the unscaled :meth:`_prox` is
+        :math:`\\sigma \\beta`.
+
+        Parameters
+        ----------
+        x : Array
+            Input array.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\text{prox}_{\\sigma (\\beta f)}(x)`.
+        """
+        if self._beta == 1.0:
+            return self._prox(x, sigma)
+        return self._prox(x, sigma * self._beta)
+
+    def prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        """Proximal operator of the convex conjugate of :math:`\\beta f`
+        via Moreau's identity.
+
+        .. math::
+
+            \\text{prox}_{\\sigma (\\beta f)^*}(y)
+            = y - \\sigma \\, \\text{prox}_{(\\beta f) / \\sigma}(y / \\sigma)
+
+        Subclasses with a cheaper closed-form dual prox may override this.
+
+        Parameters
+        ----------
+        y : Array
+            Input array.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\text{prox}_{\\sigma (\\beta f)^*}(y)`.
+        """
+        return y - sigma * self.prox(y / sigma, 1.0 / sigma)
 
 
 class C1Function(ABC):
@@ -931,3 +1103,96 @@ class C2AffineObjective(C2Function, C1AffineObjective):
         if self._s is not None:
             pred = pred + self._s
         return self._op.adjoint(self._loss.hessian_diag_vec_prod(pred, self._op(v)))
+
+
+class NonNegativeIndicator(FunctionWithProx):
+    """Indicator function of the non-negative orthant.
+
+    .. math::
+
+        f(x) = \\begin{cases} 0 & x \\geq 0 \\\\ +\\infty & \\text{otherwise} \\end{cases}
+
+    The proximal operator is the projection onto the non-negative orthant:
+
+    .. math::
+
+        \\text{prox}_{\\sigma f}(x) = \\max(x, 0)
+
+    independent of :math:`\\sigma` and :math:`\\beta`.
+
+    The dual prox (via Moreau's identity) is the projection onto the
+    non-positive orthant:
+
+    .. math::
+
+        \\text{prox}_{\\sigma f^*}(y) = \\min(y, 0)
+
+    Parameters
+    ----------
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+        For an indicator function the value is 0 or :math:`+\\infty`
+        regardless of :math:`\\beta > 0`, but :math:`\\beta` affects the
+        effective step size passed to :meth:`prox`.
+    """
+
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        return 0.0 if bool(xp.all(x >= 0)) else float("inf")
+
+    def _prox(self, x: Array, sigma: float | Array) -> Array:
+        xp = get_namespace(x)
+        return xp.where(x < 0, xp.zeros_like(x), x)
+
+
+class MixedL21Norm(FunctionWithConjProx):
+    """Mixed L2-L1 norm (isotropic TV semi-norm on a gradient field).
+
+    For an array :math:`g` whose **first axis** enumerates the gradient
+    directions (as produced by :class:`~parallelproj.operators.FiniteForwardDifference`),
+    the norm is
+
+    .. math::
+
+        f(g) = \\sum_{\\mathbf{i}} \\|g_{:, \\mathbf{i}}\\|_2
+
+    where the sum runs over all spatial multi-indices :math:`\\mathbf{i}` and
+    the L2 norm is taken along axis 0.
+
+    The convex conjugate is the indicator of the mixed :math:`L_{\\infty,2}`
+    unit ball:
+
+    .. math::
+
+        f^*(p) = \\begin{cases}
+            0 & \\|p_{:, \\mathbf{i}}\\|_2 \\leq 1 \\; \\forall \\mathbf{i} \\\\
+            +\\infty & \\text{otherwise}
+        \\end{cases}
+
+    so its proximal operator is a pointwise projection onto the L2 unit ball
+    along axis 0 (independent of :math:`\\sigma`):
+
+    .. math::
+
+        \\left(\\text{prox}_{\\sigma f^*}(y)\\right)_{:, \\mathbf{i}}
+        = \\frac{y_{:, \\mathbf{i}}}{\\max\\!\\left(\\|y_{:, \\mathbf{i}}\\|_2,\\, 1\\right)}
+
+    The direct :meth:`prox` (block soft-thresholding) is available via
+    Moreau's identity.
+
+    Parameters
+    ----------
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta` (regularization weight).
+        Defaults to ``1.0``.
+    """
+
+    def _call(self, g: Array) -> float:
+        xp = get_namespace(g)
+        return float(xp.sum(xp.linalg.vector_norm(g, axis=0)))
+
+    def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        xp = get_namespace(y)
+        norm = xp.linalg.vector_norm(y, axis=0)  # shape: spatial_shape
+        denom = xp.where(norm < 1, xp.ones_like(norm), norm)
+        return y / xp.expand_dims(denom, axis=0)
