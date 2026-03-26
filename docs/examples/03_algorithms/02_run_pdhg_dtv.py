@@ -6,13 +6,14 @@ This example demonstrates the primal-dual hybrid gradient (PDHG) algorithm
 applied to the problem
 
 .. math::
-    \\min_{x \\geq 0} \\; f(Ax + s) + \\beta \\, g(Gx)
+    \\min_x \\; f_\\text{data}(Ax + s) + \\beta \\, f_\\text{reg}(Dx) + g(x)
 
 where
 
-- :math:`f = \\text{NegPoissonLogL}` -- the negative Poisson log-likelihood,
-- :math:`g = \\text{MixedL21Norm}` -- the isotropic mixed L2-L1 norm (TV semi-norm),
-- :math:`G = P_{\\xi} \\nabla` -- the projected finite-difference gradient operator
+- :math:`f_\\text{data} = \\text{NegPoissonLogL}` -- the negative Poisson log-likelihood,
+- :math:`f_\\text{reg} = \\text{MixedL21Norm}` -- the isotropic mixed L2-L1 norm (TV semi-norm),
+- :math:`g = \\iota_{\\geq 0}` -- the indicator function of the non-negative orthant,
+- :math:`D = P_{\\xi} \\nabla` -- the projected finite-difference gradient operator
   implementing a directional total variation (DTV) structural prior,
 - :math:`A` -- the PET forward projector,
 - :math:`s` -- the contamination sinogram.
@@ -223,22 +224,22 @@ for i in range(num_iter_mlem):
 # ------------------------------------------------------
 #
 # The finite-difference gradient operator :math:`\\nabla` is projected by
-# :math:`P_{\\xi}` to obtain the DTV operator :math:`G = P_{\\xi} \\nabla`.
+# :math:`P_{\\xi}` to obtain the DTV operator :math:`D = P_{\\xi} \\nabla`.
 # Three function objects handle all prox evaluations during PDHG:
 #
-# - ``data_fid`` -- :class:`.NegPoissonLogL` for the data-fidelity term,
-# - ``nonneg``   -- :class:`.NonNegativeIndicator` for the non-negativity constraint,
-# - ``reg``      -- :class:`.MixedL21Norm` (weighted by ``beta``) for the DTV regularizer.
+# - ``data_fid`` -- :class:`.NegPoissonLogL`, implements :math:`f_\text{data}`,
+# - ``nonneg``   -- :class:`.NonNegativeIndicator`, implements :math:`g = \iota_{\geq 0}`,
+# - ``reg``      -- :class:`.MixedL21Norm` (weighted by ``beta``), implements :math:`\beta f_\text{reg}`.
 #
-# To use a different regularizer, replace ``op_G`` and ``reg`` accordingly.
+# To use a different regularizer, replace ``op_D`` and ``reg`` accordingly.
 
 # setup the finite-difference gradient operator
-G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
+D = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
 # calculate the joint vector field from the structural prior image
-joint_vector_field = G(x_struct)
+joint_vector_field = D(x_struct)
 # setup the projected gradient (DTV) operator
 P = parallelproj.operators.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
-op_G = parallelproj.operators.CompositeLinearOperator((P, G))
+op_D = parallelproj.operators.CompositeLinearOperator((P, D))
 
 # function objects used by PDHG
 data_fid = parallelproj.functions.NegPoissonLogL(d)
@@ -249,11 +250,12 @@ reg = parallelproj.functions.MixedL21Norm(beta=beta)
 # Setup the cost function
 # ^^^^^^^^^^^^^^^^^^^^^^^
 #
-# The total cost is :math:`f(Ax + s) + \\beta \\, g(Gx)`.
+# The total cost is :math:`f_\text{data}(Ax + s) + \beta \, f_\text{reg}(Dx) + g(x)`
+# (the indicator :math:`g(x)` is zero for feasible :math:`x \geq 0`).
 
 
 def cost_function(img):
-    return float(data_fid(pet_lin_op(img) + contamination)) + float(reg(op_G(img)))
+    return float(data_fid(pet_lin_op(img) + contamination)) + float(reg(op_D(img)))
 
 
 # %%
@@ -262,18 +264,19 @@ def cost_function(img):
 #
 # .. admonition:: PDHG algorithm
 #
-#   Minimize :math:`f(Ax + s) + g(Gx)` subject to :math:`x \geq 0`, where
-#   :math:`f` is a function with a known :math:`\text{prox}_{f^*}` and
-#   :math:`g` is a function with a known :math:`\text{prox}_{g^*}`.
+#   Minimize :math:`f_\text{data}(Ax + s) + \beta \, f_\text{reg}(Dx) + g(x)`, where
+#   :math:`f_\text{data}` and :math:`f_\text{reg}` have known proximal operators of
+#   their convex conjugates and :math:`g = \iota_{\geq 0}` has a known proximal operator.
 #
-#   | **Input** data :math:`d`, operators :math:`A`, :math:`G`
-#   | **Initialize** primal :math:`x`, dual :math:`y`, :math:`w`; step sizes :math:`S_A`, :math:`S_G`, :math:`T`
-#   | **Preprocessing** :math:`z = \bar{z} = A^T y + G^T w`
+#   | **Input** data :math:`d`, operators :math:`A`, :math:`D`
+#   | **Initialize** primal :math:`x`, dual :math:`y`, :math:`w`; step sizes :math:`S_A`, :math:`S_D`, :math:`T`
+#   | **Preprocessing** :math:`z = \bar{z} = A^T y + D^T w`
 #   | **Repeat** until stopping criterion is met
-#   |     :math:`x \;\gets\; \text{nonneg.prox}(x - T\bar{z},\; T)`
-#   |     :math:`y \;\gets\; \text{data\_fid.prox\_convex\_conj}(y + S_A (Ax + s),\; S_A)`
-#   |     :math:`w \;\gets\; \text{reg.prox\_convex\_conj}(w + S_G G x,\; S_G)`
-#   |     :math:`\Delta z \gets A^T(y^+ - y) + G^T(w^+ - w)`
+#   |     :math:`x \;\gets\; \operatorname{prox}_{T g}(x - T\bar{z})`
+#   |     :math:`y^+ \gets \operatorname{prox}_{S_A f_\text{data}^*}(y + S_A (Ax + s))`
+#   |     :math:`w^+ \gets \operatorname{prox}_{S_D (\beta f_\text{reg})^*}(w + S_D D x)`
+#   |     :math:`\Delta z \gets A^T(y^+ - y) + D^T(w^+ - w)`
+#   |     :math:`y \gets y^+, \quad w \gets w^+`
 #   |     :math:`z \gets z + \Delta z`
 #   |     :math:`\bar{z} \gets z + \Delta z`
 #   | **Return** :math:`x`
@@ -282,22 +285,22 @@ def cost_function(img):
 #
 #  :math:`S_A = \gamma \, \text{diag}\!\left(\frac{\rho}{A \mathbf{1}}\right)`
 #
-#  :math:`S_G = \gamma \, \frac{\rho}{\|G\|}`
+#  :math:`S_D = \gamma \, \frac{\rho}{\|D\|}`
 #
 #  :math:`T_A = \gamma^{-1} \text{diag}\!\left(\frac{\rho}{A^T \mathbf{1}}\right)`
 #
-#  :math:`T_G = \gamma^{-1} \frac{\rho}{\|G\|}`
+#  :math:`T_D = \gamma^{-1} \frac{\rho}{\|D\|}`
 #
-#  :math:`T = \min(T_A, T_G)` elementwise
+#  :math:`T = \min(T_A, T_D)` elementwise
 #
 # See :cite:p:`Ehrhardt2019` and :cite:p:`Schramm2022` for more details.
 
 # initialize primal and dual variables
 x_pdhg = 1.0 * x_mlem
 y = 1 - d / (pet_lin_op(x_pdhg) + contamination)
-w = xp.zeros(op_G.out_shape, dtype=xp.float32, device=dev)
+w = xp.zeros(op_D.out_shape, dtype=xp.float32, device=dev)
 
-z = pet_lin_op.adjoint(y) + op_G.adjoint(w)
+z = pet_lin_op.adjoint(y) + op_D.adjoint(w)
 zbar = 1.0 * z
 
 # %%
@@ -312,12 +315,12 @@ T_A = (
     / pet_lin_op.adjoint(xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev))
 )
 
-op_G_norm = op_G.norm(xp, dev, num_iter=100)
-S_G = gamma * rho / op_G_norm
-T_G = (1 / gamma) * rho / op_G_norm
+op_D_norm = op_D.norm(xp, dev, num_iter=100)
+S_D = gamma * rho / op_D_norm
+T_D = (1 / gamma) * rho / op_D_norm
 
 T = xp.where(
-    T_A < T_G, T_A, xp.full(pet_lin_op.in_shape, T_G, device=dev, dtype=xp.float32)
+    T_A < T_D, T_A, xp.full(pet_lin_op.in_shape, T_D, device=dev, dtype=xp.float32)
 )
 
 
@@ -343,9 +346,9 @@ for i in range(num_iter_pdhg):
     )
 
     # dual update for the regularization term
-    w_plus = reg.prox_convex_conj(w + S_G * op_G(x_pdhg), S_G)
+    w_plus = reg.prox_convex_conj(w + S_D * op_D(x_pdhg), S_D)
 
-    delta_z = pet_lin_op.adjoint(y_plus - y) + op_G.adjoint(w_plus - w)
+    delta_z = pet_lin_op.adjoint(y_plus - y) + op_D.adjoint(w_plus - w)
     y = 1.0 * y_plus
     w = 1.0 * w_plus
 
