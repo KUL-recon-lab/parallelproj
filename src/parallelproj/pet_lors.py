@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import abc
 import enum
+from types import ModuleType
+
 import numpy as np
-from parallelproj import Array, to_numpy_array
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from matplotlib.axes import Axes
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.lines import Line2D
+from matplotlib.patches import Circle
 
-from types import ModuleType
+
+from ._backend import Array, to_numpy_array
 
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
@@ -271,6 +276,17 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         self._sinogram_order = sinogram_order
 
+        # declare all attributes set by setup methods so they are visible in __init__
+        self._num_planes: int = 0
+        self._start_plane_index: Array | None = None
+        self._end_plane_index: Array | None = None
+        self._start_plane_z: Array | None = None
+        self._end_plane_z: Array | None = None
+        self._plane_multiplicity: Array | None = None
+        self._plane_segment: Array | None = None
+        self._start_in_ring_index: Array | None = None
+        self._end_in_ring_index: Array | None = None
+
         self._setup_plane_indices()
         self._setup_view_indices()
 
@@ -494,13 +510,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         Planes are ordered: segment 0, then +1, -1, +2, -2, … each sorted by
         increasing axial midpoint (start_ring + end_ring).
         """
-        import numpy as _np
-
         R = self._scanner.num_rings
         D = self._max_ring_difference
 
-        ring_pos = _np.asarray(
-            to_numpy_array(self._scanner.ring_positions), dtype=_np.float64
+        ring_pos = np.asarray(
+            to_numpy_array(self._scanner.ring_positions), dtype=np.float64
         )
 
         # Group (start_ring, end_ring) pairs by (segment, axial_midpoint_int)
@@ -525,15 +539,15 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         self._num_planes = len(sorted_keys)
 
-        start_z = _np.empty(self._num_planes, dtype=_np.float32)
-        end_z = _np.empty(self._num_planes, dtype=_np.float32)
-        mult = _np.empty(self._num_planes, dtype=_np.int32)
-        seg_arr = _np.empty(self._num_planes, dtype=_np.int32)
+        start_z = np.empty(self._num_planes, dtype=np.float32)
+        end_z = np.empty(self._num_planes, dtype=np.float32)
+        mult = np.empty(self._num_planes, dtype=np.int32)
+        seg_arr = np.empty(self._num_planes, dtype=np.int32)
 
         for pi, key in enumerate(sorted_keys):
             pairs = plane_groups[key]
-            start_z[pi] = _np.mean([ring_pos[s] for s, _ in pairs])
-            end_z[pi] = _np.mean([ring_pos[e] for _, e in pairs])
+            start_z[pi] = np.mean([ring_pos[s] for s, _ in pairs])
+            end_z[pi] = np.mean([ring_pos[e] for _, e in pairs])
             mult[pi] = len(pairs)
             seg_arr[pi] = key[0]
 
@@ -696,8 +710,6 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         Internal helper shared by :meth:`show_michelogram` and
         :meth:`show_segment_lors`.
         """
-        import numpy as _np
-        from matplotlib.colors import BoundaryNorm, ListedColormap
 
         R = self._scanner.num_rings
         D = self._max_ring_difference
@@ -714,17 +726,17 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                 seg_list.append(seg)
                 z_list.append(s + e)
 
-        start_arr = _np.array(start_list, dtype=_np.float32)
-        end_arr = _np.array(end_list, dtype=_np.float32)
-        seg_arr = _np.array(seg_list, dtype=_np.int32)
-        z_arr = _np.array(z_list, dtype=_np.int32)
+        start_arr = np.array(start_list, dtype=np.float32)
+        end_arr = np.array(end_list, dtype=np.float32)
+        seg_arr = np.array(seg_list, dtype=np.int32)
+        z_arr = np.array(z_list, dtype=np.int32)
 
-        abs_seg_arr = _np.abs(seg_arr)
+        abs_seg_arr = np.abs(seg_arr)
         n_colors = int(abs_seg_arr.max()) + 1
 
         base_cmap = plt.get_cmap("tab10" if n_colors <= 10 else "tab20")
         cmap = ListedColormap([base_cmap(i) for i in range(n_colors)])
-        norm = BoundaryNorm(_np.arange(-0.5, n_colors, 1.0), cmap.N)
+        norm = BoundaryNorm(np.arange(-0.5, n_colors, 1.0), cmap.N)
 
         # build plane_groups in the same order used by the projector
         plane_groups: dict[tuple[int, int], list[tuple[int, int]]] = {}
@@ -746,7 +758,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         ax.scatter(
             start_arr,
             end_arr,
-            c=abs_seg_arr.astype(_np.float32),
+            c=abs_seg_arr.astype(np.float32),
             cmap=cmap,
             norm=norm,
             **kwargs,
@@ -757,14 +769,14 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                 mask = (seg_arr == seg) & (z_arr == z_int)
                 xs, ys = start_arr[mask], end_arr[mask]
                 if xs.size > 1:
-                    order = _np.argsort(xs)
+                    order = np.argsort(xs)
                     ax.plot(xs[order], ys[order], color="gray", lw=0.5, alpha=0.5)
 
         # annotate each compressed plane with its plane index at the group centroid
         for pi, key in enumerate(sorted_keys):
             pairs = plane_groups[key]
-            cx = _np.mean([s for s, _ in pairs])
-            cy = _np.mean([e for _, e in pairs])
+            cx = np.mean([s for s, _ in pairs])
+            cy = np.mean([e for _, e in pairs])
             ax.text(
                 cx,
                 cy,
@@ -848,17 +860,14 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         -------
         matplotlib.figure.Figure
         """
-        import numpy as _np
-        from matplotlib.lines import Line2D
-        from matplotlib.patches import Circle
 
         R = self._scanner.num_rings
         D = self._max_ring_difference
-        ring_pos = _np.asarray(
-            to_numpy_array(self._scanner.ring_positions), dtype=_np.float64
+        ring_pos = np.asarray(
+            to_numpy_array(self._scanner.ring_positions), dtype=np.float64
         )
 
-        seg_arr_np = _np.asarray(to_numpy_array(self._plane_segment), dtype=_np.int32)
+        seg_arr_np = np.asarray(to_numpy_array(self._plane_segment), dtype=np.int32)
         all_segs = sorted(set(int(v) for v in seg_arr_np))
         abs_segs = sorted(set(abs(s) for s in all_segs))  # column indices
         n_cols = len(abs_segs)
@@ -882,9 +891,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             )
             _axs = raw  # shape (n_rows, n_cols)
         else:
-            import numpy as _np2
-
-            _axs = _np2.asarray(axs)
+            _axs = np.asarray(axs)
             fig = _axs.flat[0].get_figure()
 
         # --- coordinate normalisation -----------------------------------
@@ -905,8 +912,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                 if seg in uncompressed:
                     uncompressed[seg].append((s, e))
 
-        start_z_np = _np.asarray(to_numpy_array(self._start_plane_z))
-        end_z_np = _np.asarray(to_numpy_array(self._end_plane_z))
+        start_z_np = np.asarray(to_numpy_array(self._start_plane_z))
+        end_z_np = np.asarray(to_numpy_array(self._end_plane_z))
 
         n_colors = len(abs_segs)
         base_cmap = plt.get_cmap("tab10" if n_colors <= 10 else "tab20")

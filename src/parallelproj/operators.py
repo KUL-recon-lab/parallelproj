@@ -412,7 +412,6 @@ class ElementwiseMultiplicationOperator(LinearOperator):
         ) or self.xp.isdtype(self._values.dtype, self.xp.complex128)
 
 
-
 def _sigma_for_numpy(sigma):
     if array_api_compat.is_array_api_obj(sigma):
         return np.asarray(sigma)
@@ -787,6 +786,8 @@ class FiniteForwardDifference(LinearOperator):
             div3[:, :, :, 0] = -tmp3[:, :, :, 0]
 
             res = div0 + div1 + div2 + div3
+        else:
+            raise ValueError("only up to 4 dimensions supported")
 
         return res
 
