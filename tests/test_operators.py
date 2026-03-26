@@ -346,6 +346,14 @@ def test_finite_difference(xp: ModuleType, dev: str):
     with pytest.raises(ValueError):
         A = ppo.FiniteForwardDifference((3, 3, 3, 3, 3))
 
+    # test that _adjoint raises ValueError when ndim > 4
+    # (bypasses __init__ guard by patching _ndim directly)
+    A = ppo.FiniteForwardDifference((3,))
+    A._ndim = 5
+    y = xp.zeros(A.out_shape, device=dev)
+    with pytest.raises(ValueError):
+        A._adjoint(y)
+
 
 def test_gradient_projection(xp: ModuleType, dev: str):
     np.random.seed(0)
