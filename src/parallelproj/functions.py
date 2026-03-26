@@ -6,6 +6,96 @@ from .operators import LinearOperator
 from array_api_compat import get_namespace
 
 
+class FunctionWithConjProx(ABC):
+    """Abstract base class for functions with a closed-form proximal operator
+    of their convex conjugate.
+
+    This class is a standalone root — it does **not** require the function to
+    be differentiable.  Non-smooth functions (e.g. total variation, indicator
+    functions) that admit a closed-form :math:`\\text{prox}_{\\sigma f^*}`
+    should inherit directly from this class.
+
+    Differentiable functions that additionally have a closed-form dual prox
+    should use :class:`C1FunctionWithConjProx` or :class:`C2FunctionWithConjProx`
+    instead.
+
+    The public :meth:`prox_convex_conj` handles the :math:`\\beta` scaling
+    automatically.  Subclasses implement only the *unscaled* private method
+    :meth:`_prox_convex_conj`.
+
+    Parameters
+    ----------
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    """
+
+    def __init__(self, beta: float = 1.0):
+        self._beta = beta
+
+    @property
+    def beta(self) -> float:
+        """Multiplicative scale factor :math:`\\beta`."""
+        return self._beta
+
+    @beta.setter
+    def beta(self, value: float) -> None:
+        self._beta = value
+
+    @abstractmethod
+    def __call__(self, x: Array) -> float:
+        """Evaluate :math:`\\beta f(x)`."""
+        ...
+
+    @abstractmethod
+    def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        """Unscaled proximal operator of the convex conjugate.
+
+        Computes :math:`\\text{prox}_{\\sigma f^*}(y)` for the *unscaled*
+        function :math:`f` (i.e. with :math:`\\beta = 1`).
+
+        Parameters
+        ----------
+        y : Array
+            Input array.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\text{prox}_{\\sigma f^*}(y)`.
+        """
+        ...
+
+    def prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        """Proximal operator of the convex conjugate of :math:`\\beta f`.
+
+        Uses the identity
+
+        .. math::
+
+            \\text{prox}_{\\sigma (\\beta f)^*}(y)
+            = \\beta \\, \\text{prox}_{(\\sigma / \\beta)\\, f^*}(y / \\beta)
+
+        to reduce to the unscaled :meth:`_prox_convex_conj`.
+
+        Parameters
+        ----------
+        y : Array
+            Input array.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\text{prox}_{\\sigma (\\beta f)^*}(y)`.
+        """
+        if self._beta == 1.0:
+            return self._prox_convex_conj(y, sigma)
+        return self._beta * self._prox_convex_conj(y / self._beta, sigma / self._beta)
+
+
 class C1Function(ABC):
     """Abstract base class for continuously differentiable (C1) scalar functions
     with an optional scalar scale factor :math:`\\beta`.
@@ -169,7 +259,38 @@ class C2Function(C1Function):
         return h if self._beta == 1.0 else self._beta * h
 
 
-class NegPoissonLogL(C2Function):
+class C1FunctionWithConjProx(C1Function, FunctionWithConjProx):
+    """Abstract base class for C1 functions that also admit a closed-form
+    proximal operator of their convex conjugate.
+
+    Combines :class:`C1Function` (gradient, call) with
+    :class:`FunctionWithConjProx` (:meth:`prox_convex_conj`).
+    Subclasses must implement :meth:`_call`, :meth:`_gradient`, and
+    :meth:`_prox_convex_conj`.
+
+    MRO: ``C1FunctionWithConjProx → C1Function → FunctionWithConjProx → ABC``
+
+    The ``beta`` property and ``__call__`` are resolved from :class:`C1Function`.
+    The :meth:`prox_convex_conj` public method is resolved from
+    :class:`FunctionWithConjProx`.
+    """
+
+
+class C2FunctionWithConjProx(C2Function, C1FunctionWithConjProx):
+    """Abstract base class for C2 functions that also admit a closed-form
+    proximal operator of their convex conjugate.
+
+    Combines :class:`C2Function` (Hessian diagonal) with
+    :class:`C1FunctionWithConjProx` (gradient, call, dual prox).
+    Subclasses must implement :meth:`_call`, :meth:`_gradient`,
+    :meth:`_hessian_diag_vec_prod`, and :meth:`_prox_convex_conj`.
+
+    MRO: ``C2FunctionWithConjProx → C2Function → C1FunctionWithConjProx``
+    ``→ C1Function → FunctionWithConjProx → ABC``
+    """
+
+
+class NegPoissonLogL(C2FunctionWithConjProx):
     """Negative Poisson log-likelihood as a function of expected counts.
 
     Implements
@@ -208,8 +329,31 @@ class NegPoissonLogL(C2Function):
     def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
         return self._data / (pred**2) * v
 
+    def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        """Proximal operator of the convex conjugate of the negative Poisson log-likelihood.
 
-class NegPoissonLogLSafe(C2Function):
+        .. math::
+
+            \\left(\\operatorname{prox}_{\\sigma f^*}(y)\\right)_i
+            = \\frac{1}{2}\\left(y_i + 1 - \\sqrt{(y_i - 1)^2 + 4 \\sigma d_i}\\right)
+
+        Parameters
+        ----------
+        y : Array
+            Input array (dual variable), same shape as the data.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\operatorname{prox}_{\\sigma f^*}(y)`.
+        """
+        xp = get_namespace(y)
+        return 0.5 * (y + 1 - xp.sqrt((y - 1) ** 2 + 4 * sigma * self._data))
+
+
+class NegPoissonLogLSafe(C2FunctionWithConjProx):
     """Negative Poisson log-likelihood, safe for bins with zero expectation.
 
     Identical to :class:`NegPoissonLogL` but correctly handles *virtual bins*
@@ -301,8 +445,40 @@ class NegPoissonLogLSafe(C2Function):
             xp.where(self._mask, self._data / (safe_pred**2), xp.zeros_like(pred)) * v
         )
 
+    def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        """Proximal operator of the convex conjugate, safe for virtual bins.
 
-class HalfSquaredL2Deviation(C2Function):
+        Uses the same closed-form as :class:`NegPoissonLogL` with the data
+        zeroed out on virtual bins (``mask = False``).  For a virtual bin
+        the loss reduces to :math:`f_i(\\bar{y}_i) = \\bar{y}_i` (linear),
+        whose conjugate is the indicator of :math:`(-\\infty, 1]`, so the
+        prox is :math:`\\min(y_i, 1)`.  The general formula
+
+        .. math::
+
+            \\frac{1}{2}\\left(y_i + 1 - \\sqrt{(y_i-1)^2 + 4\\sigma d_i}\\right)
+
+        yields exactly :math:`\\min(y_i, 1)` when :math:`d_i = 0`, so no
+        separate branch is needed.
+
+        Parameters
+        ----------
+        y : Array
+            Input array (dual variable), same shape as the data.
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\operatorname{prox}_{\\sigma f^*}(y)`.
+        """
+        xp = get_namespace(y)
+        safe_data = xp.where(self._mask, self._data, xp.zeros_like(self._data))
+        return 0.5 * (y + 1 - xp.sqrt((y - 1) ** 2 + 4 * sigma * safe_data))
+
+
+class HalfSquaredL2Deviation(C2FunctionWithConjProx):
     """Half squared L2 deviation from reference data, with optional weights.
 
     Implements
@@ -382,6 +558,43 @@ class HalfSquaredL2Deviation(C2Function):
             return v
         else:
             return self._weights * v
+
+    def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
+        """Proximal operator of the convex conjugate of the half squared L2 deviation.
+
+        For :math:`f(x) = \\frac{1}{2} \\sum_i w_i (x_i - d_i)^2` the
+        convex conjugate is
+
+        .. math::
+
+            f^*(p) = \\langle p, d \\rangle + \\frac{1}{2} \\sum_i \\frac{p_i^2}{w_i}
+
+        and its proximal operator is
+
+        .. math::
+
+            \\left(\\operatorname{prox}_{\\sigma f^*}(y)\\right)_i
+            = \\frac{w_i (y_i - \\sigma d_i)}{w_i + \\sigma}
+
+        which simplifies to :math:`(y_i - \\sigma d_i)/(1 + \\sigma)` for unit
+        weights and to :math:`y_i / (1 + \\sigma)` when :math:`d = 0`.
+
+        Parameters
+        ----------
+        y : Array
+            Input array (dual variable).
+        sigma : float or Array
+            Step-size parameter :math:`\\sigma > 0`.
+
+        Returns
+        -------
+        Array
+            :math:`\\operatorname{prox}_{\\sigma f^*}(y)`.
+        """
+        numerator = y if self._data is None else y - sigma * self._data
+        if self._weights is None:
+            return numerator / (1 + sigma)
+        return self._weights * numerator / (self._weights + sigma)
 
 
 class SumC1Function(C1Function):
