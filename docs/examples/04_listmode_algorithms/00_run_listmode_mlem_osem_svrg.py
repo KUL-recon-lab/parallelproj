@@ -1,6 +1,6 @@
 """
 Listmode MLEM, OSEM, and SVRG
-==============================
+=============================
 
 This example demonstrates how to run MLEM, OSEM, and SVRG using listmode
 (event-by-event) data, and compares all algorithms with their sinogram
@@ -110,7 +110,7 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 # image-based resolution model, a non-TOF PET projector and an attenuation model
 #
 
-num_epochs_mlem = 2 * 96
+num_epochs_mlem = 96
 num_subsets = 24
 num_epochs = num_epochs_mlem // num_subsets
 
@@ -311,7 +311,7 @@ lm_neg_logL = NegPoissonLogLListmode(
 )
 
 # %%
-# Sinogram OSEM -- splitting the sinogram into subsets
+# Sinogram OSEM - splitting the sinogram into subsets
 # ---------------------------------------------------
 #
 # For OSEM the sinogram is split into ``num_subsets`` subsets of
@@ -373,7 +373,7 @@ sino_subset_neg_logL = [
 ]
 
 # %%
-# Listmode OSEM -- splitting the event list into subsets
+# Listmode OSEM - splitting the event list into subsets
 # -----------------------------------------------------
 #
 # For LM-OSEM the event list is partitioned into ``num_subsets`` subsets by

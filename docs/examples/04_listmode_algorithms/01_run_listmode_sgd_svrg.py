@@ -103,7 +103,7 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 num_subsets = 24
 
 # if run on a CPU limit the number of epochs
-num_epochs = (240 if dev == "cpu" else 480) // num_subsets
+num_epochs = (120 if dev == "cpu" else 240) // num_subsets
 
 # sens factor
 sens_factor = 0.3

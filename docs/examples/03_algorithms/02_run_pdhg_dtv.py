@@ -364,11 +364,13 @@ x_pdhg_np = to_numpy_array(x_pdhg)
 
 vmax = 1.2 * x_true_np.max()
 
+# %%
 fig_true, _, widgets_true = show_vol_cuts(
     x_true_np, voxel_size=voxel_size, vmin=0, vmax=vmax, fig_title="true image"
 )
 fig_true.show()
 
+# %%
 fig_pdhg, _, widgets_pdhg = show_vol_cuts(
     x_pdhg_np,
     voxel_size=voxel_size,
@@ -378,13 +380,13 @@ fig_pdhg, _, widgets_pdhg = show_vol_cuts(
 )
 fig_pdhg.show()
 
+# %%
 fig_struct, _, widgets_struct = show_vol_cuts(
     x_struct_np, voxel_size=voxel_size, fig_title="structural image"
 )
 fig_struct.show()
 
 # %%
-
 if track_cost:
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4), tight_layout=True)
     ax2.plot(cost_pdhg, ".-", label="PDHG")
