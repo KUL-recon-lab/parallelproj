@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+from typing import Any
+from types import ModuleType
+
 import numpy as np
-import parallelproj_core
-from parallelproj import Array, to_numpy_array, empty_cuda_cache
 import array_api_compat
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from mpl_toolkits.mplot3d import Axes3D
-from types import ModuleType
 from array_api_compat import device, get_namespace, size
 
+import parallelproj_core
+
+from ._backend import Array, to_numpy_array, empty_cuda_cache
 from .operators import LinearOperator
 from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
@@ -178,7 +181,10 @@ class ParallelViewProjector2D(LinearOperator):
         return self.xp.squeeze(x, axis=0)
 
     def show_views(
-        self, views_to_show: None | Array = None, image: None | Array = None, **kwargs
+        self,
+        views_to_show: None | Array = None,
+        image: None | Array = None,
+        **kwargs: Any,
     ) -> Figure:
         """visualize the geometry of certrain projection views
 
@@ -685,6 +691,8 @@ class RegularPolygonPETProjector(LinearOperator):
         else:
             xstart = self.xstart
             xend = self.xend
+            assert xstart is not None
+            assert xend is not None
 
         # cache LOR endpoints if requested
         if self._cache_lor_endpoints and needs_compute:
@@ -735,6 +743,8 @@ class RegularPolygonPETProjector(LinearOperator):
         else:
             xstart = self.xstart
             xend = self.xend
+            assert xstart is not None
+            assert xend is not None
 
         # cache LOR endpoints if requested
         if self._cache_lor_endpoints and needs_compute:
