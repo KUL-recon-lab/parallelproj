@@ -474,6 +474,11 @@ class ModularizedPETScannerGeometry:
         )
         self._num_lor_endpoints = int(self.xp.sum(self._num_lor_endpoints_per_module))
 
+        # declare attributes set by setup_all_lor_endpoints so they are visible in __init__
+        self._all_lor_endpoints_index_offset: Array = None  # type: ignore[assignment]
+        self._all_lor_endpoints: Array = None  # type: ignore[assignment]
+        self._all_lor_endpoints_module_number: Array = None  # type: ignore[assignment]
+
         self.setup_all_lor_endpoints()
 
     def setup_all_lor_endpoints(self) -> None:
@@ -615,7 +620,7 @@ class ModularizedPETScannerGeometry:
         """
         for i, module in enumerate(self.modules):
             if show_linear_index:
-                offset = to_numpy_array(self.all_lor_endpoints_index_offset[i])
+                offset = int(to_numpy_array(self.all_lor_endpoints_index_offset[i]))
                 prefix = ""
             else:
                 offset = 0
