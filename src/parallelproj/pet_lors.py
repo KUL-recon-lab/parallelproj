@@ -278,14 +278,16 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         # declare all attributes set by setup methods so they are visible in __init__
         self._num_planes: int = 0
+        # None only when span > 1; properties guard with AttributeError before returning
         self._start_plane_index: Array | None = None
         self._end_plane_index: Array | None = None
-        self._start_plane_z: Array | None = None
-        self._end_plane_z: Array | None = None
-        self._plane_multiplicity: Array | None = None
-        self._plane_segment: Array | None = None
-        self._start_in_ring_index: Array | None = None
-        self._end_in_ring_index: Array | None = None
+        # always set to a real Array by the setup methods
+        self._start_plane_z: Array = None  # type: ignore[assignment]
+        self._end_plane_z: Array = None  # type: ignore[assignment]
+        self._plane_multiplicity: Array = None  # type: ignore[assignment]
+        self._plane_segment: Array = None  # type: ignore[assignment]
+        self._start_in_ring_index: Array = None  # type: ignore[assignment]
+        self._end_in_ring_index: Array = None  # type: ignore[assignment]
 
         self._setup_plane_indices()
         self._setup_view_indices()
@@ -332,6 +334,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             raise AttributeError(
                 "start_plane_index is not defined for span > 1. Use start_plane_z instead."
             )
+        assert self._start_plane_index is not None
         return self._start_plane_index
 
     @property
@@ -341,6 +344,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             raise AttributeError(
                 "end_plane_index is not defined for span > 1. Use end_plane_z instead."
             )
+        assert self._end_plane_index is not None
         return self._end_plane_index
 
     @property
@@ -470,6 +474,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             )
             self._end_plane_index = self.xp.concat((self._end_plane_index, tmp2, tmp1))
 
+        assert self._start_plane_index is not None
         self._num_planes = self._start_plane_index.shape[0]
 
         self._start_plane_z = self.xp.astype(
