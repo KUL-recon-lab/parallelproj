@@ -5,10 +5,14 @@ from __future__ import annotations
 import abc
 from collections.abc import Sequence
 from types import ModuleType
+from typing import TYPE_CHECKING
 
-from parallelproj import Array, to_numpy_array
-import matplotlib.pyplot as plt
 import numpy as np
+
+from ._backend import Array, to_numpy_array
+
+if TYPE_CHECKING:
+    from mpl_toolkits.mplot3d import Axes3D
 
 
 class PETScannerModule(abc.ABC):
@@ -135,7 +139,7 @@ class PETScannerModule(abc.ABC):
 
     def show_lor_endpoints(
         self,
-        ax: plt.Axes,
+        ax: Axes3D,
         annotation_fontsize: float = 0,
         annotation_prefix: str = "",
         annotation_offset: int = 0,
@@ -146,7 +150,7 @@ class PETScannerModule(abc.ABC):
 
         Parameters
         ----------
-        ax : plt.Axes
+        ax : Axes3D
             3D matplotlib axes
         annotation_fontsize : float, optional
             fontsize of LOR endpoint number annotation, by default 0
@@ -169,7 +173,7 @@ class PETScannerModule(abc.ABC):
         ax.scatter(
             all_lor_endpoints[:, 0],
             all_lor_endpoints[:, 1],
-            all_lor_endpoints[:, 2],
+            all_lor_endpoints[:, 2],  # type: ignore[arg-type]
             **kwargs,
         )
 
@@ -232,12 +236,12 @@ class BlockPETScannerModule(PETScannerModule):
         # which is why we stick to numpy
         X0, X1, X2 = np.meshgrid(x0, x1, x2, indexing="ij")
 
-        self._lor_endpoints = np.stack(
+        lor_endpoints_np = np.stack(
             (X0.ravel(), X1.ravel(), X2.ravel()),
             axis=-1,
         )
 
-        self._lor_endpoints = xp.asarray(self._lor_endpoints, device=dev)
+        self._lor_endpoints: Array = xp.asarray(lor_endpoints_np, device=dev)
 
         if affine_transformation_matrix is not None:
             tmp = xp.ones(
@@ -605,13 +609,13 @@ class ModularizedPETScannerGeometry:
         )
 
     def show_lor_endpoints(
-        self, ax: plt.Axes, show_linear_index: bool = True, **kwargs
+        self, ax: Axes3D, show_linear_index: bool = True, **kwargs
     ) -> None:
         """show all LOR endpoints in a 3D plot
 
         Parameters
         ----------
-        ax : plt.Axes
+        ax : Axes3D
             a 3D matplotlib axes
         show_linear_index : bool, optional
             annotate the LOR endpoints with the linear LOR endpoint index

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import Any, Protocol
+from typing import Any, Iterator, Protocol
 
 import numpy as np
 import array_api_compat
@@ -44,6 +44,8 @@ class Array(Protocol):
     def __float__(self) -> float: ...
     def __complex__(self) -> complex: ...
     def __index__(self) -> int: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[Array]: ...
 
     # ------------------------------------------------------------------
     # Indexing
