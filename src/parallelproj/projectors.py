@@ -203,7 +203,7 @@ class ParallelViewProjector2D(LinearOperator):
             the matplotlib figure
         """
         if views_to_show is None:
-            views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)
+            views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)  # type: ignore[assignment]
 
         assert views_to_show is not None
 
@@ -725,8 +725,8 @@ class RegularPolygonPETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_tofbins,
-                self.tof_parameters.num_sigmas,
+                self._tof_parameters.num_tofbins,
+                self._tof_parameters.num_sigmas,
             )
 
         return x_fwd
@@ -780,8 +780,8 @@ class RegularPolygonPETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_tofbins,
-                self.tof_parameters.num_sigmas,
+                self._tof_parameters.num_tofbins,
+                self._tof_parameters.num_sigmas,
             )
 
         return y_back
@@ -1133,8 +1133,8 @@ class ListmodePETProjector(LinearOperator):
                     device=dev,
                 ),
                 self._tofbin,
-                self.tof_parameters.num_tofbins,
-                self.tof_parameters.num_sigmas,
+                self._tof_parameters.num_tofbins,
+                self._tof_parameters.num_sigmas,
             )
 
         return x_fwd
