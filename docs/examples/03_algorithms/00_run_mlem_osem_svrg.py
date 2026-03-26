@@ -10,11 +10,11 @@ for minimising the negative Poisson log-likelihood
 
 subject to :math:`x \\geq 0`:
 
-* **MLEM** — expectation–maximisation on the full data; one iteration = one
+* **MLEM** -- expectation-maximisation on the full data; one iteration = one
   full data pass; guaranteed to converge but slow per epoch.
-* **OSEM** — ordered-subsets EM; one epoch = :math:`m` subset updates ≈ one
+* **OSEM** -- ordered-subsets EM; one epoch = :math:`m` subset updates ~= one
   full data pass; fast empirical convergence but *no* convergence guarantee.
-* **SVRG** — stochastic variance-reduced gradient with subsets; one epoch =
+* **SVRG** -- stochastic variance-reduced gradient with subsets; one epoch =
   :math:`m` variance-reduced subset updates; provably convergent like MLEM
   while achieving the fast per-epoch progress of OSEM.
 
@@ -73,7 +73,7 @@ num_subsets = 24
 num_epochs_mlem = 480 if dev == "cpu" else 1200
 num_epochs = num_epochs_mlem // num_subsets
 
-# run MLEM only on GPU – it is too slow on CPU for the number of iterations used here
+# run MLEM only on GPU - it is too slow on CPU for the number of iterations used here
 run_mlem = dev != "cpu"
 
 # %%

@@ -8,14 +8,14 @@ equivalents via a convergence plot of the negative Poisson log-likelihood.
 
 **Objective functions** from :mod:`parallelproj.functions`:
 
-- :class:`.NegPoissonLogL` — operates in **prediction space** :math:`\\bar{y}`,
+- :class:`.NegPoissonLogL` -- operates in **prediction space** :math:`\\bar{y}`,
   composed with an affine forward model via :class:`.C2AffineObjective`:
 
   .. math::
 
       f_{\\text{sino}}(x) = \\sum_i \\bigl[(Ax+s)_i - y_i \\log(Ax+s)_i\\bigr]
 
-- :class:`.NegPoissonLogLListmode` — operates directly in **image space**
+- :class:`.NegPoissonLogLListmode` -- operates directly in **image space**
   :math:`x`, with the listmode forward model built in internally:
 
   .. math::
@@ -37,13 +37,13 @@ w.r.t. the image :math:`x`.
   sensitivity image :math:`(A^k)^T\\mathbf{1}`.
 
 - *Listmode OSEM*: the event list is split into :math:`m` subsets by
-  taking every :math:`m`-th event — subset :math:`k` uses events at indices
+  taking every :math:`m`-th event -- subset :math:`k` uses events at indices
   :math:`k, k{+}m, k{+}2m, \\ldots`.  The sensitivity image for each subset
   is approximated as :math:`A^T\\mathbf{1}/m` and each subset gets a separate
   :class:`.NegPoissonLogLListmode` instance.
 
-**Key learning goal:** The EM update — written as a preconditioned gradient
-descent step — is *agnostic of the data representation and the subset
+**Key learning goal:** The EM update -- written as a preconditioned gradient
+descent step -- is *agnostic of the data representation and the subset
 partitioning*.  The same :func:`em_update` function is used for all four
 variants (sinogram MLEM, LM-MLEM, sinogram OSEM, LM-OSEM) because every
 objective implements the :class:`.C1Function` interface with the correct
@@ -114,7 +114,7 @@ num_epochs_mlem = 2 * 96
 num_subsets = 24
 num_epochs = num_epochs_mlem // num_subsets
 
-# run full MLEM only on GPU — too slow on CPU for the number of iterations used here
+# run full MLEM only on GPU -- too slow on CPU for the number of iterations used here
 run_mlem = dev != "cpu"
 
 sens_factor = 1.0
@@ -277,8 +277,8 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 # (``__call__`` for the function value, ``gradient`` for the gradient w.r.t.
 # the image :math:`x`).
 #
-# The sinogram objective wraps :class:`.NegPoissonLogL` — which operates on
-# predicted counts :math:`\bar{y}` — with :class:`.C2AffineObjective` to
+# The sinogram objective wraps :class:`.NegPoissonLogL` -- which operates on
+# predicted counts :math:`\bar{y}` -- with :class:`.C2AffineObjective` to
 # pull the gradient back through the forward model :math:`\bar{y}(x) = Ax + s`:
 #
 # .. math::
@@ -311,7 +311,7 @@ lm_neg_logL = NegPoissonLogLListmode(
 )
 
 # %%
-# Sinogram OSEM — splitting the sinogram into subsets
+# Sinogram OSEM -- splitting the sinogram into subsets
 # ---------------------------------------------------
 #
 # For OSEM the sinogram is split into ``num_subsets`` subsets of
@@ -373,7 +373,7 @@ sino_subset_neg_logL = [
 ]
 
 # %%
-# Listmode OSEM — splitting the event list into subsets
+# Listmode OSEM -- splitting the event list into subsets
 # -----------------------------------------------------
 #
 # For LM-OSEM the event list is partitioned into ``num_subsets`` subsets by
@@ -439,7 +439,7 @@ for k in range(num_subsets):
 #
 # This formulation is **data-representation agnostic**: the same
 # :func:`em_update` below works for any objective :math:`f` that provides
-# a gradient :math:`\nabla_x f` via the :class:`.C1Function` interface —
+# a gradient :math:`\nabla_x f` via the :class:`.C1Function` interface --
 # whether that objective is :class:`.C2AffineObjective` wrapping
 # :class:`.NegPoissonLogL` (sinogram data) or
 # :class:`.NegPoissonLogLListmode` (listmode data).
@@ -461,7 +461,7 @@ def em_update(
 
     This is equivalent to the standard MLEM multiplicative update and works
     for *any* objective ``negpoissonlogl`` that implements the
-    :class:`.C1Function` interface — in particular for both
+    :class:`.C1Function` interface -- in particular for both
     :class:`.C2AffineObjective` (sinogram) and
     :class:`.NegPoissonLogLListmode` (listmode).
 
@@ -553,7 +553,7 @@ if run_mlem:
             df_mlem_sino[i + 1] = float(sinogram_neg_logL(x_mlem_sino))
     print()
 
-    # run MLEM with listmode data — identical loop, only the objective changes
+    # run MLEM with listmode data -- identical loop, only the objective changes
     df_mlem_lm: dict[int, float] = {}
     x_mlem_lm = xp.asarray(x_init, copy=True)
     for i in range(num_epochs_mlem):
@@ -568,8 +568,8 @@ if run_mlem:
 # -------------------------------------------
 #
 # One OSEM epoch cycles through all :math:`m` subsets in sequence.
-# Each subset step is the same EM update as in MLEM — the same
-# :func:`em_update` function is used — but with the subset objective and
+# Each subset step is the same EM update as in MLEM -- the same
+# :func:`em_update` function is used -- but with the subset objective and
 # the corresponding subset sensitivity image.
 #
 # * *Sinogram OSEM* passes a :class:`.C2AffineObjective` per subset together
@@ -596,7 +596,7 @@ for i in range(num_epochs):
     df_osem_sino.append(float(sinogram_neg_logL(x_osem_sino)))
 print()
 
-# listmode OSEM — identical loop structure, objectives and sensitivity differ
+# listmode OSEM -- identical loop structure, objectives and sensitivity differ
 df_osem_lm: list[float] = []
 x_osem_lm = xp.asarray(x_init, copy=True)
 for i in range(num_epochs):
@@ -721,7 +721,7 @@ for epoch in range(num_epochs):
     df_svrg_sino.append(float(sinogram_neg_logL(x_svrg_sino)))
 print()
 
-# listmode SVRG — identical loop, subset objectives and sensitivity differ
+# listmode SVRG -- identical loop, subset objectives and sensitivity differ
 df_svrg_lm: list[float] = []
 x_svrg_lm = xp.asarray(x_init, copy=True)
 svrg_precond_lm = x_svrg_lm / adjoint_ones
@@ -760,7 +760,7 @@ print()
 # Convergence plot
 # ----------------
 #
-# We compare all six variants (sino/LM × MLEM/OSEM/SVRG) by plotting the
+# We compare all six variants (sino/LM x MLEM/OSEM/SVRG) by plotting the
 # **sinogram** negative Poisson log-likelihood vs epoch and vs full data passes.
 #
 # Data-pass counts per epoch:

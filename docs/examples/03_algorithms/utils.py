@@ -297,11 +297,11 @@ def neighbor_difference_and_sum(x, xp):
                 center_sl.append(slice(0, n))
                 neigh_sl.append(slice(0, n))
             elif o > 0:
-                # neighbor is shifted +o → valid center is [0 : n-o]
+                # neighbor is shifted +o -> valid center is [0 : n-o]
                 center_sl.append(slice(0, n - o))
                 neigh_sl.append(slice(o, n))
             else:  # o < 0
-                # neighbor is shifted -|o| → valid center is [|o| : n]
+                # neighbor is shifted -|o| -> valid center is [|o| : n]
                 o_abs = -o
                 center_sl.append(slice(o_abs, n))
                 neigh_sl.append(slice(0, n - o_abs))

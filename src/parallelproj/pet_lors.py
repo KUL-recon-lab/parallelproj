@@ -432,7 +432,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         Returns
         -------
         int
-            Segment number (0 for segment 0, ±k for outer segments).
+            Segment number (0 for segment 0, +/-k for outer segments).
         """
         S = self._span
         half_span = (S - 1) // 2
@@ -510,9 +510,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         Segment assignment for ring difference rd (span S, half_span = (S-1)//2):
           seg = 0                              if |rd| <= half_span
-          seg = ±ceil((|rd|-half_span) / S)   otherwise  (sign follows rd)
+          seg = +/-ceil((|rd|-half_span) / S)   otherwise  (sign follows rd)
 
-        Planes are ordered: segment 0, then +1, -1, +2, -2, … each sorted by
+        Planes are ordered: segment 0, then +1, -1, +2, -2, ... each sorted by
         increasing axial midpoint (start_ring + end_ring).
         """
         R = self._scanner.num_rings
@@ -537,7 +537,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                     plane_groups[key] = []
                 plane_groups[key].append((s, e))
 
-        # Order: seg 0, then +1, -1, +2, -2, …; within each segment by axial midpoint
+        # Order: seg 0, then +1, -1, +2, -2, ...; within each segment by axial midpoint
         sorted_keys = sorted(
             plane_groups.keys(), key=lambda k: (abs(k[0]), -k[0], k[1])
         )
@@ -797,7 +797,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         ax.set_xlabel("start ring")
         ax.set_ylabel("end ring")
         ax.set_title(
-            f"Michelogram\n(span={self._span}, max Δring={D})", fontsize="small"
+            f"Michelogram\n(span={self._span}, max Dring={D})", fontsize="small"
         )
         ax.set_aspect("equal")
         ax.set_xlim(-0.5, R - 0.5)
@@ -839,16 +839,16 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         Subplots are arranged in a 2-row grid (when negative segments exist):
 
-        * **columns** – indexed by ``abs(segment)``: 0, 1, 2, …
-        * **row 0** – non-negative segments (0, +1, +2, …)
-        * **row 1, col 0** – Michelogram
-        * **row 1, col ≥ 1** – negative segments (−1, −2, …)
+        * **columns** - indexed by ``abs(segment)``: 0, 1, 2, ...
+        * **row 0** - non-negative segments (0, +1, +2, ...)
+        * **row 1, col 0** - Michelogram
+        * **row 1, col >= 1** - negative segments (-1, -2, ...)
 
         Each LOR subplot shows:
 
-        * **solid black lines** – every individual ring-pair LOR in the segment
+        * **solid black lines** - every individual ring-pair LOR in the segment
           (the "uncompressed" planes);
-        * **dashed coloured lines** – the compressed (axially-averaged) LOR geometry
+        * **dashed coloured lines** - the compressed (axially-averaged) LOR geometry
           (one line per spanned plane).
 
         Parameters
@@ -969,7 +969,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                 if seg_val > 0:
                     seg_label = f"+{abs_seg}"
                 elif seg_val < 0:
-                    seg_label = f"−{abs_seg}"
+                    seg_label = f"-{abs_seg}"
                 else:
                     seg_label = "0"
                 n_compressed = int((seg_arr_np == seg_val).sum())

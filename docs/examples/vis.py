@@ -128,9 +128,9 @@ def show_vol_cuts(
 
     # --- images ---
     # The 3 panels always show cuts through the last 3 (spatial) axes:
-    #   panel 0: cut along lx → shows (ly, lz) plane, aspect = dz / dy
-    #   panel 1: cut along ly → shows (lx, lz) plane, aspect = dz / dx
-    #   panel 2: cut along lz → shows (lx, ly) plane, aspect = dy / dx
+    #   panel 0: cut along lx -> shows (ly, lz) plane, aspect = dz / dy
+    #   panel 1: cut along ly -> shows (lx, lz) plane, aspect = dz / dx
+    #   panel 2: cut along lz -> shows (lx, ly) plane, aspect = dy / dx
     aspects       = [dz / dy, dz / dx, dy / dx]
     panel_xlabels = [ly,      lx,      lx     ]
     panel_ylabels = [lz,      lz,      ly     ]

@@ -166,7 +166,7 @@ x_fwd_back = proj_with_att_and_res_model.adjoint(x_fwd)
 # visualize the forward and the back projection
 # ---------------------------------------------
 
-# TOF sinogram shape is (r, v, p, t) — transpose to (t, r, v, p) so the
+# TOF sinogram shape is (r, v, p, t) -- transpose to (t, r, v, p) so the
 # TOF-bin axis becomes the leading slider in the 4-D viewer
 x_fwd_np = to_numpy_array(x_fwd).transpose(3, 0, 1, 2)
 

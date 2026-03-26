@@ -18,9 +18,9 @@ where the quadratic penalty is
 and :math:`G` is the finite forward-difference operator.  The same objective
 is expressed in two equivalent ways:
 
-* **Sinogram** — via :class:`.C2AffineObjective` wrapping :class:`.NegPoissonLogL`
+* **Sinogram** -- via :class:`.C2AffineObjective` wrapping :class:`.NegPoissonLogL`
   (operates on predicted counts :math:`\\bar{y}`).
-* **Listmode** — via :class:`.NegPoissonLogLListmode` (operates directly on the
+* **Listmode** -- via :class:`.NegPoissonLogLListmode` (operates directly on the
   image :math:`x` with the forward model built in).
 
 The objective is decomposed into :math:`m` subset functions
@@ -33,10 +33,10 @@ The objective is decomposed into :math:`m` subset functions
 so that :math:`F(x) = \\sum_{k=1}^m f_k(x)` exactly.  Both algorithms exploit
 this splitting:
 
-* **SGD** — stochastic gradient descent using ordered subsets; one epoch =
-  :math:`m` subset updates ≈ one full data pass; fast empirical convergence
+* **SGD** -- stochastic gradient descent using ordered subsets; one epoch =
+  :math:`m` subset updates ~= one full data pass; fast empirical convergence
   but *no* convergence guarantee.
-* **SVRG** — stochastic variance-reduced gradient with subsets; one epoch =
+* **SVRG** -- stochastic variance-reduced gradient with subsets; one epoch =
   :math:`m` variance-reduced subset updates; provably convergent while
   achieving the fast per-epoch progress of SGD.
 
@@ -49,7 +49,7 @@ this splitting:
 
 **Key learning goal**: Once the subset objective functions are defined (either
 as sinogram :class:`.C2AffineObjective` or listmode :class:`.NegPoissonLogLListmode`
-objects), the SGD and SVRG loops are *identical* — they only depend on the
+objects), the SGD and SVRG loops are *identical* -- they only depend on the
 :class:`.C1Function` interface (``gradient`` method).  Regularisation is added
 transparently via the :meth:`~.C1Function.__add__` operator.
 """
@@ -294,7 +294,7 @@ lm_data_fidelity = NegPoissonLogLListmode(
     lm_pet_lin_op, adjoint_ones, contamination_list, float(xp.sum(contamination))
 )
 
-# total objectives (data fidelity + regularisation) — used only for evaluation
+# total objectives (data fidelity + regularisation) -- used only for evaluation
 total_objective_sino = sinogram_data_fidelity + reg
 total_objective_lm = lm_data_fidelity + reg
 
@@ -345,7 +345,7 @@ sino_subset_objectives: list[C1Function] = [
     for k, sl in enumerate(subset_slices)
 ]
 
-# sensitivity images (A^k)^T 1 — one per subset, used as SGD/SVRG preconditioner
+# sensitivity images (A^k)^T 1 -- one per subset, used as SGD/SVRG preconditioner
 subset_adjoint_ones = xp.zeros(
     (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
 )
@@ -569,7 +569,7 @@ print()
 #
 # The same :func:`svrg_calc_snapshot_gradients` and :func:`svrg_update`
 # functions are used for both sinogram and listmode because both expose the
-# :class:`.C1Function` interface — the regularisation term is already folded
+# :class:`.C1Function` interface -- the regularisation term is already folded
 # into every subset objective via :meth:`~.C1Function.__add__`.
 
 # --- sinogram SVRG ---

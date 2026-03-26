@@ -11,7 +11,7 @@ class FunctionWithConjProx(ABC):
     """Abstract base class for functions with a closed-form proximal operator
     of their convex conjugate.
 
-    This class is a standalone root — it does **not** require the function to
+    This class is a standalone root -- it does **not** require the function to
     be differentiable.  Non-smooth functions (e.g. total variation, indicator
     functions) that admit a closed-form :math:`\\text{prox}_{\\sigma f^*}`
     should inherit directly from this class.
@@ -141,7 +141,7 @@ class FunctionWithConjProx(ABC):
 class FunctionWithProx(ABC):
     """Abstract base class for functions with a closed-form proximal operator.
 
-    This class is a standalone root — it does **not** require the function to
+    This class is a standalone root -- it does **not** require the function to
     be differentiable.  Functions (e.g. indicator functions, L1 norm) that
     admit a closed-form :math:`\\text{prox}_{\\sigma f}` should inherit
     directly from this class.
@@ -298,7 +298,7 @@ class C1Function(ABC):
         self._beta = value
 
     # ------------------------------------------------------------------
-    # Abstract interface — subclasses implement the *unscaled* versions
+    # Abstract interface -- subclasses implement the *unscaled* versions
     # ------------------------------------------------------------------
 
     @abstractmethod
@@ -317,7 +317,7 @@ class C1Function(ABC):
         return self._call(x), self._gradient(x)
 
     # ------------------------------------------------------------------
-    # Public interface — applies self._beta
+    # Public interface -- applies self._beta
     # ------------------------------------------------------------------
 
     def __call__(self, x: Array) -> float:
@@ -434,7 +434,7 @@ class C1FunctionWithConjProx(C1Function, FunctionWithConjProx):
     Subclasses must implement :meth:`_call`, :meth:`_gradient`, and
     :meth:`_prox_convex_conj`.
 
-    MRO: ``C1FunctionWithConjProx → C1Function → FunctionWithConjProx → ABC``
+    MRO: ``C1FunctionWithConjProx -> C1Function -> FunctionWithConjProx -> ABC``
 
     The ``beta`` property and ``__call__`` are resolved from :class:`C1Function`.
     The :meth:`prox_convex_conj` public method is resolved from
@@ -451,8 +451,8 @@ class C2FunctionWithConjProx(C2Function, C1FunctionWithConjProx):
     Subclasses must implement :meth:`_call`, :meth:`_gradient`,
     :meth:`_hessian_diag_vec_prod`, and :meth:`_prox_convex_conj`.
 
-    MRO: ``C2FunctionWithConjProx → C2Function → C1FunctionWithConjProx``
-    ``→ C1Function → FunctionWithConjProx → ABC``
+    MRO: ``C2FunctionWithConjProx -> C2Function -> C1FunctionWithConjProx``
+    ``-> C1Function -> FunctionWithConjProx -> ABC``
     """
 
 

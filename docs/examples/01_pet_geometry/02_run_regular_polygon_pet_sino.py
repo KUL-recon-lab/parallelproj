@@ -229,7 +229,7 @@ fig_seg1.tight_layout()
 fig_seg1.show()
 
 # %%
-# 3D visualisation of two planes – span-5 (no max ring diff)
+# 3D visualisation of two planes - span-5 (no max ring diff)
 
 _p0_s7 = _central_plane_seg0(lor_desc_s7)
 _ph_s7 = _last_plane_highest_seg(lor_desc_s7)
@@ -298,7 +298,7 @@ fig_seg2.tight_layout()
 fig_seg2.show()
 
 # %%
-# 3D visualisation of two planes – span-5, max ring diff = 7
+# 3D visualisation of two planes - span-5, max ring diff = 7
 
 _p0_s7_mrd9 = _central_plane_seg0(lor_desc_s7_mrd9)
 _ph_s7_mrd9 = _last_plane_highest_seg(lor_desc_s7_mrd9)

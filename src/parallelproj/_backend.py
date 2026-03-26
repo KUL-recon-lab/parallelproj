@@ -11,7 +11,7 @@ class Array(Protocol):
     """Protocol for Python Array API-compliant arrays.
 
     Any array satisfying this protocol (numpy ndarray, CuPy ndarray,
-    PyTorch Tensor, …) can be used wherever :class:`Array` is expected.
+    PyTorch Tensor, ...) can be used wherever :class:`Array` is expected.
     The declared operations correspond to the Python Array API standard
     (https://data-apis.org/array-api/latest/API_specification/array_object.html).
     """

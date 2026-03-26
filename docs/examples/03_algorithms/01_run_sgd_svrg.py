@@ -26,10 +26,10 @@ The objective is decomposed into :math:`m` subset functions
 so that :math:`F(x) = \\sum_{k=1}^m f_k(x)` exactly.  Both algorithms below
 exploit this splitting:
 
-* **SGD** — stochastic gradient descent using ordered subsets;
-  one epoch = :math:`m` subset updates ≈ one full data pass; fast empirical
+* **SGD** -- stochastic gradient descent using ordered subsets;
+  one epoch = :math:`m` subset updates ~= one full data pass; fast empirical
   convergence but *no* convergence guarantee.
-* **SVRG** — stochastic variance-reduced gradient with subsets; one epoch =
+* **SVRG** -- stochastic variance-reduced gradient with subsets; one epoch =
   :math:`m` variance-reduced subset updates; provably convergent while
   achieving the fast per-epoch progress of SGD.
 

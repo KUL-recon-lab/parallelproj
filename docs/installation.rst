@@ -4,8 +4,8 @@ Installation
 ``parallelproj`` is a **pure Python** package for PET image reconstruction.
 It relies on two lower-level dependencies:
 
-- `libparallelproj <https://libparallelproj.readthedocs.io>`_ — a compiled C++/CUDA library providing the core projector implementations
-- `parallelproj-core <https://libparallelproj.readthedocs.io>`_ — a minimal Python interface to ``libparallelproj``
+- `libparallelproj <https://libparallelproj.readthedocs.io>`_ -- a compiled C++/CUDA library providing the core projector implementations
+- `parallelproj-core <https://libparallelproj.readthedocs.io>`_ -- a minimal Python interface to ``libparallelproj``
 
 Both ``libparallelproj`` and ``parallelproj-core`` are available on **conda-forge** and are documented at `libparallelproj.readthedocs.io <https://libparallelproj.readthedocs.io>`_.
 

@@ -249,7 +249,7 @@ class AdjointLinearOperator(LinearOperator):
 
     @scale.setter
     def scale(self, value: float | complex):
-        # setting A.H.scale = α sets A.scale = conj(α)
+        # setting A.H.scale = a sets A.scale = conj(a)
         self._operator.scale = value.conjugate()
 
     def _apply(self, x: Array) -> Array:

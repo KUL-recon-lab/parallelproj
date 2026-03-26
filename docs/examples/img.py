@@ -34,7 +34,7 @@ def elliptic_cylinder_phantom(
         Physical voxel size along each axis.
         Default: ``(2.0, 2.0, 2.0)``.
     xp:
-        Array API–compatible namespace (e.g. ``array_api_compat.torch`` or
+        Array API-compatible namespace (e.g. ``array_api_compat.torch`` or
         ``array_api_compat.numpy``).  Defaults to ``array_api_compat.numpy``.
     dev:
         Device passed to array-creation functions (e.g. ``"cpu"`` or
@@ -75,7 +75,7 @@ def elliptic_cylinder_phantom(
 
     inside_cyl = ((X0 / a0) ** 2 + (X1 / a1) ** 2 <= 1.0) & (xp.abs(X2) <= hz)
 
-    # Boolean → float32: 1.0 inside the cylinder, 0.0 outside
+    # Boolean -> float32: 1.0 inside the cylinder, 0.0 outside
     img = xp.astype(inside_cyl, xp.float32)
 
     # ------------------------------------------------------------------
@@ -86,9 +86,9 @@ def elliptic_cylinder_phantom(
     r_ref = min(a0, a1)
 
     # Each row: (c0/a0, c1/a1, c2/hz, radius/r_ref, fill_value)
-    #   fill_value > 1  →  hot insert
-    #   fill_value < 1  →  cold insert
-    #   fill_value = 0  →  signal-free (dark) cold insert
+    #   fill_value > 1  ->  hot insert
+    #   fill_value < 1  ->  cold insert
+    #   fill_value = 0  ->  signal-free (dark) cold insert
     inserts: list[tuple[float, float, float, float, float]] = [
         # --- hot inserts ---
         (0.50, 0.00, 0.00, 0.08, 2.0),  # small,  4x contrast
