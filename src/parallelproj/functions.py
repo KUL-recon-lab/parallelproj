@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from ._backend import Array
-from .operators import LinearOperator
 
 from array_api_compat import get_namespace
+
+from ._backend import Array
+from .operators import LinearOperator
 
 
 class FunctionWithConjProx(ABC):
@@ -47,7 +48,6 @@ class FunctionWithConjProx(ABC):
     @abstractmethod
     def _call(self, x: Array) -> float:
         """Unscaled function value f(x) (implemented by subclasses)."""
-        ...
 
     def __call__(self, x: Array) -> float:
         """Evaluate :math:`\\beta f(x)`.
@@ -84,7 +84,6 @@ class FunctionWithConjProx(ABC):
         Array
             :math:`\\text{prox}_{\\sigma f^*}(y)`.
         """
-        ...
 
     def prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of :math:`\\beta f`.
@@ -176,7 +175,6 @@ class FunctionWithProx(ABC):
     @abstractmethod
     def _call(self, x: Array) -> float:
         """Unscaled function value f(x) (implemented by subclasses)."""
-        ...
 
     def __call__(self, x: Array) -> float:
         """Evaluate :math:`\\beta f(x)`.
@@ -213,7 +211,6 @@ class FunctionWithProx(ABC):
         Array
             :math:`\\text{prox}_{\\sigma f}(x)`.
         """
-        ...
 
     def prox(self, x: Array, sigma: float | Array) -> Array:
         """Proximal operator of :math:`\\beta f`.
@@ -307,12 +304,10 @@ class C1Function(ABC):
     @abstractmethod
     def _call(self, x: Array) -> float:
         """Unscaled function value at x (implemented by subclasses)."""
-        ...
 
     @abstractmethod
     def _gradient(self, x: Array) -> Array:
         """Unscaled gradient at x (implemented by subclasses)."""
-        ...
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         """Unscaled function value and gradient at x.
@@ -407,7 +402,6 @@ class C2Function(C1Function):
     @abstractmethod
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         """Unscaled diagonal Hessian-vector product (implemented by subclasses)."""
-        ...
 
     def hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         """Scaled diagonal Hessian-vector product:
@@ -491,15 +485,15 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         super().__init__()
         self._data = data
 
-    def _call(self, pred: Array) -> float:
-        xp = get_namespace(pred)
-        return float(xp.sum(pred - self._data * xp.log(pred)))
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        return float(xp.sum(x - self._data * xp.log(x)))
 
-    def _gradient(self, pred: Array) -> Array:
-        return 1 - self._data / pred
+    def _gradient(self, x: Array) -> Array:
+        return 1 - self._data / x
 
-    def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
-        return self._data / (pred**2) * v
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        return self._data / (x**2) * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of the negative Poisson log-likelihood.
@@ -593,28 +587,28 @@ class NegPoissonLogLSafe(C2FunctionWithConjProx):
         self._data = data
         self._mask = mask
 
-    def _call(self, pred: Array) -> float:
-        xp = get_namespace(pred)
-        safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        safe_x = xp.where(self._mask, x, xp.ones_like(x))
         return float(
             xp.sum(
-                pred
+                x
                 - xp.where(
-                    self._mask, self._data * xp.log(safe_pred), xp.zeros_like(pred)
+                    self._mask, self._data * xp.log(safe_x), xp.zeros_like(x)
                 )
             )
         )
 
-    def _gradient(self, pred: Array) -> Array:
-        xp = get_namespace(pred)
-        safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
-        return 1 - xp.where(self._mask, self._data / safe_pred, xp.zeros_like(pred))
+    def _gradient(self, x: Array) -> Array:
+        xp = get_namespace(x)
+        safe_x = xp.where(self._mask, x, xp.ones_like(x))
+        return 1 - xp.where(self._mask, self._data / safe_x, xp.zeros_like(x))
 
-    def _hessian_diag_vec_prod(self, pred: Array, v: Array) -> Array:
-        xp = get_namespace(pred)
-        safe_pred = xp.where(self._mask, pred, xp.ones_like(pred))
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        xp = get_namespace(x)
+        safe_x = xp.where(self._mask, x, xp.ones_like(x))
         return (
-            xp.where(self._mask, self._data / (safe_pred**2), xp.zeros_like(pred)) * v
+            xp.where(self._mask, self._data / (safe_x**2), xp.zeros_like(x)) * v
         )
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
@@ -705,31 +699,27 @@ class HalfSquaredL2Deviation(C2FunctionWithConjProx):
         diff = x if self._data is None else x - self._data
         if self._weights is None:
             return float(0.5 * xp.sum(diff**2))
-        else:
-            return float(0.5 * xp.sum(self._weights * diff**2))
+        return float(0.5 * xp.sum(self._weights * diff**2))
 
     def _gradient(self, x: Array) -> Array:
         xp = get_namespace(x)
         diff = xp.asarray(x, copy=True) if self._data is None else x - self._data
         if self._weights is None:
             return diff
-        else:
-            return self._weights * diff
+        return self._weights * diff
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         xp = get_namespace(x)
         diff = xp.asarray(x, copy=True) if self._data is None else x - self._data
         if self._weights is None:
             return float(0.5 * xp.sum(diff**2)), diff
-        else:
-            wdiff = self._weights * diff
-            return float(0.5 * xp.sum(self._weights * diff**2)), wdiff
+        wdiff = self._weights * diff
+        return float(0.5 * xp.sum(self._weights * diff**2)), wdiff
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         if self._weights is None:
             return v
-        else:
-            return self._weights * v
+        return self._weights * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of the half squared L2 deviation.
@@ -836,7 +826,7 @@ class SumC2Function(C2Function, SumC1Function):
 
     def __init__(self, functions: Sequence[C2Function]):
         self._functions: Sequence[C2Function]
-        SumC1Function.__init__(self, functions)
+        super().__init__(functions)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         result = self._functions[0].hessian_diag_vec_prod(x, v)
@@ -1050,7 +1040,7 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> loss.beta = 0.5
     >>> aff_obj = C2AffineObjective(loss, op, s)
     >>>
-    >>> fx = aff_obj(x)                                     # scalar function value, scaled by beta=0.5
+    >>> fx = aff_obj(x)                           # scalar value, scaled by beta=0.5
     >>> grad = aff_obj.gradient(x)                          # shape (4,), scaled by beta=0.5
     >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
 
@@ -1077,7 +1067,8 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     .. math::
 
         h(x) = \\underbrace{f_{\\text{PL}}(Ax + s)}_{\\text{data fidelity}}
-               + \\underbrace{\\beta_{\\text{reg}} \\cdot \\tfrac{1}{2}\\|Dx\\|_2^2}_{\\text{roughness penalty}}
+               + \\underbrace{\\beta_{\\text{reg}} \\cdot
+               \\tfrac{1}{2}\\|Dx\\|_2^2}_{\\text{roughness penalty}}
 
     where :math:`D` is a finite forward difference operator.
 
@@ -1096,7 +1087,7 @@ class C2AffineObjective(C2Function, C1AffineObjective):
 
     def __init__(self, loss: C2Function, op: LinearOperator, s: Array | None = None):
         self._loss: C2Function
-        C1AffineObjective.__init__(self, loss, op, s)
+        super().__init__(loss, op, s)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         pred = self._op(x)
@@ -1187,9 +1178,9 @@ class MixedL21Norm(FunctionWithConjProx):
         Defaults to ``1.0``.
     """
 
-    def _call(self, g: Array) -> float:
-        xp = get_namespace(g)
-        return float(xp.sum(xp.linalg.vector_norm(g, axis=0)))
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        return float(xp.sum(xp.linalg.vector_norm(x, axis=0)))
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         xp = get_namespace(y)
