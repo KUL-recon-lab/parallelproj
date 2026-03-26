@@ -2,28 +2,26 @@
 PDHG to optimize the Poisson logL and directional TV (structural prior)
 =======================================================================
 
-This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm,
-to minimize the negative  Poisson log-likelihood function combined with a
-directional total variation regularizer (a structural prior):
+This example demonstrates the primal-dual hybrid gradient (PDHG) algorithm
+applied to the problem
 
 .. math::
-    f(x) = \\sum_{i=1}^m \\bar{d}_i (x) - d_i \\log(\\bar{d}_i (x)) + \\beta \\|P_{\\xi} \\nabla x \\|_{1,2}
+    \\min_{x \\geq 0} \\; f(Ax + s) + \\beta \\, g(Gx)
 
-subject to
+where
 
-.. math::
-    x \\geq 0
+- :math:`f = \\text{NegPoissonLogL}` -- the negative Poisson log-likelihood,
+- :math:`g = \\text{MixedL21Norm}` -- the isotropic mixed L2-L1 norm (TV semi-norm),
+- :math:`G = P_{\\xi} \\nabla` -- the projected finite-difference gradient operator
+  implementing a directional total variation (DTV) structural prior,
+- :math:`A` -- the PET forward projector,
+- :math:`s` -- the contamination sinogram.
 
-using the linear forward model
-
-.. math::
-    \\bar{d}(x) = A x + s
-
-see :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details.
+See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior.
 
 .. warning::
     Running this example using GPU arrays (e.g. using cupy as array backend)
-    is highly recommended due to "longer" execution times with CPU arrays
+    is highly recommended due to longer execution times with CPU arrays.
 """
 
 # %%
@@ -34,6 +32,7 @@ from img import elliptic_cylinder_phantom
 import numpy as np
 
 import parallelproj.operators
+import parallelproj.functions
 import parallelproj.tof
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -66,19 +65,18 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 
 # image scale (can be used to simulated more or less counts)
 img_scale = 0.1
-# number of MLEM iterations to init. PDHG and LM-SPDHG
+# number of MLEM iterations used to initialize PDHG
 num_iter_mlem = 10
 # number of PDHG iterations
-num_iter_pdhg = 1000
-# prior weight
+num_iter_pdhg = 200 if dev == "cpu" else 1000
+# regularization weight
 beta = 6.0
 # step size ratio for PDHG
 gamma = 1.0 / img_scale
 # rho value for PDHG
 rho = 0.9999
-# contaminaton in every sinogram bin relative to mean of trues sinogram
+# contamination in every sinogram bin relative to mean of trues sinogram
 contam = 1.0
-
 
 track_cost = True
 
@@ -86,17 +84,16 @@ track_cost = True
 # Simulation of PET data in sinogram space
 # ----------------------------------------
 #
-# In this example, we use simulated listmode data for which we first
+# In this example, we use simulated sinogram data for which we first
 # need to setup a sinogram forward model to create a noise-free and noisy
-# emission sinogram that can be converted to listmode data.
+# emission sinogram.
 
 # %%
 # Setup of the sinogram forward model
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
 # We setup a linear forward operator :math:`A` consisting of an
-# image-based resolution model, a non-TOF PET projector and an attenuation model
-#
+# image-based resolution model, a non-TOF PET projector and an attenuation model.
 
 num_rings = 2
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -125,7 +122,9 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-x_true = elliptic_cylinder_phantom(xp, dev, image_shape=img_shape, voxel_size=voxel_size)
+x_true = elliptic_cylinder_phantom(
+    xp, dev, image_shape=img_shape, voxel_size=voxel_size
+)
 
 # setup a structural prior image
 c0 = proj.in_shape[0] // 2
@@ -181,12 +180,12 @@ pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_m
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
 # We setup an arbitrary ground truth :math:`x_{true}` and simulate
-# noise-free and noisy data :math:`y` by adding Poisson noise.
+# noise-free and noisy data :math:`d` by adding Poisson noise.
 
 # simulated noise-free data
 noise_free_data = pet_lin_op(x_true)
 
-# generate a contant contamination sinogram
+# generate a constant contamination sinogram
 contamination = xp.full(
     noise_free_data.shape,
     contam * float(xp.mean(noise_free_data)),
@@ -209,7 +208,7 @@ d = xp.asarray(
 # --------------------------------
 
 x_mlem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-# calculate A^H 1
+# calculate A^T 1
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
@@ -220,77 +219,89 @@ for i in range(num_iter_mlem):
     x_mlem *= pet_lin_op.adjoint(d / dbar) / adjoint_ones
 
 # %%
+# Setup the regularization operator and function objects
+# ------------------------------------------------------
+#
+# The finite-difference gradient operator :math:`\\nabla` is projected by
+# :math:`P_{\\xi}` to obtain the DTV operator :math:`G = P_{\\xi} \\nabla`.
+# Three function objects handle all prox evaluations during PDHG:
+#
+# - ``data_fid`` -- :class:`.NegPoissonLogL` for the data-fidelity term,
+# - ``nonneg``   -- :class:`.NonNegativeIndicator` for the non-negativity constraint,
+# - ``reg``      -- :class:`.MixedL21Norm` (weighted by ``beta``) for the DTV regularizer.
+#
+# To use a different regularizer, replace ``op_G`` and ``reg`` accordingly.
+
+# setup the finite-difference gradient operator
+G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
+# calculate the joint vector field from the structural prior image
+joint_vector_field = G(x_struct)
+# setup the projected gradient (DTV) operator
+P = parallelproj.operators.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
+op_G = parallelproj.operators.CompositeLinearOperator((P, G))
+
+# function objects used by PDHG
+data_fid = parallelproj.functions.NegPoissonLogL(d)
+nonneg = parallelproj.functions.NonNegativeIndicator()
+reg = parallelproj.functions.MixedL21Norm(beta=beta)
+
+# %%
 # Setup the cost function
 # ^^^^^^^^^^^^^^^^^^^^^^^
+#
+# The total cost is :math:`f(Ax + s) + \\beta \\, g(Gx)`.
 
 
 def cost_function(img):
-    exp = pet_lin_op(img) + contamination
-    res = float(xp.sum(exp - d * xp.log(exp)))
-    res += beta * float(xp.sum(xp.linalg.vector_norm(op_G(img), axis=0)))
-    return res
+    return float(data_fid(pet_lin_op(img) + contamination)) + float(reg(op_G(img)))
 
 
 # %%
 # PDHG
 # ----
 #
-# .. admonition:: PDHG algorithm to minimize negative Poisson log-likelihood + regularization
+# .. admonition:: PDHG algorithm
 #
-#   | **Input** Poisson data :math:`d`
-#   | **Initialize** :math:`x,y,w,S_A,S_G,T`
-#   | **Preprocessing** :math:`\overline{z} = z = A^T y + \nabla^T w`
-#   | **Repeat**, until stopping criterion fulfilled
-#   |     **Update** :math:`x \gets \text{proj}_{\geq 0} \left( x - T \overline{z} \right)`
-#   |     **Update** :math:`y^+ \gets \text{prox}_{D^*}^{S_A} ( y + S_A  ( A x + s))`
-#   |     **Update** :math:`w^+ \gets \beta \, \text{prox}_{R^*}^{S_G/\beta} ((w + S_G  \nabla x)/\beta)`
-#   |     **Update** :math:`\Delta z \gets A^T (y^+ - y) + \nabla^T (w^+ - w)`
-#   |     **Update** :math:`z \gets z + \Delta z`
-#   |     **Update** :math:`\bar{z} \gets z + \Delta z`
-#   |     **Update** :math:`y \gets y^+`
-#   |     **Update** :math:`w \gets w^+`
+#   Minimize :math:`f(Ax + s) + g(Gx)` subject to :math:`x \geq 0`, where
+#   :math:`f` is a function with a known :math:`\text{prox}_{f^*}` and
+#   :math:`g` is a function with a known :math:`\text{prox}_{g^*}`.
+#
+#   | **Input** data :math:`d`, operators :math:`A`, :math:`G`
+#   | **Initialize** primal :math:`x`, dual :math:`y`, :math:`w`; step sizes :math:`S_A`, :math:`S_G`, :math:`T`
+#   | **Preprocessing** :math:`z = \bar{z} = A^T y + G^T w`
+#   | **Repeat** until stopping criterion is met
+#   |     :math:`x \;\gets\; \text{nonneg.prox}(x - T\bar{z},\; T)`
+#   |     :math:`y \;\gets\; \text{data\_fid.prox\_convex\_conj}(y + S_A (Ax + s),\; S_A)`
+#   |     :math:`w \;\gets\; \text{reg.prox\_convex\_conj}(w + S_G G x,\; S_G)`
+#   |     :math:`\Delta z \gets A^T(y^+ - y) + G^T(w^+ - w)`
+#   |     :math:`z \gets z + \Delta z`
+#   |     :math:`\bar{z} \gets z + \Delta z`
 #   | **Return** :math:`x`
-#
-# See :cite:p:`Ehrhardt2019` :cite:p:`Schramm2022` for more details.
-#
-# .. admonition:: Proximal operator of the convex dual of the negative Poisson log-likelihood
-#
-#  :math:`(\text{prox}_{D^*}^{S}(y))_i = \text{prox}_{D^*}^{S}(y_i) = \frac{1}{2} \left(y_i + 1 - \sqrt{ (y_i-1)^2 + 4 S d_i} \right)`
 #
 # .. admonition:: Step sizes
 #
-#  :math:`S_A = \gamma \, \text{diag}(\frac{\rho}{A 1})`
+#  :math:`S_A = \gamma \, \text{diag}\!\left(\frac{\rho}{A \mathbf{1}}\right)`
 #
-#  :math:`S_G = \gamma \, \text{diag}(\frac{\rho}{|\nabla|})`
+#  :math:`S_G = \gamma \, \frac{\rho}{\|G\|}`
 #
-#  :math:`T_A = \gamma^{-1} \text{diag}(\frac{\rho}{A^T 1})`
+#  :math:`T_A = \gamma^{-1} \text{diag}\!\left(\frac{\rho}{A^T \mathbf{1}}\right)`
 #
-#  :math:`T_G = \gamma^{-1} \text{diag}(\frac{\rho}{|\nabla|})`
+#  :math:`T_G = \gamma^{-1} \frac{\rho}{\|G\|}`
 #
-#  :math:`T = \min T_A, T_G` pointwise
+#  :math:`T = \min(T_A, T_G)` elementwise
 #
-
-# setup the "normal" gradient operator
-G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
-# calculate the joint vector field based on the structural prior image
-joint_vector_field = G(x_struct)
-# setup the projected gradient operator
-P = parallelproj.operators.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
-op_G = parallelproj.operators.CompositeLinearOperator((P, G))
+# See :cite:p:`Ehrhardt2019` and :cite:p:`Schramm2022` for more details.
 
 # initialize primal and dual variables
 x_pdhg = 1.0 * x_mlem
 y = 1 - d / (pet_lin_op(x_pdhg) + contamination)
-
-# initialize dual variable for the gradient
 w = xp.zeros(op_G.out_shape, dtype=xp.float32, device=dev)
 
 z = pet_lin_op.adjoint(y) + op_G.adjoint(w)
 zbar = 1.0 * z
 
 # %%
-
-# calculate PHDG step sizes
+# calculate PDHG step sizes
 tmp = pet_lin_op(xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev))
 tmp = xp.where(tmp == 0, xp.min(tmp[tmp > 0]), tmp)
 S_A = gamma * rho / tmp
@@ -318,21 +329,21 @@ print("")
 cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
 
 for i in range(num_iter_pdhg):
+    # primal update: gradient step (in-place to preserve C-contiguous strides) +
+    # prox of non-negativity indicator
     x_pdhg -= T * zbar
-    x_pdhg = xp.where(x_pdhg < 0, xp.zeros_like(x_pdhg), x_pdhg)
+    x_pdhg = nonneg.prox(x_pdhg, T)
 
     if track_cost:
         cost_pdhg[i] = cost_function(x_pdhg)
 
-    y_plus = y + S_A * (pet_lin_op(x_pdhg) + contamination)
-    # prox of convex conjugate of negative Poisson logL
-    y_plus = 0.5 * (y_plus + 1 - xp.sqrt((y_plus - 1) ** 2 + 4 * S_A * d))
+    # dual update for the data-fidelity term
+    y_plus = data_fid.prox_convex_conj(
+        y + S_A * (pet_lin_op(x_pdhg) + contamination), S_A
+    )
 
-    w_plus = (w + S_G * op_G(x_pdhg)) / beta
-    # prox of convex conjugate of TV
-    denom = xp.linalg.vector_norm(w_plus, axis=0)
-    w_plus /= xp.where(denom < 1, xp.ones_like(denom), denom)
-    w_plus *= beta
+    # dual update for the regularization term
+    w_plus = reg.prox_convex_conj(w + S_G * op_G(x_pdhg), S_G)
 
     delta_z = pet_lin_op.adjoint(y_plus - y) + op_G.adjoint(w_plus - w)
     y = 1.0 * y_plus
@@ -359,7 +370,10 @@ fig_true, _, widgets_true = show_vol_cuts(
 fig_true.show()
 
 fig_pdhg, _, widgets_pdhg = show_vol_cuts(
-    x_pdhg_np, voxel_size=voxel_size, vmin=0, vmax=vmax,
+    x_pdhg_np,
+    voxel_size=voxel_size,
+    vmin=0,
+    vmax=vmax,
     fig_title=f"DTV PDHG {num_iter_pdhg} iterations",
 )
 fig_pdhg.show()
