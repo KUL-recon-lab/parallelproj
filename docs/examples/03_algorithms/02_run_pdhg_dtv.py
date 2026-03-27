@@ -394,11 +394,11 @@ for i in range(num_iter_pdhg):
 
     if track_cost:
         cost = 0
-        for i_f, f in enumerate(fs):
-            fwd = ops[i_f](x_pdhg)
-            if cons[i_f] is not None:
-                fwd += cons[i_f]
-            cost += f(fwd)
+        for k, f in enumerate(fs):
+            x_fwd = ops[k](x_pdhg)
+            if cons[k] is not None:
+                x_fwd += cons[k]
+            cost += f(x_fwd)
 
         cost += nonneg(x_pdhg)
 
