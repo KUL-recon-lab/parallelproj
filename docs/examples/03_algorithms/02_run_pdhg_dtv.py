@@ -102,41 +102,45 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 
 def pdhg_update(
     x: Array,
-    ys: list[Array],
-    z: Array,
-    zbar: Array,
-    fs: Sequence[parallelproj.functions.FunctionWithConjProx],
+    dual_vars: list[Array],  # modified in-place
+    z_array: Array,
+    zbar_array: Array,
+    f_functions: Sequence[parallelproj.functions.FunctionWithConjProx],
     ops: Sequence[parallelproj.operators.LinearOperator],
     contams: Sequence[Array | None],
-    g: parallelproj.functions.FunctionWithProx,
-    Ss: Sequence[float | Array],
-    T: float | Array,
+    g_function: parallelproj.functions.FunctionWithProx,
+    dual_step_sizes: Sequence[float | Array],
+    primal_step_size: float | Array,
 ) -> tuple[Array, Array, Array]:
 
     # prox of g function (e.g. non-negativity indicator)
-    x -= T * zbar
-    x = g.prox(x, T)
+    x -= primal_step_size * zbar_array
+    x = g_function.prox(x, primal_step_size)
 
     y_plus = []
 
-    for i, f in enumerate(fs):
+    for i_f, f in enumerate(f_functions):
         # dual update for the i-th term
-        fwd = ops[i](x)
-        if contams[i] is not None:
-            fwd += contams[i]
+        fwd = ops[i_f](x)
+        if contams[i_f] is not None:
+            fwd += contams[i_f]
 
-        y_plus.append(f.prox_convex_conj(ys[i] + Ss[i] * fwd, Ss[i]))
+        y_plus.append(
+            f.prox_convex_conj(
+                dual_vars[i_f] + dual_step_sizes[i_f] * fwd, dual_step_sizes[i_f]
+            )
+        )
 
-    delta_z = xp.zeros_like(z)
+    delta_z = xp.zeros_like(z_array)
 
-    for i, op in enumerate(ops):
-        delta_z += op.adjoint(y_plus[i] - ys[i])
-        ys[i] = y_plus[i]
+    for i_o, op in enumerate(ops):
+        delta_z += op.adjoint(y_plus[i_o] - dual_vars[i_o])
+        dual_vars[i_o] = y_plus[i_o]
 
-    z = z + delta_z
-    zbar = z + delta_z
+    z_array += delta_z
+    zbar_array = z_array + delta_z
 
-    return x, z, zbar
+    return x, z_array, zbar_array
 
 
 # %%
@@ -145,13 +149,13 @@ def pdhg_update(
 # image scale (can be used to simulated more or less counts)
 img_scale = 0.1
 # number of MLEM iterations used to initialize PDHG
-num_iter_mlem = 10
+num_iter_mlem = 20
 # number of PDHG iterations
-num_iter_pdhg = 200 if dev == "cpu" else 500
+num_iter_pdhg = 200 if dev == "cpu" else 1000
 # regularization weight
 beta = 6.0
 # step size ratio for PDHG
-gamma = 1.0 / img_scale
+gamma = 10.0 / img_scale
 # rho value for PDHG
 rho = 0.9999
 # contamination in every sinogram bin relative to mean of trues sinogram
@@ -412,6 +416,16 @@ fig_true, _, widgets_true = show_vol_cuts(
 fig_true.show()
 
 # %%
+fig_mlem, _, widgets_mlem = show_vol_cuts(
+    to_numpy_array(x_mlem),
+    voxel_size=voxel_size,
+    vmin=0,
+    vmax=vmax,
+    fig_title=f"MLEM {num_iter_mlem} iterations",
+)
+fig_mlem.show()
+
+# %%
 fig_pdhg, _, widgets_pdhg = show_vol_cuts(
     to_numpy_array(x_pdhg),
     voxel_size=voxel_size,
@@ -429,8 +443,9 @@ fig_struct.show()
 
 # %%
 if track_cost:
+    epochs = np.arange(1, num_iter_pdhg + 1)
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4), tight_layout=True)
-    ax2.plot(cost_pdhg, ".-", label="PDHG")
+    ax2.semilogx(epochs, cost_pdhg, ".-", label="PDHG")
     ax2.grid(ls=":")
     ax2.legend()
     ax2.set_xlabel("iteration")
