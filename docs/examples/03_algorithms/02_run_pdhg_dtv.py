@@ -27,6 +27,7 @@ See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV pri
 
 # %%
 from __future__ import annotations
+from collections.abc import Sequence
 import matplotlib.pyplot as plt
 from vis import show_vol_cuts
 from img import elliptic_cylinder_phantom
@@ -101,40 +102,41 @@ print(f"Using array API: {xp.__name__}, device: {dev}")
 
 def pdhg_update(
     x: Array,
-    y_data: Array,
-    y_reg: Array,
+    ys: list[Array],
     z: Array,
     zbar: Array,
-    f_data: parallelproj.functions.FunctionWithConjProx,
-    op_A: parallelproj.operators.LinearOperator,
-    s: Array,
-    f_reg: parallelproj.functions.FunctionWithConjProx,
-    op_D: parallelproj.operators.LinearOperator,
+    fs: Sequence[parallelproj.functions.FunctionWithConjProx],
+    ops: Sequence[parallelproj.operators.LinearOperator],
+    contams: Sequence[Array | None],
     g: parallelproj.functions.FunctionWithProx,
-    S_A: float | Array,
-    S_D: float | Array,
+    Ss: Sequence[float | Array],
     T: float | Array,
-) -> tuple[Array, Array, Array, Array, Array]:
+) -> tuple[Array, Array, Array]:
 
     # prox of g function (e.g. non-negativity indicator)
     x -= T * zbar
     x = g.prox(x, T)
 
-    # dual update for the data-fidelity term
-    y_data_plus = f_data.prox_convex_conj(y_data + S_A * (op_A(x) + s), S_A)
+    y_plus = []
 
-    # dual update for the regularization term
-    y_reg_plus = f_reg.prox_convex_conj(y_reg + S_D * op_D(x), S_D)
+    for i, f in enumerate(fs):
+        # dual update for the i-th term
+        fwd = ops[i](x)
+        if contams[i] is not None:
+            fwd += contams[i]
 
-    delta_z = op_A.adjoint(y_data_plus - y_data) + op_D.adjoint(y_reg_plus - y_reg)
+        y_plus.append(f.prox_convex_conj(ys[i] + Ss[i] * fwd, Ss[i]))
 
-    y_data = y_data_plus
-    y_reg = y_reg_plus
+    delta_z = xp.zeros_like(z)
+
+    for i, op in enumerate(ops):
+        delta_z += op.adjoint(y_plus[i] - ys[i])
+        ys[i] = y_plus[i]
 
     z = z + delta_z
     zbar = z + delta_z
 
-    return x, y_data, y_reg, z, zbar
+    return x, z, zbar
 
 
 # %%
@@ -366,21 +368,19 @@ T = xp.where(
 
 cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
 
+ys = [y, w]
+
 for i in range(num_iter_pdhg):
-    x_pdhg, y, w, z, zbar = pdhg_update(
+    x_pdhg, z, zbar = pdhg_update(
         x_pdhg,
-        y,
-        w,
+        ys,
         z,
         zbar,
-        data_fid,
-        pet_lin_op,
-        contamination,
-        reg,
-        D,
+        (data_fid, reg),
+        (pet_lin_op, D),
+        (contamination, None),
         nonneg,
-        S_A,
-        S_D,
+        (S_A, S_D),
         T,
     )
 
