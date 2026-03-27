@@ -370,9 +370,13 @@ T = xp.where(
 # Run PDHG
 # ^^^^^^^^
 
-cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
 
 ys = [y, w]
+fs = (data_fid, reg)
+ops = (pet_lin_op, D)
+cons = (contamination, None)
+
+cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
 
 for i in range(num_iter_pdhg):
     x_pdhg, z, zbar = pdhg_update(
@@ -380,18 +384,25 @@ for i in range(num_iter_pdhg):
         ys,
         z,
         zbar,
-        (data_fid, reg),
-        (pet_lin_op, D),
-        (contamination, None),
+        fs,
+        ops,
+        cons,
         nonneg,
         (S_A, S_D),
         T,
     )
 
     if track_cost:
-        cost_pdhg[i] = float(data_fid(pet_lin_op(x_pdhg) + contamination)) + float(
-            reg(D(x_pdhg))
-        )
+        cost = 0
+        for i_f, f in enumerate(fs):
+            fwd = ops[i_f](x_pdhg)
+            if cons[i_f] is not None:
+                fwd += cons[i_f]
+            cost += f(fwd)
+
+        cost += nonneg(x_pdhg)
+
+        cost_pdhg[i] = cost
         print(
             f"PDHG iter {(i+1):04} / {num_iter_pdhg}, cost {cost_pdhg[i]:.7e}", end="\r"
         )
