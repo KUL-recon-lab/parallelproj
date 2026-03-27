@@ -25,10 +25,6 @@ MLEM is run for a small number of iterations to obtain a warm start for PDHG.
 
 See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior,
 and :cite:p:`Schramm2022` for the step-size rules used here.
-
-.. warning::
-    Running this example using GPU arrays (e.g. using cupy as array backend)
-    is highly recommended due to longer execution times with CPU arrays.
 """
 
 # %%
@@ -48,24 +44,11 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 
 # %%
-from importlib import import_module, util
-import parallelproj_core as ppc
+from array_utils import suggest_array_backend_and_device
 
-
-# choose array backend and a device (CPU or CUDA GPU)
-if util.find_spec("torch") is not None:
-    xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
-elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
-    xp = import_module("array_api_compat.cupy")
-    # using cupy, only cuda devices are possible
-    dev = xp.cuda.Device(0)
-else:
-    xp = import_module("array_api_compat.numpy")
-    # using numpy, device must be cpu
-    dev = "cpu"
-
-print(f"Using array API: {xp.__name__}, device: {dev}")
+# To use a specific backend and/or device, replace the None arguments, e.g.:
+#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
+xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
@@ -382,7 +365,7 @@ for i in range(num_iter_mlem):
 # ------------------------------------------------------
 #
 # The finite-difference gradient operator :math:`G` is projected by
-# :math:`P_{\\xi}` to obtain the DTV operator :math:`D = P_{\\xi} G`.
+# :math:`P_{\xi}` to obtain the DTV operator :math:`D = P_{\xi} G`.
 # Three function objects handle all prox evaluations during PDHG:
 #
 # - ``data_fid`` -- :class:`.NegPoissonLogL`, implements :math:`f_\text{data}`,

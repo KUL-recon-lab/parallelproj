@@ -19,24 +19,11 @@ import parallelproj.tof
 from parallelproj import to_numpy_array
 
 # %%
-from importlib import import_module, util
-import parallelproj_core as ppc
+from array_utils import suggest_array_backend_and_device
 
-
-# choose array backend and a device (CPU or CUDA GPU)
-if util.find_spec("torch") is not None:
-    xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
-elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
-    xp = import_module("array_api_compat.cupy")
-    # using cupy, only cuda devices are possible
-    dev = xp.cuda.Device(0)
-else:
-    xp = import_module("array_api_compat.numpy")
-    # using numpy, device must be cpu
-    dev = "cpu"
-
-print(f"Using array API: {xp.__name__}, device: {dev}")
+# To use a specific backend and/or device, replace the None arguments, e.g.:
+#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
+xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
@@ -128,7 +115,9 @@ fig2.show()
 # TOF parameters define the timing resolution and the number/width of TOF bins.
 # Here we use a TOF resolution FWHM of 30mm (approximately 200ps).
 
-tof_params = parallelproj.tof.TOFParameters(sigma_tof=30.0 / 2.35, num_tofbins=59, tofbin_width=12.5)
+tof_params = parallelproj.tof.TOFParameters(
+    sigma_tof=30.0 / 2.35, num_tofbins=59, tofbin_width=12.5
+)
 
 # event TOF bins - valid values are between 0 and num_tofbins-1,
 # with 0 being closest to the start of the LOR
@@ -185,6 +174,7 @@ y_back2 = lm_proj_with_res_model_and_att.adjoint(ones_list)
 # -------------------------------------------------------------------------
 
 fig4, _, widgets4 = show_vol_cuts(
-    to_numpy_array(y_back2), fig_title="TOF back projection with resolution and attenuation model"
+    to_numpy_array(y_back2),
+    fig_title="TOF back projection with resolution and attenuation model",
 )
 fig4.show()

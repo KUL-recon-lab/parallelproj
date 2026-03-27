@@ -45,24 +45,11 @@ from vis import show_vol_cuts
 from img import elliptic_cylinder_phantom
 
 # %%
-from importlib import import_module, util
-import parallelproj_core as ppc
+from array_utils import suggest_array_backend_and_device
 
-
-# choose array backend and a device (CPU or CUDA GPU)
-if util.find_spec("torch") is not None:
-    xp = import_module("array_api_compat.torch")
-    dev = "cuda" if xp.cuda.is_available() and ppc.cuda_enabled == 1 else "cpu"
-elif util.find_spec("cupy") is not None and ppc.cupy_enabled == 1:
-    xp = import_module("array_api_compat.cupy")
-    # using cupy, only cuda devices are possible
-    dev = xp.cuda.Device(0)
-else:
-    xp = import_module("array_api_compat.numpy")
-    # using numpy, device must be cpu
-    dev = "cpu"
-
-print(f"Using array API: {xp.__name__}, device: {dev}")
+# To use a specific backend and/or device, replace the None arguments, e.g.:
+#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
+xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
 
