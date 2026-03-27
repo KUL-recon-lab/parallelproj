@@ -446,16 +446,12 @@ class GaussianFilterOperator(LinearOperator):
         return self._in_shape
 
     def _apply(self, x: Array) -> Array:
-        # Normalize sigma to a Python-native type so it is namespace-agnostic
-        # (e.g. a NumPy sigma array works fine when x is a CuPy array).
-        # sigma = self._sigma
-        # if array_api_compat.is_array_api_obj(sigma):
-        #    sigma = np.asarray(sigma)
+        xp = array_api_compat.get_namespace(x)
+        dev = array_api_compat.device(x)
 
         # PyTorch CUDA: scipy array API dispatch does not support CUDA tensors
         # yet, so round-trip via CuPy using DLPack.
         if array_api_compat.is_torch_array(x) and x.device.type != "cpu":
-            xp = array_api_compat.get_namespace(x)
             import cupy as cp
 
             x_cp = cp.from_dlpack(x.detach())
@@ -464,7 +460,10 @@ class GaussianFilterOperator(LinearOperator):
         else:
             # All other cases (NumPy, CuPy, PyTorch CPU, array-api-strict) are
             # handled uniformly via scipy's array API dispatch (SCIPY_ARRAY_API=1).
-            return ndimage.gaussian_filter(x, **self._kwargs)
+            # scipy may return a plain numpy array even for non-numpy inputs, so
+            # convert the result back to the input's array namespace/device.
+            result = ndimage.gaussian_filter(x, **self._kwargs)
+            return xp.asarray(result, device=dev, dtype=x.dtype)
 
     def _adjoint(self, y: Array) -> Array:
         # A Gaussian filter with a symmetric kernel is self-adjoint, so the
