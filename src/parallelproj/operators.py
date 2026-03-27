@@ -12,6 +12,11 @@ import array_api_compat
 import scipy.ndimage as ndimage
 from array_api_compat import device, get_namespace
 
+try:
+    import cupy as cp
+except Exception:
+    cp = None
+
 from parallelproj import Array
 
 # Enable scipy's experimental array API support so that scipy.ndimage functions
@@ -452,8 +457,9 @@ class GaussianFilterOperator(LinearOperator):
         # PyTorch CUDA: scipy array API dispatch does not support CUDA tensors
         # yet, so round-trip via CuPy using DLPack.
         if array_api_compat.is_torch_array(x) and x.device.type != "cpu":
-            import cupy as cp
-
+            assert (
+                cp is not None
+            ), "cupy must be installed to use GaussianFilterOperator with PyTorch CUDA tensors"
             x_cp = cp.from_dlpack(x.detach())
             y_cp = ndimage.gaussian_filter(x_cp, **self._kwargs)
             return xp.asarray(xp.from_dlpack(y_cp))
