@@ -15,10 +15,16 @@ where
 - :math:`g = \\iota_{\\geq 0}` -- the indicator function of the non-negative orthant,
 - :math:`D = P_{\\xi} G` -- the projected finite-difference gradient operator
   implementing a directional total variation (DTV) structural prior,
-- :math:`A` -- the PET forward projector,
+- :math:`A` -- the composite PET forward operator (resolution model, TOF projector,
+  attenuation), and
 - :math:`s` -- the contamination sinogram.
 
-See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior.
+The example uses simulated TOF sinogram data with a synthetic elliptic-cylinder
+phantom and a structural prior image derived from the ground-truth activity.
+MLEM is run for a small number of iterations to obtain a warm start for PDHG.
+
+See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior,
+and :cite:p:`Schramm2022` for the step-size rules used here.
 
 .. warning::
     Running this example using GPU arrays (e.g. using cupy as array backend)
@@ -112,7 +118,77 @@ def pdhg_update(
     dual_step_sizes: Sequence[float | Array],
     primal_step_size: float | Array,
 ) -> tuple[Array, Array, Array]:
+    """Perform one PDHG iteration for problems with multiple linear operators.
 
+    Executes one update step of the general PDHG scheme for problems of the form
+
+    .. math::
+
+        \\min_x \\; \\sum_{i} f_i(K_i x + c_i) + g(x)
+
+    where each :math:`f_i` has a known proximal operator of its convex conjugate
+    and :math:`g` has a known proximal operator.  For this example the sum has
+    two terms: :math:`f_\\text{data}(Ax + s)` and :math:`\\beta f_\\text{reg}(Dx)`.
+
+    The primal variable is updated via
+
+    .. math::
+
+        x \\gets \\operatorname{prox}_{T g}(x - T \\bar{z})
+
+    Each dual variable :math:`y_i` is updated via
+
+    .. math::
+
+        y_i^+ \\gets \\operatorname{prox}_{S_i f_i^*}(y_i + S_i (K_i x + c_i))
+
+    and the auxiliary variables :math:`z`, :math:`\\bar{z}` are then updated as
+
+    .. math::
+
+        \\Delta z = \\sum_i K_i^T (y_i^+ - y_i), \\quad
+        z \\gets z + \\Delta z, \\quad
+        \\bar{z} \\gets z + \\Delta z.
+
+    Parameters
+    ----------
+    x :
+        Current primal variable.  Modified in-place during the primal update.
+    dual_vars :
+        List of current dual variables :math:`y_i`, one per term in
+        ``f_functions``.  Updated in-place.
+    z_array :
+        Auxiliary variable :math:`z = \\sum_i K_i^T y_i` accumulating the
+        adjoints of the dual variables.
+    zbar_array :
+        Over-relaxed auxiliary variable :math:`\\bar{z}` used in the primal
+        gradient step.
+    f_functions :
+        Functions :math:`f_i`, each exposing a proximal operator of their
+        convex conjugate via :meth:`~parallelproj.functions.FunctionWithConjProx.prox_convex_conj`.
+    ops :
+        Linear operators :math:`K_i`, one per function in ``f_functions``.
+    contams :
+        Additive offsets :math:`c_i` applied after each forward projection
+        :math:`K_i x`.  Pass ``None`` for terms without an offset.
+    g_function :
+        Proximal-friendly constraint or regularization function :math:`g`
+        applied to the primal variable, exposing
+        :meth:`~parallelproj.functions.FunctionWithProx.prox`.
+    dual_step_sizes :
+        Dual step sizes :math:`S_i`, one per function/operator pair.
+    primal_step_size :
+        Primal step size :math:`T`.
+
+    Returns
+    -------
+    x :
+        Updated primal variable.
+    z_array :
+        Updated auxiliary variable :math:`z`.
+    zbar_array :
+        Updated over-relaxed auxiliary variable :math:`\\bar{z}`.
+    """
     # prox of g function (e.g. non-negativity indicator)
     x -= primal_step_size * zbar_array
     x = g_function.prox(x, primal_step_size)
@@ -146,7 +222,7 @@ def pdhg_update(
 # %%
 # **Input Parameters**
 
-# image scale (can be used to simulated more or less counts)
+# image scale (can be used to simulate more or less counts)
 img_scale = 0.1
 # number of MLEM iterations used to initialize PDHG
 num_iter_mlem = 20
@@ -368,7 +444,7 @@ T = xp.where(
 
 # %%
 # Run PDHG
-# ^^^^^^^^
+# --------
 
 
 ys = [y, w]
@@ -409,7 +485,6 @@ for i in range(num_iter_pdhg):
 
 print("")
 
-#
 # %%
 # Visualizations
 # --------------
