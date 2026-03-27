@@ -161,7 +161,7 @@ att_values = (
 att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values)
 
 res_model = parallelproj.operators.GaussianFilterOperator(
-    proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
+    proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
 )
 
 # compose all 3 operators into a single linear operator

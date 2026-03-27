@@ -138,7 +138,7 @@ x_fwd_back = proj.adjoint(x_fwd)
 
 # setup a simple image-based resolution model with an Gaussian FWHM of 4.5mm
 res_model = parallelproj.operators.GaussianFilterOperator(
-    proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
+    proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
 )
 
 proj_with_res_model = parallelproj.operators.CompositeLinearOperator((proj, res_model))

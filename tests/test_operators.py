@@ -188,7 +188,7 @@ def test_gaussian(xp: ModuleType, dev: str):
     op = ppo.GaussianFilterOperator(in_shape, sigma=sigma1)
     assert op.adjointness_test(xp, dev)
 
-    sigma2 = xp.asarray([2.3, 1.2], device=dev)
+    sigma2 = (2.3, 1.2)
     op = ppo.GaussianFilterOperator(in_shape, sigma=sigma2)
     assert op.adjointness_test(xp, dev)
 
@@ -443,20 +443,3 @@ def test_gaussian_array_api_strict(xp: ModuleType, dev: str):
     x = xp_strict.asarray(nprnd.rand(8, 8))
     y = op._apply(x)
     assert y.shape == (8, 8)
-
-
-def test_gaussian_unsupported_type(xp: ModuleType, dev: str):
-    """Covers the raise TypeError fallback in GaussianFilterOperator._apply (line 543)."""
-    import numpy as _np
-
-    op = ppo.GaussianFilterOperator((4,), sigma=1.0)
-    x = _np.array([1.0, 2.0, 3.0, 4.0])
-
-    with (
-        patch("array_api_compat.is_numpy_array", return_value=False),
-        patch("array_api_compat.is_array_api_strict_namespace", return_value=False),
-        patch("array_api_compat.is_cupy_array", return_value=False),
-        patch("array_api_compat.is_torch_array", return_value=False),
-    ):
-        with pytest.raises(TypeError, match="Unsupported input type"):
-            op._apply(x)

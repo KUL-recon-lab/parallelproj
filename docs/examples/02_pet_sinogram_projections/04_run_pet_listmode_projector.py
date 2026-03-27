@@ -153,7 +153,7 @@ fig3.show()
 
 # setup a simple image-based resolution model with a Gaussian FWHM of 4.5mm
 res_model = parallelproj.operators.GaussianFilterOperator(
-    lm_proj.in_shape, sigma=4.5 / (2.35 * lm_proj.voxel_size)
+    lm_proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in lm_proj.voxel_size]
 )
 
 # define arbitrary attenuation factors

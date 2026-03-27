@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import ModuleType
 import abc
+import os
+
 import numpy as np
 import array_api_compat
+import scipy.ndimage as ndimage
 from array_api_compat import device, get_namespace
+
 from parallelproj import Array
-from collections.abc import Sequence
+
+# Enable scipy's experimental array API support so that scipy.ndimage functions
+# dispatch correctly for NumPy, CuPy, and PyTorch CPU arrays uniformly.
+os.environ.setdefault("SCIPY_ARRAY_API", "1")
 
 
 class LinearOperator(abc.ABC):
@@ -412,38 +420,21 @@ class ElementwiseMultiplicationOperator(LinearOperator):
         ) or self.xp.isdtype(self._values.dtype, self.xp.complex128)
 
 
-def _sigma_for_numpy(sigma):
-    if array_api_compat.is_array_api_obj(sigma):
-        return np.asarray(sigma)
-    return sigma
-
-
-def _sigma_for_cupy(sigma):
-    if array_api_compat.is_array_api_obj(sigma):
-        import cupy as cp
-
-        return cp.asarray(sigma)
-    return sigma
-
-
 class GaussianFilterOperator(LinearOperator):
     """Gaussian filter operator"""
 
-    def __init__(self, in_shape: tuple[int, ...], sigma: float | Array, **kwargs):
+    def __init__(self, in_shape: tuple[int, ...], **kwargs):
         """init method
 
         Parameters
         ----------
         in_shape : tuple[int, ...]
             shape of the input array
-        sigma: float | array
-            standard deviation of the gaussian filter
         **kwargs : dict
-            passed to the ndimage gaussian_filter function (e.g. ``mode``, ``truncate``)
+            passed to scipy.ndimage.gaussian_filter (e.g. ``mode``, ``truncate``)
         """
         super().__init__()
         self._in_shape = in_shape
-        self._sigma = sigma
         self._kwargs = kwargs
 
     @property
@@ -455,64 +446,25 @@ class GaussianFilterOperator(LinearOperator):
         return self._in_shape
 
     def _apply(self, x: Array) -> Array:
-        xp = array_api_compat.get_namespace(x)
-        # NumPy
-        if array_api_compat.is_numpy_array(
-            x
-        ) or array_api_compat.is_array_api_strict_namespace(xp):
-            import scipy.ndimage as ndimage
+        # Normalize sigma to a Python-native type so it is namespace-agnostic
+        # (e.g. a NumPy sigma array works fine when x is a CuPy array).
+        # sigma = self._sigma
+        # if array_api_compat.is_array_api_obj(sigma):
+        #    sigma = np.asarray(sigma)
 
-            tmp = ndimage.gaussian_filter(
-                np.asarray(x),
-                sigma=_sigma_for_numpy(self._sigma),
-                **self._kwargs,
-            )
-
-            if array_api_compat.is_array_api_strict_namespace(xp):
-                return xp.asarray(tmp)
-            else:
-                return tmp
-
-        # CuPy
-        if array_api_compat.is_cupy_array(x):
+        # PyTorch CUDA: scipy array API dispatch does not support CUDA tensors
+        # yet, so round-trip via CuPy using DLPack.
+        if array_api_compat.is_torch_array(x) and x.device.type != "cpu":
+            xp = array_api_compat.get_namespace(x)
             import cupy as cp
-            import cupyx.scipy.ndimage as cndimage
-
-            return cndimage.gaussian_filter(
-                cp.asarray(x),
-                sigma=_sigma_for_cupy(self._sigma),
-                **self._kwargs,
-            )
-
-        # Torch
-        if array_api_compat.is_torch_array(x):
-            import torch
-
-            if x.device.type == "cpu":
-                import scipy.ndimage as ndimage
-
-                y_np = ndimage.gaussian_filter(
-                    x.detach().numpy(),
-                    sigma=_sigma_for_numpy(self._sigma),
-                    **self._kwargs,
-                )
-                return torch.from_numpy(y_np).to(device=x.device)
-
-            # Torch GPU -> CuPy via DLPack -> filter -> Torch via DLPack
-            import cupy as cp
-            import cupyx.scipy.ndimage as cndimage
 
             x_cp = cp.from_dlpack(x.detach())
-            y_cp = cndimage.gaussian_filter(
-                x_cp,
-                sigma=_sigma_for_cupy(self._sigma),
-                **self._kwargs,
-            )
-            return torch.from_dlpack(y_cp)
-
-        raise TypeError(
-            "Unsupported input type. Expected NumPy array, CuPy array, or Torch tensor."
-        )
+            y_cp = ndimage.gaussian_filter(x_cp, **self._kwargs)
+            return xp.asarray(xp.from_dlpack(y_cp))
+        else:
+            # All other cases (NumPy, CuPy, PyTorch CPU, array-api-strict) are
+            # handled uniformly via scipy's array API dispatch (SCIPY_ARRAY_API=1).
+            return ndimage.gaussian_filter(x, **self._kwargs)
 
     def _adjoint(self, y: Array) -> Array:
         # A Gaussian filter with a symmetric kernel is self-adjoint, so the
