@@ -1,0 +1,619 @@
+"""
+SPDHG to optimize the Poisson logL and directional TV (structural prior)
+========================================================================
+
+This example demonstrates the stochastic primal-dual hybrid gradient (SPDHG)
+algorithm applied to the problem
+
+.. math::
+    \\min_x \\; f_\\text{data}(Ax + s) + \\beta \\, f_\\text{reg}(Dx) + g(x)
+
+where
+
+- :math:`f_\\text{data} = \\text{NegPoissonLogL}` -- the negative Poisson log-likelihood,
+- :math:`f_\\text{reg} = \\text{MixedL21Norm}` -- the isotropic mixed L2-L1 norm (TV semi-norm),
+- :math:`g = \\iota_{\\geq 0}` -- the indicator function of the non-negative orthant,
+- :math:`D = P_{\\xi} G` -- the projected finite-difference gradient operator
+  implementing a directional total variation (DTV) structural prior,
+- :math:`A = A^1 + \\ldots + A^n` -- the composite PET forward operator split into
+  :math:`n` sinogram subsets, and
+- :math:`s` -- the contamination sinogram.
+
+SPDHG replaces the full dual update of PDHG with a randomised update that
+touches only one block (a data subset or the regularization operator) per
+mini-iteration, while maintaining provable convergence.
+
+Compared to :doc:`02_run_pdhg_dtv`, the only algorithmic change is:
+
+1. The operator / function list is extended with :math:`n` data-subset entries
+   instead of one full-sinogram entry.
+2. Each mini-iteration selects one block at random (or via a shuffled
+   permutation), updates only that dual variable, and scales
+   :math:`\\bar{z} \\gets z + \\Delta z / p_i` by the block's selection
+   probability :math:`p_i` (compare :math:`\\bar{z} \\gets z + \\Delta z`
+   in full PDHG).
+
+The example uses simulated TOF sinogram data with a synthetic elliptic-cylinder
+phantom and a structural prior image derived from the ground-truth activity.
+MLEM is run for a small number of iterations to obtain a warm start for SPDHG.
+
+See :cite:p:`Ehrhardt2019` for the SPDHG algorithm (Algorithm 2),
+:cite:p:`Ehrhardt2016` for the DTV prior,
+and :cite:p:`Schramm2022` for the step-size rules.
+"""
+
+# %%
+from __future__ import annotations
+from collections.abc import Sequence
+from copy import copy
+import matplotlib.pyplot as plt
+from vis import show_vol_cuts
+from img import elliptic_cylinder_phantom
+import numpy as np
+
+import parallelproj.operators
+import parallelproj.functions
+import parallelproj.tof
+import parallelproj.pet_scanners
+import parallelproj.pet_lors
+import parallelproj.projectors
+from parallelproj import to_numpy_array, Array
+
+# %%
+from array_utils import suggest_array_backend_and_device
+
+# To use a specific backend and/or device, replace the None arguments, e.g.:
+#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
+xp, dev = suggest_array_backend_and_device(None, None)
+
+
+# %%
+# SPDHG update
+# ------------
+#
+# .. admonition:: SPDHG algorithm (Algorithm 2 from :cite:p:`Ehrhardt2019`)
+#
+#   Minimize :math:`\sum_{k=1}^{n+1} f_k(K_k x + c_k) + g(x)` where the
+#   first :math:`n` blocks are data subsets and block :math:`n{+}1` is the
+#   regularizer.
+#
+#   | **Input** data :math:`d`, operators :math:`K_1,\ldots,K_{n+1}`, probabilities :math:`p_1,\ldots,p_{n+1}`
+#   | **Initialize** primal :math:`x`, duals :math:`y_1,\ldots,y_{n+1}`; step sizes :math:`S_i`, :math:`T`
+#   | **Preprocessing** :math:`z = \bar{z} = \sum_i K_i^T y_i`
+#   | **Repeat** until stopping criterion is met
+#   |     :math:`x \;\gets\; \operatorname{prox}_{T g}(x - T\bar{z})`
+#   |     Select :math:`i \in \{1,\ldots,n{+}1\}` with probabilities :math:`(p_i)`
+#   |     :math:`y_i^+ \gets \operatorname{prox}_{S_i f_i^*}(y_i + S_i (K_i x + c_i))`
+#   |     :math:`\Delta z \gets K_i^T(y_i^+ - y_i)`
+#   |     :math:`y_i \gets y_i^+`
+#   |     :math:`z \gets z + \Delta z`
+#   |     :math:`\bar{z} \gets z + \Delta z / p_i`
+#   | **Return** :math:`x`
+#
+# Compared to the full PDHG in :doc:`02_run_pdhg_dtv`, the update loop
+# touches only **one** selected block per mini-iteration and scales
+# :math:`\bar{z}` by :math:`1/p_i` instead of :math:`1`.
+#
+# .. admonition:: Step sizes
+#
+#  :math:`S^k = \gamma \, \text{diag}\!\left(\frac{\rho}{A^k \mathbf{1}}\right)` for data subsets
+#
+#  :math:`S_D = \gamma \, \frac{\rho}{\|D\|}` for regularization
+#
+#  :math:`T^k = \gamma^{-1} \, \frac{\rho \, p_k}{(A^k)^T \mathbf{1}}` for data subsets
+#
+#  :math:`T_D = \gamma^{-1} \, \frac{\rho \, p_D}{\|D\|}` for regularization
+#
+#  :math:`T = \min(T^1, \ldots, T^n, T_D)` elementwise
+#
+# See :cite:p:`Ehrhardt2019` and :cite:p:`Schramm2022` for more details.
+
+
+def spdhg_update(
+    x: Array,
+    dual_vars: list[Array],  # modified in-place
+    z_array: Array,
+    zbar_array: Array,
+    f_functions: Sequence[parallelproj.functions.FunctionWithConjProx],
+    ops: Sequence[parallelproj.operators.LinearOperator],
+    contams: Sequence[Array | None],
+    g_function: parallelproj.functions.FunctionWithProx,
+    dual_step_sizes: Sequence[float | Array],
+    primal_step_size: float | Array,
+    selected_idx: int,
+    prob: float,
+) -> tuple[Array, Array, Array]:
+    """Perform one SPDHG mini-iteration for problems with multiple linear operators.
+
+    Identical to the full PDHG update in :func:`pdhg_update` except that only
+    the dual variable at index ``selected_idx`` is updated, and the
+    over-relaxed variable is scaled by ``1 / prob``:
+
+    .. math::
+
+        \\bar{z} \\gets z + \\Delta z / p_i
+
+    instead of :math:`\\bar{z} \\gets z + \\Delta z`.
+
+    Parameters
+    ----------
+    x :
+        Current primal variable.  Modified in-place during the primal update.
+    dual_vars :
+        List of current dual variables :math:`y_i`.  Only ``dual_vars[selected_idx]``
+        is updated in-place.
+    z_array :
+        Auxiliary variable :math:`z = \\sum_i K_i^T y_i`.
+    zbar_array :
+        Over-relaxed auxiliary variable :math:`\\bar{z}`.
+    f_functions :
+        Functions :math:`f_i`, each exposing a proximal operator of their
+        convex conjugate via :meth:`~parallelproj.functions.FunctionWithConjProx.prox_convex_conj`.
+    ops :
+        Linear operators :math:`K_i`, one per function.
+    contams :
+        Additive offsets :math:`c_i`.  Pass ``None`` for terms without an offset.
+    g_function :
+        Proximal-friendly constraint or regularization function :math:`g`.
+    dual_step_sizes :
+        Dual step sizes :math:`S_i`, one per function/operator pair.
+    primal_step_size :
+        Primal step size :math:`T`.
+    selected_idx :
+        Index of the block to update in this mini-iteration.
+    prob :
+        Selection probability :math:`p_i` of ``selected_idx``; used to scale
+        the over-relaxation :math:`\\bar{z} \\gets z + \\Delta z / p_i`.
+
+    Returns
+    -------
+    x :
+        Updated primal variable.
+    z_array :
+        Updated auxiliary variable :math:`z`.
+    zbar_array :
+        Updated over-relaxed auxiliary variable :math:`\\bar{z}`.
+    """
+    # primal update: prox of g (e.g. non-negativity indicator)
+    x -= primal_step_size * zbar_array
+    x = g_function.prox(x, primal_step_size)
+
+    # dual update: only the selected block
+    i = selected_idx
+    fwd = ops[i](x)
+    if contams[i] is not None:
+        fwd += contams[i]
+
+    y_plus = f_functions[i].prox_convex_conj(
+        dual_vars[i] + dual_step_sizes[i] * fwd, dual_step_sizes[i]
+    )
+
+    delta_z = ops[i].adjoint(y_plus - dual_vars[i])
+    dual_vars[i] = y_plus
+
+    z_array += delta_z
+    zbar_array = z_array + delta_z / prob  # key difference from PDHG
+
+    return x, z_array, zbar_array
+
+
+# %%
+# **Input Parameters**
+
+# image scale (can be used to simulate more or less counts)
+img_scale = 0.1
+# number of MLEM iterations used to initialize SPDHG
+num_iter_mlem = 20
+# number of SPDHG outer iterations (each = 2*num_subsets mini-iterations)
+num_iter_spdhg = 50 if dev == "cpu" else 100
+# number of sinogram subsets for SPDHG
+num_subsets = 28
+# regularization weight
+beta = 6.0
+# step size ratio for SPDHG
+gamma = 10.0 / img_scale
+# rho value for SPDHG
+rho = 0.9999
+# contamination in every sinogram bin relative to mean of trues sinogram
+contam = 1.0
+# probability of the regularization (gradient) block update per mini-iteration
+p_g = 0.5
+# probability of each data subset block update per mini-iteration
+p_a = (1 - p_g) / num_subsets
+
+track_cost = True
+
+# %%
+# Simulation of PET data in sinogram space
+# ----------------------------------------
+#
+# In this example, we use simulated sinogram data for which we first
+# need to setup a sinogram forward model to create a noise-free and noisy
+# emission sinogram.
+
+# %%
+# Setup of the sinogram forward model
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#
+# We setup a linear forward operator :math:`A` consisting of an
+# image-based resolution model, a non-TOF PET projector and an attenuation model.
+
+num_rings = 2
+scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=350.0,
+    num_sides=28,
+    num_lor_endpoints_per_side=16,
+    lor_spacing=4.0,
+    ring_positions=xp.linspace(-2.5, 2.5, num_rings, device=dev),
+    symmetry_axis=2,
+)
+
+# setup the LOR descriptor that defines the sinogram
+
+img_shape = (40, 40, 4)
+voxel_size = (4.0, 4.0, 2.5)
+
+lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+    scanner,
+    radial_trim=170,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
+)
+
+proj = parallelproj.projectors.RegularPolygonPETProjector(
+    lor_desc, img_shape=img_shape, voxel_size=voxel_size
+)
+
+x_true = elliptic_cylinder_phantom(
+    xp, dev, image_shape=img_shape, voxel_size=voxel_size
+)
+
+# setup a structural prior image
+x_struct = -1.0 * xp.sqrt(x_true)
+x_struct[x_true == 3] = -1.0
+
+# scale image to get more counts
+x_true *= img_scale
+
+
+# %%
+# Attenuation image and sinogram setup
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+# setup an attenuation image
+x_att = 0.01 * xp.astype(x_true > 0, xp.float32)
+# calculate the attenuation sinogram
+att_sino = xp.exp(-proj(x_att))
+
+# %%
+# Complete sinogram PET forward model setup
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#
+# We combine an image-based resolution model,
+# a non-TOF or TOF PET projector and an attenuation model
+# into a single linear operator.
+
+# enable TOF - uncomment if you want to run TOF recons
+proj.tof_parameters = parallelproj.tof.TOFParameters(
+    num_tofbins=10, tofbin_width=24.0, sigma_tof=24.0
+)
+
+# For TOF, att_sino has no TOF-bins dimension while the projector output does.
+# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
+# the TOF-bins axis without copying data (zero-stride view).
+att_values = (
+    xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
+    if proj.tof
+    else att_sino
+)
+att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values)
+
+res_model = parallelproj.operators.GaussianFilterOperator(
+    proj.in_shape, sigma=[4.0 / (2.35 * float(vs)) for vs in proj.voxel_size]
+)
+
+# compose all 3 operators into a single linear operator
+pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
+
+# %%
+# Simulation of sinogram projection data
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#
+# We setup an arbitrary ground truth :math:`x_{true}` and simulate
+# noise-free and noisy data :math:`d` by adding Poisson noise.
+
+# simulated noise-free data
+noise_free_data = pet_lin_op(x_true)
+
+# generate a constant contamination sinogram
+contamination = xp.full(
+    noise_free_data.shape,
+    contam * float(xp.mean(noise_free_data)),
+    device=dev,
+    dtype=xp.float32,
+)
+
+noise_free_data += contamination
+
+# add Poisson noise
+np.random.seed(1)
+d = xp.asarray(
+    np.random.poisson(to_numpy_array(noise_free_data)),
+    device=dev,
+    dtype=xp.float32,
+)
+
+# %%
+# Splitting of the forward model into subsets :math:`A^k`
+# -------------------------------------------------------
+#
+# Calculate the view numbers and slices for each subset.
+# We use the subset views to setup a sequence of projectors projecting only
+# a subset of views. The slices extract the corresponding subsets from the
+# full data and contamination sinograms.
+
+subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
+    num_subsets, len(proj.out_shape)
+)
+
+_, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
+    num_subsets, 3
+)
+
+# clear cached LOR endpoints before creating many copies of the projector
+proj.clear_cached_lor_endpoints()
+
+# sequence of subset forward operators: resolution model + subset projector + attenuation
+pet_subset_linop_seq = []
+
+for i in range(num_subsets):
+    subset_proj = copy(proj)
+    subset_proj.views = subset_views[i]
+
+    att_values_k = (
+        xp.broadcast_to(
+            xp.expand_dims(att_sino[subset_slices_non_tof[i]], axis=-1),
+            subset_proj.out_shape,
+        )
+        if subset_proj.tof
+        else att_sino[subset_slices_non_tof[i]]
+    )
+    subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+        att_values_k
+    )
+
+    pet_subset_linop_seq.append(
+        parallelproj.operators.CompositeLinearOperator(
+            [subset_att_op, subset_proj, res_model]
+        )
+    )
+
+pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
+    pet_subset_linop_seq
+)
+
+# %%
+# Run quick MLEM as initialization
+# --------------------------------
+
+x_mlem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+adjoint_ones = pet_lin_op.adjoint(
+    xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
+)
+
+for i in range(num_iter_mlem):
+    print(f"MLEM iteration {(i + 1):03} / {num_iter_mlem:03}", end="\r")
+    dbar = pet_lin_op(x_mlem) + contamination
+    x_mlem *= pet_lin_op.adjoint(d / dbar) / adjoint_ones
+
+# %%
+# Setup the regularization operator and function objects
+# ------------------------------------------------------
+#
+# The finite-difference gradient operator :math:`G` is projected by
+# :math:`P_{\xi}` to obtain the DTV operator :math:`D = P_{\xi} G`.
+# Three function objects handle all prox evaluations during SPDHG:
+#
+# - ``data_fid_subsets`` -- list of :class:`.NegPoissonLogL`, one per subset,
+# - ``nonneg``           -- :class:`.NonNegativeIndicator`, implements :math:`g = \iota_{\geq 0}`,
+# - ``reg``              -- :class:`.MixedL21Norm` (weighted by ``beta``), implements :math:`\beta f_\text{reg}`.
+
+# setup the finite-difference gradient operator
+G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
+# calculate the joint vector field from the structural prior image
+joint_vector_field = G(x_struct)
+# setup the projected gradient (DTV) operator
+P = parallelproj.operators.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
+D = parallelproj.operators.CompositeLinearOperator((P, G))
+
+# one data-fidelity function per subset
+data_fid_subsets = [
+    parallelproj.functions.NegPoissonLogL(d[sl]) for sl in subset_slices
+]
+nonneg = parallelproj.functions.NonNegativeIndicator()
+reg = parallelproj.functions.MixedL21Norm(beta=beta)
+
+# full data fidelity for cost evaluation only
+data_fid_full = parallelproj.functions.NegPoissonLogL(d)
+
+# %%
+# Setup the cost function
+# ^^^^^^^^^^^^^^^^^^^^^^^
+#
+# The total cost is :math:`f_\text{data}(Ax + s) + \beta \, f_\text{reg}(Dx) + g(x)`
+# (the indicator :math:`g(x)` is zero for feasible :math:`x \geq 0`).
+
+
+# %%
+# Unified block lists for SPDHG
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#
+# All blocks -- data subsets and regularization -- are collected into a single
+# list.  SPDHG then selects one block per mini-iteration.
+
+# blocks: n data subsets + 1 regularization
+fs_all = list(data_fid_subsets) + [reg]
+ops_all = list(pet_subset_linop_seq) + [D]
+contams_all = [contamination[sl] for sl in subset_slices] + [None]
+probs_all = [p_a] * num_subsets + [p_g]
+
+# %%
+# Calculate SPDHG step sizes
+# --------------------------
+
+# dual step sizes for data subsets: S^k = gamma * rho / (A^k * 1)
+S_A = []
+for op in pet_subset_linop_seq:
+    tmp = op(xp.ones(op.in_shape, dtype=xp.float32, device=dev))
+    tmp = xp.where(tmp == 0, xp.min(tmp[tmp > 0]), tmp)
+    S_A.append(gamma * rho / tmp)
+
+# dual step size for regularization
+D_norm = D.norm(xp, dev, num_iter=100)
+S_D = gamma * rho / D_norm
+
+S_all = S_A + [S_D]
+
+# primal step size contributions: T^k = rho * p_k / (gamma * (A^k)^T * 1)
+T_candidates = xp.zeros(
+    (num_subsets + 1,) + tuple(pet_lin_op.in_shape), dtype=xp.float32, device=dev
+)
+for k, op in enumerate(pet_subset_linop_seq):
+    adj_ones_k = op.adjoint(xp.ones(op.out_shape, dtype=xp.float32, device=dev))
+    T_candidates[k] = (rho * p_a / gamma) / adj_ones_k
+
+T_candidates[-1] = xp.full(
+    pet_lin_op.in_shape,
+    (rho * p_g / gamma) / D_norm,
+    device=dev,
+    dtype=xp.float32,
+)
+
+# final primal step size: elementwise minimum over all blocks
+T = xp.min(T_candidates, axis=0)
+
+# %%
+# Initialize primal and dual variables
+# -------------------------------------
+
+x_spdhg = 1.0 * x_mlem
+
+# warm-start dual variables for data subsets
+ys = [
+    1 - d[sl] / (pet_subset_linop_seq[k](x_spdhg) + contamination[sl])
+    for k, sl in enumerate(subset_slices)
+]
+
+# warm-start dual variable for regularization
+# w = xp.zeros(D.out_shape, dtype=xp.float32, device=dev)
+w = reg.prox_convex_conj(D(x_spdhg), 1.0)
+
+ys_all = ys + [w]
+
+# initialize z = sum_k (A^k)^T y^k + D^T w  and  zbar = z
+z = xp.zeros(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+for k, op in enumerate(pet_subset_linop_seq):
+    z += op.adjoint(ys[k])
+z += D.adjoint(w)
+zbar = 1.0 * z
+
+# %%
+# Run SPDHG
+# ---------
+#
+# Each outer iteration consists of ``2 * num_subsets`` mini-iterations drawn
+# from a random permutation of block indices.  Indices ``0..num_subsets-1``
+# address the :math:`n` data subsets; index ``num_subsets`` addresses the
+# regularization block.  Using a permutation (rather than i.i.d. draws)
+# ensures that each data subset is visited exactly once and the regularization
+# block is visited ``num_subsets`` times per outer iteration, which closely
+# approximates sampling with probabilities ``p_a`` and ``p_g``.
+
+cost_spdhg = np.zeros(num_iter_spdhg, dtype=np.float32)
+
+for i in range(num_iter_spdhg):
+    # permutation over n data subsets + n regularization slots
+    # k < num_subsets -> data subset k; k >= num_subsets -> regularization (index n)
+    subset_sequence = np.random.permutation(2 * num_subsets)
+
+    for k in subset_sequence:
+        block_idx = k if k < num_subsets else num_subsets
+
+        x_spdhg, z, zbar = spdhg_update(
+            x_spdhg,
+            ys_all,
+            z,
+            zbar,
+            fs_all,
+            ops_all,
+            contams_all,
+            nonneg,
+            S_all,
+            T,
+            selected_idx=block_idx,
+            prob=probs_all[block_idx],
+        )
+
+    if track_cost:
+        cost = data_fid_full(pet_lin_op(x_spdhg) + contamination) + reg(D(x_spdhg))
+        cost_spdhg[i] = cost
+        print(
+            f"SPDHG iter {(i+1):04} / {num_iter_spdhg}, cost {cost_spdhg[i]:.7e}",
+            end="\r",
+        )
+
+print("")
+
+# %%
+# Visualizations
+# --------------
+
+vmax = 1.2 * float(xp.max(x_true))
+
+# %%
+fig_true, _, widgets_true = show_vol_cuts(
+    to_numpy_array(x_true),
+    voxel_size=voxel_size,
+    vmin=0,
+    vmax=vmax,
+    fig_title="true image",
+)
+fig_true.show()
+
+# %%
+fig_mlem, _, widgets_mlem = show_vol_cuts(
+    to_numpy_array(x_mlem),
+    voxel_size=voxel_size,
+    vmin=0,
+    vmax=vmax,
+    fig_title=f"MLEM {num_iter_mlem} iterations",
+)
+fig_mlem.show()
+
+# %%
+fig_spdhg, _, widgets_spdhg = show_vol_cuts(
+    to_numpy_array(x_spdhg),
+    voxel_size=voxel_size,
+    vmin=0,
+    vmax=vmax,
+    fig_title=f"DTV SPDHG {num_iter_spdhg} iterations / {num_subsets} subsets",
+)
+fig_spdhg.show()
+
+# %%
+fig_struct, _, widgets_struct = show_vol_cuts(
+    to_numpy_array(x_struct), voxel_size=voxel_size, fig_title="structural image"
+)
+fig_struct.show()
+
+# %%
+if track_cost:
+    epochs = np.arange(1, num_iter_spdhg + 1)
+    fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4), tight_layout=True)
+    ax2.semilogx(epochs, cost_spdhg, ".-", label=f"SPDHG ({num_subsets} subsets)")
+    ax2.grid(ls=":")
+    ax2.legend()
+    ax2.set_xlabel("iteration")
+    ax2.set_title("cost", fontsize="medium")
+    fig2.show()
