@@ -9,6 +9,10 @@ import os
 
 import numpy as np
 import array_api_compat
+
+# Enable scipy's experimental array API support so that scipy.ndimage functions
+# dispatch correctly for NumPy, CuPy, and PyTorch CPU arrays uniformly.
+os.environ.setdefault("SCIPY_ARRAY_API", "1")
 import scipy.ndimage as ndimage
 from array_api_compat import device, get_namespace
 
@@ -18,10 +22,6 @@ except Exception:
     cp = None
 
 from parallelproj import Array
-
-# Enable scipy's experimental array API support so that scipy.ndimage functions
-# dispatch correctly for NumPy, CuPy, and PyTorch CPU arrays uniformly.
-os.environ.setdefault("SCIPY_ARRAY_API", "1")
 
 
 class LinearOperator(abc.ABC):
