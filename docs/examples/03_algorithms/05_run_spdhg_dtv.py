@@ -120,8 +120,7 @@ def spdhg_update(
     g_function: parallelproj.functions.FunctionWithProx,
     dual_step_sizes: Sequence[float | Array],
     primal_step_size: float | Array,
-    selected_idx: int,
-    prob: float,
+    probs: Sequence[float],
 ) -> tuple[Array, Array, Array]:
     """Perform one SPDHG mini-iteration for problems with multiple linear operators.
 
@@ -159,10 +158,9 @@ def spdhg_update(
         Dual step sizes :math:`S_i`, one per function/operator pair.
     primal_step_size :
         Primal step size :math:`T`.
-    selected_idx :
-        Index of the block to update in this mini-iteration.
-    prob :
-        Selection probability :math:`p_i` of ``selected_idx``; used to scale
+    probs :
+        Selection probabilities :math:`p_i` for each block;
+        used to select subset and to scale
         the over-relaxation :math:`\\bar{z} \\gets z + \\Delta z / p_i`.
 
     Returns
@@ -174,25 +172,28 @@ def spdhg_update(
     zbar_array :
         Updated over-relaxed auxiliary variable :math:`\\bar{z}`.
     """
+
+    # select i based on the provided probabilities
+    i_sub = np.random.choice(len(f_functions), p=probs)
+
     # primal update: prox of g (e.g. non-negativity indicator)
     x -= primal_step_size * zbar_array
     x = g_function.prox(x, primal_step_size)
 
     # dual update: only the selected block
-    i = selected_idx
-    fwd = ops[i](x)
-    if contams[i] is not None:
-        fwd += contams[i]
+    fwd = ops[i_sub](x)
+    if contams[i_sub] is not None:
+        fwd += contams[i_sub]
 
-    y_plus = f_functions[i].prox_convex_conj(
-        dual_vars[i] + dual_step_sizes[i] * fwd, dual_step_sizes[i]
+    y_plus = f_functions[i_sub].prox_convex_conj(
+        dual_vars[i_sub] + dual_step_sizes[i_sub] * fwd, dual_step_sizes[i_sub]
     )
 
-    delta_z = ops[i].adjoint(y_plus - dual_vars[i])
-    dual_vars[i] = y_plus
+    delta_z = ops[i_sub].adjoint(y_plus - dual_vars[i_sub])
+    dual_vars[i_sub] = y_plus
 
     z_array += delta_z
-    zbar_array = z_array + delta_z / prob  # key difference from PDHG
+    zbar_array = z_array + delta_z / probs[i_sub]  # key difference from PDHG
 
     return x, z_array, zbar_array
 
@@ -551,8 +552,7 @@ for i in range(num_iter_spdhg):
             nonneg,
             S_all,
             T,
-            selected_idx=block_idx,
-            prob=probs_all[block_idx],
+            probs_all,
         )
 
     if track_cost:
