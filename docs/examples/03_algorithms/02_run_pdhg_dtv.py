@@ -388,21 +388,13 @@ nonneg = parallelproj.functions.NonNegativeIndicator()
 reg = parallelproj.functions.MixedL21Norm(beta=beta)
 
 # %%
-# Setup the cost function
-# ^^^^^^^^^^^^^^^^^^^^^^^
-#
-# The total cost is :math:`f_\text{data}(Ax + s) + \beta \, f_\text{reg}(Dx) + g(x)`
-# (the indicator :math:`g(x)` is zero for feasible :math:`x \geq 0`).
-
-
-# %%
 # initialize primal and dual variables
-x_pdhg = 1.0 * x_mlem
+x_pdhg = xp.asarray(x_mlem, copy=True)
 y = 1 - d / (pet_lin_op(x_pdhg) + contamination)
 w = xp.zeros(D.out_shape, dtype=xp.float32, device=dev)
 
 z = pet_lin_op.adjoint(y) + D.adjoint(w)
-zbar = 1.0 * z
+zbar = xp.asarray(z, copy=True)
 
 # %%
 # calculate PDHG step sizes

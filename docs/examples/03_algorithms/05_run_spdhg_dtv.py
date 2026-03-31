@@ -68,31 +68,34 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
-# SPDHG update
-# ------------
+# SPDHG update (unified with PDHG)
+# ---------------------------------
 #
-# .. admonition:: SPDHG algorithm (Algorithm 2 from :cite:p:`Ehrhardt2019`)
+# .. admonition:: Unified PDHG / SPDHG algorithm
 #
 #   Minimize :math:`\sum_{k=1}^{n+1} f_k(K_k x + c_k) + g(x)` where the
 #   first :math:`n` blocks are data subsets and block :math:`n{+}1` is the
 #   regularizer.
 #
-#   | **Input** data :math:`d`, operators :math:`K_1,\ldots,K_{n+1}`, probabilities :math:`p_1,\ldots,p_{n+1}`
+#   | **Input** data :math:`d`, operators :math:`K_1,\ldots,K_{n+1}`, probabilities :math:`p_1,\ldots,p_{n+1}` (or ``None`` for full PDHG)
 #   | **Initialize** primal :math:`x`, duals :math:`y_1,\ldots,y_{n+1}`; step sizes :math:`S_i`, :math:`T`
 #   | **Preprocessing** :math:`z = \bar{z} = \sum_i K_i^T y_i`
 #   | **Repeat** until stopping criterion is met
 #   |     :math:`x \;\gets\; \operatorname{prox}_{T g}(x - T\bar{z})`
-#   |     Select :math:`i \in \{1,\ldots,n{+}1\}` with probabilities :math:`(p_i)`
-#   |     :math:`y_i^+ \gets \operatorname{prox}_{S_i f_i^*}(y_i + S_i (K_i x + c_i))`
-#   |     :math:`\Delta z \gets K_i^T(y_i^+ - y_i)`
-#   |     :math:`y_i \gets y_i^+`
+#   |     **if** ``probs`` is ``None`` **(full PDHG)**:
+#   |         update all :math:`y_i^+ \gets \operatorname{prox}_{S_i f_i^*}(y_i + S_i (K_i x + c_i))`
+#   |         :math:`\Delta z \gets \sum_i K_i^T(y_i^+ - y_i)`, :math:`\quad \bar{z} \gets z + \Delta z`
+#   |     **else (SPDHG)**:
+#   |         Select :math:`i \in \{1,\ldots,n{+}1\}` with probabilities :math:`(p_i)`
+#   |         :math:`y_i^+ \gets \operatorname{prox}_{S_i f_i^*}(y_i + S_i (K_i x + c_i))`
+#   |         :math:`\Delta z \gets K_i^T(y_i^+ - y_i)`, :math:`\quad \bar{z} \gets z + \Delta z / p_i`
 #   |     :math:`z \gets z + \Delta z`
-#   |     :math:`\bar{z} \gets z + \Delta z / p_i`
 #   | **Return** :math:`x`
 #
-# Compared to the full PDHG in :doc:`02_run_pdhg_dtv`, the update loop
-# touches only **one** selected block per mini-iteration and scales
-# :math:`\bar{z}` by :math:`1/p_i` instead of :math:`1`.
+# Passing ``probs=None`` recovers the full PDHG update from :doc:`02_run_pdhg_dtv`.
+# Passing per-block probabilities activates SPDHG (Algorithm 2 from
+# :cite:p:`Ehrhardt2019`), which touches only one block per mini-iteration and
+# scales :math:`\bar{z}` by :math:`1/p_i`.
 #
 # .. admonition:: Step sizes
 #
@@ -120,80 +123,125 @@ def spdhg_update(
     g_function: parallelproj.functions.FunctionWithProx,
     dual_step_sizes: Sequence[float | Array],
     primal_step_size: float | Array,
-    probs: Sequence[float],
+    probs: Sequence[float] | None = None,
 ) -> tuple[Array, Array, Array]:
-    """Perform one SPDHG mini-iteration for problems with multiple linear operators.
+    """Unified PDHG / SPDHG update for problems with multiple linear operators.
 
-    Identical to the full PDHG update in :func:`pdhg_update` except that only
-    the dual variable at index ``selected_idx`` is updated, and the
-    over-relaxed variable is scaled by ``1 / prob``:
+    Minimizes ``sum_i f_i(K_i x + c_i) + g(x)`` where each ``f_i`` has a
+    known proximal operator of its convex conjugate and ``g`` has a known
+    proximal operator.
 
-    .. math::
+    The primal variable is updated first::
 
-        \\bar{z} \\gets z + \\Delta z / p_i
+        x <- prox_{T g}(x - T * zbar)
 
-    instead of :math:`\\bar{z} \\gets z + \\Delta z`.
+    Then the dual variable(s) are updated depending on the mode:
+
+    **Full PDHG mode** (``probs=None``):
+        All dual variables are updated each call.  For every block i::
+
+            y_i+ <- prox_{S_i f_i*}(y_i + S_i (K_i x + c_i))
+            delta_z += K_i^T (y_i+ - y_i)
+            y_i <- y_i+
+
+        The auxiliary variables are then updated as::
+
+            z    <- z + delta_z
+            zbar <- z + delta_z          (scale factor 1, i.e. p_i = 1)
+
+    **SPDHG mode** (``probs`` is a sequence of floats):
+        One block i_sub is drawn with probabilities ``probs``.  Only that
+        dual variable is updated::
+
+            y_i+ <- prox_{S_i f_i*}(y_i + S_i (K_i x + c_i))
+            delta_z = K_i^T (y_i+ - y_i)
+            y_i <- y_i+
+
+        The auxiliary variables are then updated as::
+
+            z    <- z + delta_z
+            zbar <- z + delta_z / p_i   (scale factor 1/p_i)
 
     Parameters
     ----------
     x :
         Current primal variable.  Modified in-place during the primal update.
     dual_vars :
-        List of current dual variables :math:`y_i`.  Only ``dual_vars[selected_idx]``
-        is updated in-place.
+        List of current dual variables ``y_i``.  In PDHG mode all entries are
+        updated in-place; in SPDHG mode only the selected entry is updated.
     z_array :
-        Auxiliary variable :math:`z = \\sum_i K_i^T y_i`.
+        Auxiliary variable ``z = sum_i K_i^T y_i``.
     zbar_array :
-        Over-relaxed auxiliary variable :math:`\\bar{z}`.
+        Over-relaxed auxiliary variable ``zbar``.
     f_functions :
-        Functions :math:`f_i`, each exposing a proximal operator of their
-        convex conjugate via :meth:`~parallelproj.functions.FunctionWithConjProx.prox_convex_conj`.
+        Functions ``f_i``, each exposing a proximal operator of their convex
+        conjugate via
+        :meth:`~parallelproj.functions.FunctionWithConjProx.prox_convex_conj`.
     ops :
-        Linear operators :math:`K_i`, one per function.
+        Linear operators ``K_i``, one per function in ``f_functions``.
     contams :
-        Additive offsets :math:`c_i`.  Pass ``None`` for terms without an offset.
+        Additive offsets ``c_i`` applied after each forward projection
+        ``K_i x``.  Pass ``None`` for terms without an offset.
     g_function :
-        Proximal-friendly constraint or regularization function :math:`g`.
+        Proximal-friendly constraint or regularization function ``g``,
+        exposing :meth:`~parallelproj.functions.FunctionWithProx.prox`.
     dual_step_sizes :
-        Dual step sizes :math:`S_i`, one per function/operator pair.
+        Dual step sizes ``S_i``, one per function/operator pair.
     primal_step_size :
-        Primal step size :math:`T`.
+        Primal step size ``T``.
     probs :
-        Selection probabilities :math:`p_i` for each block;
-        used to select subset and to scale
-        the over-relaxation :math:`\\bar{z} \\gets z + \\Delta z / p_i`.
+        Selection probabilities ``p_i`` for each block.  When ``None`` (the
+        default) a full PDHG update is performed (all blocks updated, scale
+        factor 1).  When provided, one block is selected at random and the
+        over-relaxation is scaled by ``1 / p_i`` (SPDHG mode).
 
     Returns
     -------
     x :
         Updated primal variable.
     z_array :
-        Updated auxiliary variable :math:`z`.
+        Updated auxiliary variable ``z``.
     zbar_array :
-        Updated over-relaxed auxiliary variable :math:`\\bar{z}`.
+        Updated over-relaxed auxiliary variable ``zbar``.
     """
-
-    # select i based on the provided probabilities
-    i_sub = np.random.choice(len(f_functions), p=probs)
 
     # primal update: prox of g (e.g. non-negativity indicator)
     x -= primal_step_size * zbar_array
     x = g_function.prox(x, primal_step_size)
 
-    # dual update: only the selected block
-    fwd = ops[i_sub](x)
-    if contams[i_sub] is not None:
-        fwd += contams[i_sub]
+    if probs is None:
+        # full PDHG: update all dual variables
+        delta_z = xp.zeros_like(z_array)
+        for i, (f, op, contam, S) in enumerate(
+            zip(f_functions, ops, contams, dual_step_sizes)
+        ):
+            fwd = op(x)
+            if contam is not None:
+                fwd += contam
+            y_plus = f.prox_convex_conj(dual_vars[i] + S * fwd, S)
+            delta_z += op.adjoint(y_plus - dual_vars[i])
+            dual_vars[i] = y_plus
 
-    y_plus = f_functions[i_sub].prox_convex_conj(
-        dual_vars[i_sub] + dual_step_sizes[i_sub] * fwd, dual_step_sizes[i_sub]
-    )
+        z_array += delta_z
+        zbar_array = z_array + delta_z  # scale factor 1
 
-    delta_z = ops[i_sub].adjoint(y_plus - dual_vars[i_sub])
-    dual_vars[i_sub] = y_plus
+    else:
+        # SPDHG: update one randomly selected block
+        i_sub = np.random.choice(len(f_functions), p=probs)
 
-    z_array += delta_z
-    zbar_array = z_array + delta_z / probs[i_sub]  # key difference from PDHG
+        fwd = ops[i_sub](x)
+        if contams[i_sub] is not None:
+            fwd += contams[i_sub]
+
+        y_plus = f_functions[i_sub].prox_convex_conj(
+            dual_vars[i_sub] + dual_step_sizes[i_sub] * fwd, dual_step_sizes[i_sub]
+        )
+
+        delta_z = ops[i_sub].adjoint(y_plus - dual_vars[i_sub])
+        dual_vars[i_sub] = y_plus
+
+        z_array += delta_z
+        zbar_array = z_array + delta_z / probs[i_sub]  # scale factor 1/p_i
 
     return x, z_array, zbar_array
 
@@ -205,8 +253,10 @@ def spdhg_update(
 img_scale = 0.1
 # number of MLEM iterations used to initialize SPDHG
 num_iter_mlem = 20
-# number of SPDHG outer iterations (each = 2*num_subsets mini-iterations)
-num_iter_spdhg = 50 if dev == "cpu" else 100
+# number of PDHG outer iterations
+num_iter_pdhg = 50 if dev == "cpu" else 50 * 28
+# number of SPDHG outer iterations
+num_iter_spdhg = 50
 # number of sinogram subsets for SPDHG
 num_subsets = 28
 # regularization weight
@@ -345,6 +395,7 @@ d = xp.asarray(
     dtype=xp.float32,
 )
 
+
 # %%
 # Splitting of the forward model into subsets :math:`A^k`
 # -------------------------------------------------------
@@ -438,12 +489,82 @@ reg = parallelproj.functions.MixedL21Norm(beta=beta)
 # full data fidelity for cost evaluation only
 data_fid_full = parallelproj.functions.NegPoissonLogL(d)
 
+
 # %%
-# Setup the cost function
-# ^^^^^^^^^^^^^^^^^^^^^^^
-#
-# The total cost is :math:`f_\text{data}(Ax + s) + \beta \, f_\text{reg}(Dx) + g(x)`
-# (the indicator :math:`g(x)` is zero for feasible :math:`x \geq 0`).
+# initialize primal and dual variables
+x_pdhg = xp.asarray(x_mlem, copy=True)
+y = 1 - d / (pet_lin_op(x_pdhg) + contamination)
+w = xp.zeros(D.out_shape, dtype=xp.float32, device=dev)
+
+z = pet_lin_op.adjoint(y) + D.adjoint(w)
+zbar = xp.asarray(z, copy=True)
+
+# %%
+# calculate PDHG step sizes
+tmp = pet_lin_op(xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev))
+tmp = xp.where(tmp == 0, xp.min(tmp[tmp > 0]), tmp)
+S_A = gamma * rho / tmp
+
+T_A = (
+    (1 / gamma)
+    * rho
+    / pet_lin_op.adjoint(xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev))
+)
+
+D_norm = D.norm(xp, dev, num_iter=100)
+S_D = gamma * rho / D_norm
+T_D = (1 / gamma) * rho / D_norm
+
+T = xp.where(
+    T_A < T_D, T_A, xp.full(pet_lin_op.in_shape, T_D, device=dev, dtype=xp.float32)
+)
+
+
+# -------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
+# %%
+# Run PDHG
+# --------
+
+
+ys = [y, w]
+fs = (data_fid_full, reg)
+ops = (pet_lin_op, D)
+cons = (contamination, None)
+
+cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
+
+for i in range(num_iter_pdhg):
+    x_pdhg, z, zbar = spdhg_update(
+        x_pdhg,
+        ys,
+        z,
+        zbar,
+        fs,
+        ops,
+        cons,
+        nonneg,
+        (S_A, S_D),
+        T,
+        probs=None,  # full PDHG (all blocks updated every iteration
+    )
+
+    if track_cost:
+        cost = data_fid_full(pet_lin_op(x_pdhg) + contamination) + reg(D(x_pdhg))
+
+        cost_pdhg[i] = cost
+        print(
+            f"PDHG iter {(i+1):04} / {num_iter_pdhg}, cost {cost_pdhg[i]:.7e}", end="\r"
+        )
+
+print("")
+
+
+# -------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
 
 # %%
@@ -494,11 +615,13 @@ T_candidates[-1] = xp.full(
 # final primal step size: elementwise minimum over all blocks
 T = xp.min(T_candidates, axis=0)
 
+del T_candidates  # free memory
+
 # %%
 # Initialize primal and dual variables
 # -------------------------------------
 
-x_spdhg = 1.0 * x_mlem
+x_spdhg = xp.asarray(x_mlem, copy=True)
 
 # warm-start dual variables for data subsets
 ys = [
@@ -517,7 +640,7 @@ z = xp.zeros(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 for k, op in enumerate(pet_subset_linop_seq):
     z += op.adjoint(ys[k])
 z += D.adjoint(w)
-zbar = 1.0 * z
+zbar = xp.asarray(z, copy=True)
 
 # %%
 # Run SPDHG
@@ -552,7 +675,7 @@ for i in range(num_iter_spdhg):
             nonneg,
             S_all,
             T,
-            probs_all,
+            probs=probs_all,
         )
 
     if track_cost:
@@ -592,6 +715,17 @@ fig_mlem, _, widgets_mlem = show_vol_cuts(
 fig_mlem.show()
 
 # %%
+fig_pdhg, _, widgets_pdhg = show_vol_cuts(
+    to_numpy_array(x_pdhg),
+    voxel_size=voxel_size,
+    vmin=0,
+    vmax=vmax,
+    fig_title=f"DTV PDHG {num_iter_pdhg} iterations",
+)
+fig_pdhg.show()
+
+
+# %%
 fig_spdhg, _, widgets_spdhg = show_vol_cuts(
     to_numpy_array(x_spdhg),
     voxel_size=voxel_size,
@@ -609,9 +743,14 @@ fig_struct.show()
 
 # %%
 if track_cost:
-    epochs = np.arange(1, num_iter_spdhg + 1)
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4), tight_layout=True)
-    ax2.semilogx(epochs, cost_spdhg, ".-", label=f"SPDHG ({num_subsets} subsets)")
+    ax2.semilogx(np.arange(1, num_iter_pdhg + 1), cost_pdhg, ".-", label=f"PDHG")
+    ax2.semilogx(
+        np.arange(1, num_iter_spdhg + 1),
+        cost_spdhg,
+        ".-",
+        label=f"SPDHG ({num_subsets} subsets)",
+    )
     ax2.grid(ls=":")
     ax2.legend()
     ax2.set_xlabel("iteration")
