@@ -22,18 +22,18 @@ where
 
 Both algorithms are implemented through the single :func:`spdhg_update` function.
 Passing ``probs=None`` performs a **full PDHG** update: all dual blocks are updated
-every iteration and the over-relaxed variable is scaled by 1.  Passing per-block
+every epoch and the over-relaxed variable is scaled by 1.  Passing per-block
 selection probabilities activates **SPDHG**: only one randomly selected block is
 updated per mini-iteration and the over-relaxed variable is scaled by
 :math:`1/p_i`, where :math:`p_i` is the selection probability of that block.
 
-The SPDHG variant is generally faster per iteration because it splits the forward
+The SPDHG variant is generally cheaper per epoch because it splits the forward
 operator :math:`A` into :math:`n` sinogram subsets
 :math:`A = A^1 + \\ldots + A^n` and updates one subset at a time.
 
 The example uses simulated TOF sinogram data with a synthetic elliptic-cylinder
 phantom and a structural prior image derived from the ground-truth activity.
-MLEM is run for a small number of iterations to provide a warm start for both
+MLEM is run for a small number of epochs to provide a warm start for both
 algorithms.
 
 See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior
@@ -250,14 +250,14 @@ def spdhg_update(
 
 # image scale (can be used to simulate more or less counts)
 img_scale = 0.1
-# number of MLEM iterations used to initialize PDHG and SPDHG
-num_iter_mlem = 20
-# number of PDHG outer iterations
-num_iter_pdhg = 50 if dev == "cpu" else 50 * 28
-# number of SPDHG outer iterations (each = 2 * num_subsets mini-iterations)
-num_iter_spdhg = 50
+# number of MLEM epochs used to initialize PDHG and SPDHG
+num_epochs_mlem = 20
+# number of SPDHG epochs (each = 2 * num_subsets mini-iterations)
+num_epochs_spdhg = 50
 # number of sinogram subsets for SPDHG
 num_subsets = 28
+# number of PDHG epochs
+num_epochs_pdhg = 50 if dev == "cpu" else 60 * num_subsets
 # regularization weight
 beta = 6.0
 # step size ratio (used by both PDHG and SPDHG)
@@ -267,7 +267,7 @@ rho = 0.9999
 # contamination in every sinogram bin relative to mean of trues sinogram
 contam = 1.0
 # probability of the regularization (gradient) block update per mini-iteration.
-# Chosen as 0.5 so that each outer SPDHG iteration (2*num_subsets mini-iterations)
+# Chosen as 0.5 so that each outer SPDHG epoch (2*num_subsets mini-iterations)
 # produces on average num_subsets data-subset updates and num_subsets reg updates:
 #   E[data subset visits] = p_a * 2 * num_subsets = 2 * (1 - p_g) = 1  per subset
 #   E[reg visits]         = p_g * 2 * num_subsets = num_subsets
@@ -457,8 +457,8 @@ adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
 
-for i in range(num_iter_mlem):
-    print(f"MLEM iteration {(i + 1):03} / {num_iter_mlem:03}", end="\r")
+for i in range(num_epochs_mlem):
+    print(f"MLEM epoch {(i + 1):03} / {num_epochs_mlem:03}", end="\r")
     dbar = pet_lin_op(x_mlem) + contamination
     x_mlem *= pet_lin_op.adjoint(d / dbar) / adjoint_ones
 
@@ -541,9 +541,9 @@ fs = (data_fid_full, reg)
 ops = (pet_lin_op, D)
 cons = (contamination, None)
 
-cost_pdhg = np.zeros(num_iter_pdhg, dtype=np.float32)
+cost_pdhg = np.zeros(num_epochs_pdhg, dtype=np.float32)
 
-for i in range(num_iter_pdhg):
+for i in range(num_epochs_pdhg):
     x_pdhg, z, zbar = spdhg_update(
         x_pdhg,
         ys,
@@ -555,7 +555,7 @@ for i in range(num_iter_pdhg):
         nonneg,
         (S_A, S_D),
         T,
-        probs=None,  # full PDHG (all blocks updated every iteration)
+        probs=None,  # full PDHG (all blocks updated every epoch)
     )
 
     if track_cost:
@@ -563,7 +563,8 @@ for i in range(num_iter_pdhg):
 
         cost_pdhg[i] = cost
         print(
-            f"PDHG iter {(i+1):04} / {num_iter_pdhg}, cost {cost_pdhg[i]:.7e}", end="\r"
+            f"PDHG epoch {(i+1):04} / {num_epochs_pdhg}, cost {cost_pdhg[i]:.7e}",
+            end="\r",
         )
 
 print("")
@@ -647,22 +648,22 @@ zbar = xp.asarray(z, copy=True)
 # Run SPDHG
 # ---------
 #
-# Each outer iteration consists of ``2 * num_subsets`` mini-iterations.
+# Each outer epoch consists of ``2 * num_subsets`` mini-iterations.
 # In each mini-iteration :func:`spdhg_update` randomly draws one block
 # according to ``probs_all`` (probability ``p_a`` per data subset,
 # ``p_g`` for the regularization block) and updates only that dual variable.
 # With ``p_g = 0.5`` and ``p_a = (1 - p_g) / num_subsets``, the expected
-# number of updates per outer iteration is:
+# number of updates per outer epoch is:
 #
 #   * ``p_a * 2 * num_subsets = 1`` update per data subset  (one full pass)
 #   * ``p_g * 2 * num_subsets = num_subsets`` regularization updates
 #
-# so each outer SPDHG iteration is roughly equivalent to one epoch over
-# the data subsets plus ``num_subsets`` regularization gradient steps.
+# so each outer SPDHG epoch consists of one pass over all data subsets
+# plus ``num_subsets`` regularization gradient steps.
 
-cost_spdhg = np.zeros(num_iter_spdhg, dtype=np.float32)
+cost_spdhg = np.zeros(num_epochs_spdhg, dtype=np.float32)
 
-for i in range(num_iter_spdhg):
+for i in range(num_epochs_spdhg):
     for _ in range(2 * num_subsets):
         x_spdhg, z, zbar = spdhg_update(
             x_spdhg,
@@ -682,7 +683,7 @@ for i in range(num_iter_spdhg):
         cost = data_fid_full(pet_lin_op(x_spdhg) + contamination) + reg(D(x_spdhg))
         cost_spdhg[i] = cost
         print(
-            f"SPDHG iter {(i+1):04} / {num_iter_spdhg}, cost {cost_spdhg[i]:.7e}",
+            f"SPDHG epoch {(i+1):04} / {num_epochs_spdhg}, cost {cost_spdhg[i]:.7e}",
             end="\r",
         )
 
@@ -710,7 +711,7 @@ fig_mlem, _, widgets_mlem = show_vol_cuts(
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
-    fig_title=f"MLEM {num_iter_mlem} iterations",
+    fig_title=f"MLEM {num_epochs_mlem} epochs",
 )
 fig_mlem.show()
 
@@ -720,7 +721,7 @@ fig_pdhg, _, widgets_pdhg = show_vol_cuts(
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
-    fig_title=f"DTV PDHG {num_iter_pdhg} iterations",
+    fig_title=f"DTV PDHG {num_epochs_pdhg} epochs",
 )
 fig_pdhg.show()
 
@@ -731,7 +732,7 @@ fig_spdhg, _, widgets_spdhg = show_vol_cuts(
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
-    fig_title=f"DTV SPDHG {num_iter_spdhg} iterations / {num_subsets} subsets",
+    fig_title=f"DTV SPDHG {num_epochs_spdhg} epochs / {num_subsets} subsets",
 )
 fig_spdhg.show()
 
@@ -744,15 +745,15 @@ fig_struct.show()
 # %%
 if track_cost:
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4), tight_layout=True)
-    ax2.semilogx(np.arange(1, num_iter_pdhg + 1), cost_pdhg, ".-", label=f"PDHG")
+    ax2.semilogx(np.arange(1, num_epochs_pdhg + 1), cost_pdhg, ".-", label=f"PDHG")
     ax2.semilogx(
-        np.arange(1, num_iter_spdhg + 1),
+        np.arange(1, num_epochs_spdhg + 1),
         cost_spdhg,
         ".-",
         label=f"SPDHG ({num_subsets} subsets)",
     )
     ax2.grid(ls=":")
     ax2.legend()
-    ax2.set_xlabel("iteration")
+    ax2.set_xlabel("epoch")
     ax2.set_title("cost", fontsize="medium")
     fig2.show()
