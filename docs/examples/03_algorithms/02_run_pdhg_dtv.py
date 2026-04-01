@@ -1,9 +1,10 @@
 """
-SPDHG to optimize the Poisson logL and directional TV (structural prior)
-========================================================================
+PDHG and SPDHG for PET reconstruction with a directional TV prior
+==================================================================
 
-This example demonstrates the stochastic primal-dual hybrid gradient (SPDHG)
-algorithm applied to the problem
+This example demonstrates the primal-dual hybrid gradient (PDHG) algorithm
+and its stochastic variant (SPDHG) applied to the regularized PET
+reconstruction problem
 
 .. math::
     \\min_x \\; f_\\text{data}(Ax + s) + \\beta \\, f_\\text{reg}(Dx) + g(x)
@@ -15,31 +16,29 @@ where
 - :math:`g = \\iota_{\\geq 0}` -- the indicator function of the non-negative orthant,
 - :math:`D = P_{\\xi} G` -- the projected finite-difference gradient operator
   implementing a directional total variation (DTV) structural prior,
-- :math:`A = A^1 + \\ldots + A^n` -- the composite PET forward operator split into
-  :math:`n` sinogram subsets, and
+- :math:`A` -- the composite PET forward operator (resolution model, TOF projector,
+  attenuation), and
 - :math:`s` -- the contamination sinogram.
 
-SPDHG replaces the full dual update of PDHG with a randomised update that
-touches only one block (a data subset or the regularization operator) per
-mini-iteration, while maintaining provable convergence.
+Both algorithms are implemented through the single :func:`spdhg_update` function.
+Passing ``probs=None`` performs a **full PDHG** update: all dual blocks are updated
+every iteration and the over-relaxed variable is scaled by 1.  Passing per-block
+selection probabilities activates **SPDHG**: only one randomly selected block is
+updated per mini-iteration and the over-relaxed variable is scaled by
+:math:`1/p_i`, where :math:`p_i` is the selection probability of that block.
 
-Compared to :doc:`02_run_pdhg_dtv`, the only algorithmic change is:
-
-1. The operator / function list is extended with :math:`n` data-subset entries
-   instead of one full-sinogram entry.
-2. Each mini-iteration selects one block at random (or via a shuffled
-   permutation), updates only that dual variable, and scales
-   :math:`\\bar{z} \\gets z + \\Delta z / p_i` by the block's selection
-   probability :math:`p_i` (compare :math:`\\bar{z} \\gets z + \\Delta z`
-   in full PDHG).
+The SPDHG variant is generally faster per iteration because it splits the forward
+operator :math:`A` into :math:`n` sinogram subsets
+:math:`A = A^1 + \\ldots + A^n` and updates one subset at a time.
 
 The example uses simulated TOF sinogram data with a synthetic elliptic-cylinder
 phantom and a structural prior image derived from the ground-truth activity.
-MLEM is run for a small number of iterations to obtain a warm start for SPDHG.
+MLEM is run for a small number of iterations to provide a warm start for both
+algorithms.
 
-See :cite:p:`Ehrhardt2019` for the SPDHG algorithm (Algorithm 2),
-:cite:p:`Ehrhardt2016` for the DTV prior,
-and :cite:p:`Schramm2022` for the step-size rules.
+See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior
+and the SPDHG algorithm (Algorithm 2), and :cite:p:`Schramm2022` for the step-size
+rules used here.
 """
 
 # %%
@@ -68,8 +67,8 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
-# SPDHG update (unified with PDHG)
-# ---------------------------------
+# Unified PDHG / SPDHG update function
+# -------------------------------------
 #
 # .. admonition:: Unified PDHG / SPDHG algorithm
 #
@@ -92,10 +91,10 @@ xp, dev = suggest_array_backend_and_device(None, None)
 #   |     :math:`z \gets z + \Delta z`
 #   | **Return** :math:`x`
 #
-# Passing ``probs=None`` recovers the full PDHG update from :doc:`02_run_pdhg_dtv`.
-# Passing per-block probabilities activates SPDHG (Algorithm 2 from
-# :cite:p:`Ehrhardt2019`), which touches only one block per mini-iteration and
-# scales :math:`\bar{z}` by :math:`1/p_i`.
+# Passing ``probs=None`` performs a full PDHG update (all blocks updated every
+# call, scale factor 1).  Passing per-block probabilities activates SPDHG
+# (Algorithm 2 from :cite:p:`Ehrhardt2019`), which touches only one block per
+# mini-iteration and scales :math:`\bar{z}` by :math:`1/p_i`.
 #
 # .. admonition:: Step sizes
 #
@@ -465,9 +464,10 @@ for i in range(num_iter_mlem):
 #
 # The finite-difference gradient operator :math:`G` is projected by
 # :math:`P_{\xi}` to obtain the DTV operator :math:`D = P_{\xi} G`.
-# Three function objects handle all prox evaluations during SPDHG:
+# Three function objects handle all prox evaluations during PDHG and SPDHG:
 #
-# - ``data_fid_subsets`` -- list of :class:`.NegPoissonLogL`, one per subset,
+# - ``data_fid_subsets`` -- list of :class:`.NegPoissonLogL`, one per subset (used by SPDHG);
+#   ``data_fid_full`` is the full-sinogram version used by PDHG and for cost evaluation,
 # - ``nonneg``           -- :class:`.NonNegativeIndicator`, implements :math:`g = \iota_{\geq 0}`,
 # - ``reg``              -- :class:`.MixedL21Norm` (weighted by ``beta``), implements :math:`\beta f_\text{reg}`.
 
@@ -491,6 +491,13 @@ data_fid_full = parallelproj.functions.NegPoissonLogL(d)
 
 
 # %%
+# Setup PDHG -- step sizes and primal / dual variables
+# -----------------------------------------------------
+#
+# The step sizes follow the rules from :cite:p:`Schramm2022`.  The primal
+# variable is warm-started from the MLEM result; the dual variables are
+# warm-started from the current residuals.
+
 # initialize primal and dual variables
 x_pdhg = xp.asarray(x_mlem, copy=True)
 y = 1 - d / (pet_lin_op(x_pdhg) + contamination)
@@ -519,10 +526,6 @@ T = xp.where(
     T_A < T_D, T_A, xp.full(pet_lin_op.in_shape, T_D, device=dev, dtype=xp.float32)
 )
 
-
-# -------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------
 
 # %%
 # Run PDHG
@@ -560,11 +563,6 @@ for i in range(num_iter_pdhg):
         )
 
 print("")
-
-
-# -------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------
 
 
 # %%
@@ -629,9 +627,7 @@ ys = [
     for k, sl in enumerate(subset_slices)
 ]
 
-# warm-start dual variable for regularization
-# w = xp.zeros(D.out_shape, dtype=xp.float32, device=dev)
-w = reg.prox_convex_conj(D(x_spdhg), 1.0)
+w = xp.zeros(D.out_shape, dtype=xp.float32, device=dev)
 
 ys_all = ys + [w]
 
@@ -662,8 +658,7 @@ for i in range(num_iter_spdhg):
     subset_sequence = np.random.permutation(2 * num_subsets)
 
     for k in subset_sequence:
-        block_idx = k if k < num_subsets else num_subsets
-
+        # the SPHDG update function chooses the block to update based on the provided probabilities
         x_spdhg, z, zbar = spdhg_update(
             x_spdhg,
             ys_all,
