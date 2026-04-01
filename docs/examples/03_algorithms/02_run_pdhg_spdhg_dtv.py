@@ -250,23 +250,27 @@ def spdhg_update(
 
 # image scale (can be used to simulate more or less counts)
 img_scale = 0.1
-# number of MLEM iterations used to initialize SPDHG
+# number of MLEM iterations used to initialize PDHG and SPDHG
 num_iter_mlem = 20
 # number of PDHG outer iterations
 num_iter_pdhg = 50 if dev == "cpu" else 50 * 28
-# number of SPDHG outer iterations
+# number of SPDHG outer iterations (each = 2 * num_subsets mini-iterations)
 num_iter_spdhg = 50
 # number of sinogram subsets for SPDHG
 num_subsets = 28
 # regularization weight
 beta = 6.0
-# step size ratio for SPDHG
+# step size ratio (used by both PDHG and SPDHG)
 gamma = 10.0 / img_scale
-# rho value for SPDHG
+# rho parameter controlling the step size margin (used by both PDHG and SPDHG)
 rho = 0.9999
 # contamination in every sinogram bin relative to mean of trues sinogram
 contam = 1.0
-# probability of the regularization (gradient) block update per mini-iteration
+# probability of the regularization (gradient) block update per mini-iteration.
+# Chosen as 0.5 so that each outer SPDHG iteration (2*num_subsets mini-iterations)
+# produces on average num_subsets data-subset updates and num_subsets reg updates:
+#   E[data subset visits] = p_a * 2 * num_subsets = 2 * (1 - p_g) = 1  per subset
+#   E[reg visits]         = p_g * 2 * num_subsets = num_subsets
 p_g = 0.5
 # probability of each data subset block update per mini-iteration
 p_a = (1 - p_g) / num_subsets
@@ -286,7 +290,7 @@ track_cost = True
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
 # We setup a linear forward operator :math:`A` consisting of an
-# image-based resolution model, a non-TOF PET projector and an attenuation model.
+# image-based resolution model, a TOF PET projector and an attenuation model.
 
 num_rings = 2
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -551,7 +555,7 @@ for i in range(num_iter_pdhg):
         nonneg,
         (S_A, S_D),
         T,
-        probs=None,  # full PDHG (all blocks updated every iteration
+        probs=None,  # full PDHG (all blocks updated every iteration)
     )
 
     if track_cost:
@@ -566,11 +570,12 @@ print("")
 
 
 # %%
-# Unified block lists for SPDHG
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# Setup SPDHG -- block lists, step sizes, and primal / dual variables
+# -------------------------------------------------------------------
 #
-# All blocks -- data subsets and regularization -- are collected into a single
-# list.  SPDHG then selects one block per mini-iteration.
+# All blocks (data subsets and regularization) are collected into a single
+# list.  Each mini-iteration, :func:`spdhg_update` draws one block at random
+# according to ``probs_all`` and updates only that dual variable.
 
 # blocks: n data subsets + 1 regularization
 fs_all = list(data_fid_subsets) + [reg]
@@ -589,8 +594,7 @@ for op in pet_subset_linop_seq:
     tmp = xp.where(tmp == 0, xp.min(tmp[tmp > 0]), tmp)
     S_A.append(gamma * rho / tmp)
 
-# dual step size for regularization
-D_norm = D.norm(xp, dev, num_iter=100)
+# dual step size for regularization (reuse D_norm computed for PDHG above)
 S_D = gamma * rho / D_norm
 
 S_all = S_A + [S_D]
@@ -627,6 +631,7 @@ ys = [
     for k, sl in enumerate(subset_slices)
 ]
 
+# zero-initialize the regularization dual variable (no warm-start for SPDHG)
 w = xp.zeros(D.out_shape, dtype=xp.float32, device=dev)
 
 ys_all = ys + [w]
@@ -642,23 +647,23 @@ zbar = xp.asarray(z, copy=True)
 # Run SPDHG
 # ---------
 #
-# Each outer iteration consists of ``2 * num_subsets`` mini-iterations drawn
-# from a random permutation of block indices.  Indices ``0..num_subsets-1``
-# address the :math:`n` data subsets; index ``num_subsets`` addresses the
-# regularization block.  Using a permutation (rather than i.i.d. draws)
-# ensures that each data subset is visited exactly once and the regularization
-# block is visited ``num_subsets`` times per outer iteration, which closely
-# approximates sampling with probabilities ``p_a`` and ``p_g``.
+# Each outer iteration consists of ``2 * num_subsets`` mini-iterations.
+# In each mini-iteration :func:`spdhg_update` randomly draws one block
+# according to ``probs_all`` (probability ``p_a`` per data subset,
+# ``p_g`` for the regularization block) and updates only that dual variable.
+# With ``p_g = 0.5`` and ``p_a = (1 - p_g) / num_subsets``, the expected
+# number of updates per outer iteration is:
+#
+#   * ``p_a * 2 * num_subsets = 1`` update per data subset  (one full pass)
+#   * ``p_g * 2 * num_subsets = num_subsets`` regularization updates
+#
+# so each outer SPDHG iteration is roughly equivalent to one epoch over
+# the data subsets plus ``num_subsets`` regularization gradient steps.
 
 cost_spdhg = np.zeros(num_iter_spdhg, dtype=np.float32)
 
 for i in range(num_iter_spdhg):
-    # permutation over n data subsets + n regularization slots
-    # k < num_subsets -> data subset k; k >= num_subsets -> regularization (index n)
-    subset_sequence = np.random.permutation(2 * num_subsets)
-
-    for k in subset_sequence:
-        # the SPHDG update function chooses the block to update based on the provided probabilities
+    for _ in range(2 * num_subsets):
         x_spdhg, z, zbar = spdhg_update(
             x_spdhg,
             ys_all,
