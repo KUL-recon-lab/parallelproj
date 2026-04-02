@@ -77,7 +77,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 num_subsets = 24
 
 # if run on a CPU limit the number of epochs
-num_epochs = (480 if dev == "cpu" else 1200) // num_subsets
+num_epochs = (240 if dev == "cpu" else 1200) // num_subsets
 
 # regularisation weight beta
 beta = 3.0

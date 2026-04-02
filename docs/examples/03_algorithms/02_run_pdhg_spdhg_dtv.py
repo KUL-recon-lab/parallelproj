@@ -257,7 +257,7 @@ num_epochs_spdhg = 50
 # number of sinogram subsets for SPDHG
 num_subsets = 28
 # number of PDHG epochs
-num_epochs_pdhg = 50 if dev == "cpu" else 60 * num_subsets
+num_epochs_pdhg = 25 if dev == "cpu" else 50 * num_subsets
 # regularization weight
 beta = 6.0
 # step size ratio (used by both PDHG and SPDHG)

@@ -57,7 +57,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 num_subsets = 24
 
 # if run on a CPU limit the number of "OSEM / SVRG epochs"
-num_epochs_mlem = 480 if dev == "cpu" else 1200
+num_epochs_mlem = 240 if dev == "cpu" else 1200
 num_epochs = num_epochs_mlem // num_subsets
 
 # run MLEM only on GPU - it is too slow on CPU for the number of iterations used here
