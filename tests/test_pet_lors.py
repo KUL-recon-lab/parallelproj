@@ -5,6 +5,8 @@ import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
 import matplotlib.pyplot as plt
 
+from parallelproj import to_numpy_array
+
 from types import ModuleType
 
 from .config import pytestmark
@@ -500,3 +502,251 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
     lor_desc.show_block_pair_lors(ax3, block_pair_nums=None, color=plt.cm.tab10(0))
     fig3.show()
     plt.close(fig3)
+
+
+def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
+    """Tests for :class:`SinogramAxialCompressionOperator`.
+
+    Covers:
+
+    * constructor validation,
+    * shape / companion-descriptor consistency,
+    * adjointness via the inherited random-array helper,
+    * closed-form operator norm :math:`\\|G\\|_2 = \\sqrt{\\max_n m_n}`,
+    * closed-form roundtrip :math:`G^T G \\mathbf{1} = m[\\tau(p_1)]`,
+    * a hand-computed mini-scanner verification of the forward and adjoint,
+    * ``target_span=1`` identity behaviour,
+    * all :class:`SinogramSpatialAxisOrder` permutations,
+    * TOF pass-through.
+    """
+    import numpy as _np
+
+    # 3-ring scanner with tiny radial/view counts so things are tractable.
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=4,
+        num_lor_endpoints_per_side=2,
+        lor_spacing=4.0,
+        ring_positions=xp.asarray([0.0, 1.0, 2.0], device=dev),
+        symmetry_axis=2,
+    )
+
+    lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        radial_trim=2,
+        max_ring_difference=2,
+        sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+        span=1,
+    )
+
+    # ------------------------------------------------------------------
+    # Constructor validation
+    # ------------------------------------------------------------------
+    with pytest.raises(TypeError):
+        ppl.SinogramAxialCompressionOperator("not a descriptor", 3)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="target_span"):
+        ppl.SinogramAxialCompressionOperator(lor_s1, 2)  # even
+
+    with pytest.raises(ValueError, match="target_span"):
+        ppl.SinogramAxialCompressionOperator(lor_s1, 0)
+
+    with pytest.raises(ValueError, match="num_tof_bins"):
+        ppl.SinogramAxialCompressionOperator(lor_s1, 3, num_tof_bins=0)
+
+    lor_s3_input = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=3
+    )
+    with pytest.raises(ValueError, match="span=1"):
+        ppl.SinogramAxialCompressionOperator(lor_s3_input, 3)
+
+    # ------------------------------------------------------------------
+    # Build operator and check shapes / companion descriptor
+    # ------------------------------------------------------------------
+    op = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=3)
+
+    assert op.target_span == 3
+    assert op.num_tof_bins is None
+    assert op.lor_descriptor is lor_s1
+    assert op.in_shape == lor_s1.spatial_sinogram_shape
+    assert op.out_shape == op.out_lor_descriptor.spatial_sinogram_shape
+    assert op.num_planes_in == lor_s1.num_planes
+    assert op.num_planes_out == op.out_lor_descriptor.num_planes
+    assert "target_span=3" in str(op)
+
+    op_mult_np = _np.asarray(to_numpy_array(op.plane_multiplicity))
+    desc_mult_np = _np.asarray(
+        to_numpy_array(op.out_lor_descriptor.plane_multiplicity)
+    )
+    assert _np.array_equal(op_mult_np, desc_mult_np)
+
+    # ------------------------------------------------------------------
+    # adjointness (random arrays via the LinearOperator base-class helper)
+    # ------------------------------------------------------------------
+    assert op.adjointness_test(xp, dev)
+
+    # ------------------------------------------------------------------
+    # Closed-form operator norm
+    # ------------------------------------------------------------------
+    expected_norm = float(_np.sqrt(int(op_mult_np.max())))
+    assert abs(op.norm(xp, dev) - expected_norm) < 1e-6
+    assert op.max_plane_multiplicity == int(op_mult_np.max())
+
+    # ------------------------------------------------------------------
+    # Closed-form roundtrip:  G^T G 1  =  m[target(p1)]
+    # ------------------------------------------------------------------
+    x_ones = xp.ones(op.in_shape, dtype=xp.float32, device=dev)
+    rt = op.adjoint(op(x_ones))
+
+    target = op.target_plane_for_input_plane
+    expected_plane_vals = xp.astype(
+        xp.take(op.plane_multiplicity, target, axis=0), xp.float32
+    )
+
+    P_axis = op.lor_descriptor.plane_axis_num
+    rt_np = _np.asarray(to_numpy_array(rt))
+    epv_np = _np.asarray(to_numpy_array(expected_plane_vals))
+    rt_moved = _np.moveaxis(rt_np, P_axis, -1)
+    assert _np.all(rt_moved == epv_np[None, None, :])
+
+    # ------------------------------------------------------------------
+    # Hand-computed mini-scanner verification (3 rings, mrd=2, span=1->3)
+    # ------------------------------------------------------------------
+    # Span-1 plane order (rd = 0, +1, -1, +2, -2) -> p1 = 0..8:
+    #
+    #     p1   (s, e)   rd   seg(S=3)   mid = s + e
+    #      0   (0,0)    0       0           0
+    #      1   (1,1)    0       0           2
+    #      2   (2,2)    0       0           4
+    #      3   (0,1)   +1       0           1
+    #      4   (1,2)   +1       0           3
+    #      5   (1,0)   -1       0           1
+    #      6   (2,1)   -1       0           3
+    #      7   (0,2)   +2      +1           2
+    #      8   (2,0)   -2      -1           2
+    #
+    # Output planes (sorted by (|seg|, -seg, mid)):
+    #
+    #      n = 0   (seg  0, mid 0)  <- p1 = 0
+    #      n = 1   (seg  0, mid 1)  <- p1 = 3, 5
+    #      n = 2   (seg  0, mid 2)  <- p1 = 1
+    #      n = 3   (seg  0, mid 3)  <- p1 = 4, 6
+    #      n = 4   (seg  0, mid 4)  <- p1 = 2
+    #      n = 5   (seg +1, mid 2)  <- p1 = 7
+    #      n = 6   (seg -1, mid 2)  <- p1 = 8
+    int_dtype = op.target_plane_for_input_plane.dtype
+    expected_target = xp.asarray(
+        [0, 2, 4, 1, 3, 1, 3, 5, 6], device=dev, dtype=int_dtype
+    )
+    assert bool(xp.all(op.target_plane_for_input_plane == expected_target))
+
+    mult_dtype = op.plane_multiplicity.dtype
+    expected_mult = xp.asarray(
+        [1, 2, 1, 2, 1, 1, 1], device=dev, dtype=mult_dtype
+    )
+    assert bool(xp.all(op.plane_multiplicity == expected_mult))
+
+    # Forward on a deterministic input  x[r, v, p1] = p1.
+    _, _, P = op.in_shape
+    plane_vals_in = xp.astype(xp.arange(P, device=dev), xp.float32)
+    x_in = xp.zeros(op.in_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        plane_vals_in, (1, 1, P)
+    )
+
+    y_out = op(x_in)
+
+    # Expected per-output-plane sum (constant in r, v):
+    #   y[n=0] = 0;  y[n=1] = 3+5 = 8;  y[n=2] = 1;  y[n=3] = 4+6 = 10;
+    #   y[n=4] = 2;  y[n=5] = 7;        y[n=6] = 8.
+    expected_plane_sums = xp.asarray(
+        [0.0, 8.0, 1.0, 10.0, 2.0, 7.0, 8.0], device=dev, dtype=xp.float32
+    )
+    expected_y = xp.zeros(op.out_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        expected_plane_sums, (1, 1, op.num_planes_out)
+    )
+    assert bool(xp.all(y_out == expected_y))
+
+    # Adjoint on  y[r, v, n] = 10 + n  gives  x[r, v, p1] = 10 + target(p1).
+    plane_vals_out = 10.0 + xp.astype(
+        xp.arange(op.num_planes_out, device=dev), xp.float32
+    )
+    y_in = xp.zeros(op.out_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        plane_vals_out, (1, 1, op.num_planes_out)
+    )
+    x_adj = op.adjoint(y_in)
+    expected_adj = xp.asarray(
+        [10.0, 12.0, 14.0, 11.0, 13.0, 11.0, 13.0, 15.0, 16.0],
+        device=dev,
+        dtype=xp.float32,
+    )
+    expected_x_adj = xp.zeros(op.in_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        expected_adj, (1, 1, op.num_planes_in)
+    )
+    assert bool(xp.all(x_adj == expected_x_adj))
+
+    # ------------------------------------------------------------------
+    # target_span = 1 is identity (each input plane in its own output)
+    # ------------------------------------------------------------------
+    op_id = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=1)
+    assert op_id.in_shape == op_id.out_shape
+    assert op_id.num_planes_in == op_id.num_planes_out
+    assert op_id.max_plane_multiplicity == 1
+
+    expected_id_target = xp.astype(
+        xp.arange(op_id.num_planes_in, device=dev),
+        op_id.target_plane_for_input_plane.dtype,
+    )
+    assert bool(xp.all(op_id.target_plane_for_input_plane == expected_id_target))
+
+    rng = _np.random.RandomState(0)
+    x_rand = xp.asarray(
+        rng.rand(*op_id.in_shape).astype(_np.float32), device=dev
+    )
+    assert bool(xp.all(op_id(x_rand) == x_rand))
+    assert bool(xp.all(op_id.adjoint(x_rand) == x_rand))
+
+    # ------------------------------------------------------------------
+    # All sinogram_orders work end-to-end (in/out plane axes line up,
+    # adjointness still holds)
+    # ------------------------------------------------------------------
+    for order in ppl.SinogramSpatialAxisOrder:
+        lor = ppl.RegularPolygonPETLORDescriptor(
+            scanner, max_ring_difference=2, sinogram_order=order, span=1
+        )
+        op_o = ppl.SinogramAxialCompressionOperator(lor, target_span=3)
+        p_ax = order.name.find("P")
+        r_ax = order.name.find("R")
+        v_ax = order.name.find("V")
+        assert op_o.in_shape[p_ax] == lor.num_planes
+        assert op_o.out_shape[p_ax] == op_o.num_planes_out
+        assert op_o.in_shape[r_ax] == op_o.out_shape[r_ax]
+        assert op_o.in_shape[v_ax] == op_o.out_shape[v_ax]
+        assert op_o.adjointness_test(xp, dev)
+
+    # ------------------------------------------------------------------
+    # TOF pass-through: trailing axis carried unchanged, and the
+    # per-TOF-bin output equals the non-TOF operator applied to
+    # that TOF slice.
+    # ------------------------------------------------------------------
+    num_tof = 5
+    op_tof = ppl.SinogramAxialCompressionOperator(
+        lor_s1, target_span=3, num_tof_bins=num_tof
+    )
+    assert op_tof.num_tof_bins == num_tof
+    assert op_tof.in_shape == lor_s1.spatial_sinogram_shape + (num_tof,)
+    assert (
+        op_tof.out_shape
+        == op_tof.out_lor_descriptor.spatial_sinogram_shape + (num_tof,)
+    )
+    assert op_tof.adjointness_test(xp, dev)
+
+    rng2 = _np.random.RandomState(42)
+    x_tof = xp.asarray(
+        rng2.rand(*op_tof.in_shape).astype(_np.float32), device=dev
+    )
+    y_tof = op_tof(x_tof)
+    for t in range(num_tof):
+        # op_tof(x)[..., t]  ==  op(x[..., t])
+        assert bool(xp.all(y_tof[..., t] == op(x_tof[..., t])))

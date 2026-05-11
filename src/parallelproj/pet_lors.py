@@ -17,6 +17,7 @@ from matplotlib.patches import Circle
 
 from ._backend import Array, to_numpy_array
 
+from .operators import LinearOperator
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
@@ -1048,3 +1049,368 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             subset_views.append(all_views[sl[self.view_axis_num]])
 
         return subset_views, subset_slices
+
+
+class SinogramAxialCompressionOperator(LinearOperator):
+    """Linear operator that axially compresses a span-1 PET sinogram into a higher odd span.
+
+    For an input :class:`RegularPolygonPETLORDescriptor` with ``span=1`` and a
+    target odd span :math:`S`, every span-1 ring pair
+    :math:`(s, e)` is assigned to an output bin
+    :math:`(\\text{segment}, \\text{axial midpoint})` where
+
+    * ``segment`` is determined by the ring difference :math:`rd = e - s` under
+      target span :math:`S` (matches Siemens / STIR conventions; see
+      :meth:`RegularPolygonPETLORDescriptor._ring_diff_to_segment`),
+    * ``axial midpoint`` is :math:`s + e` (an integer equal to twice the actual
+      midpoint).
+
+    All span-1 ring pairs sharing the same
+    :math:`(\\text{segment}, s + e)` collapse into a single output plane.
+
+    .. math::
+
+        y_n \\;=\\; \\sum_{p_1 \\in \\mathcal{G}(n)} x_{p_1}
+        \\qquad
+        \\left(G^T y\\right)_{p_1} \\;=\\; y_{\\,\\tau(p_1)}
+
+    where :math:`\\mathcal{G}(n)` is the set of input plane indices mapped to
+    output plane :math:`n` and :math:`\\tau(p_1)` is the output plane index for
+    input plane :math:`p_1`.
+
+    Output plane ordering matches that of
+    :class:`RegularPolygonPETLORDescriptor` constructed with the same scanner,
+    ``radial_trim``, ``max_ring_difference``, and ``sinogram_order`` but with
+    ``span=target_span``.  That companion descriptor is exposed as
+    :attr:`out_lor_descriptor` for visualization (e.g. ``show_michelogram``,
+    ``show_segment_lors``) or for composing the operator with a span-:math:`S`
+    projector.
+
+    Because :math:`G` is a 0/1 row-stochastic gather (each column has exactly
+    one ``1``),
+
+    .. math::
+
+        G G^T = \\operatorname{diag}(m_n), \\qquad
+        \\|G\\|_2 \\;=\\; \\sqrt{\\max_n m_n}
+
+    where :math:`m_n` is the multiplicity of output plane :math:`n` (the number
+    of span-1 planes that collapse into it).  The operator's :meth:`norm` returns
+    this closed-form value directly without power iteration.
+
+    Parameters
+    ----------
+    lor_descriptor : RegularPolygonPETLORDescriptor
+        A ``span=1`` LOR descriptor whose sinogram is to be compressed.
+    target_span : int
+        Odd integer ``>= 1`` giving the target axial compression.  ``1`` is
+        accepted and yields an identity-like operator (each input plane maps to
+        a single output plane in the same span-1 order).
+    num_tof_bins : int or None, optional
+        If ``None`` (default), the operator acts on the 3D spatial sinogram
+        with shape :attr:`RegularPolygonPETLORDescriptor.spatial_sinogram_shape`.
+        If a positive integer, the operator acts on a 4D TOF sinogram whose
+        trailing axis (size ``num_tof_bins``) is the TOF axis and is passed
+        through unchanged.
+
+    Examples
+    --------
+    >>> import array_api_compat.numpy as xp
+    >>> import parallelproj.pet_scanners as pps
+    >>> import parallelproj.pet_lors as ppl
+    >>> scanner = pps.RegularPolygonPETScannerGeometry(
+    ...     xp, "cpu", radius=65.0, num_sides=12, num_lor_endpoints_per_side=4,
+    ...     lor_spacing=4.0, ring_positions=xp.asarray([0.0, 1.0, 2.0]),
+    ...     symmetry_axis=2,
+    ... )
+    >>> lor_s1 = ppl.RegularPolygonPETLORDescriptor(scanner, radial_trim=1,
+    ...                                             max_ring_difference=2, span=1)
+    >>> comp = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=3)
+    >>> comp.in_shape, comp.out_shape  # doctest: +SKIP
+    ((..., ..., 9), (..., ..., 7))
+    >>> comp.adjointness_test(xp, "cpu")
+    True
+    """
+
+    def __init__(
+        self,
+        lor_descriptor: RegularPolygonPETLORDescriptor,
+        target_span: int,
+        num_tof_bins: int | None = None,
+    ) -> None:
+        if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
+            raise TypeError(
+                "lor_descriptor must be a RegularPolygonPETLORDescriptor"
+            )
+        if lor_descriptor.span != 1:
+            raise ValueError("input lor_descriptor must have span=1")
+        if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
+            raise ValueError("target_span must be an odd positive integer")
+        if num_tof_bins is not None and (
+            not isinstance(num_tof_bins, int) or num_tof_bins < 1
+        ):
+            raise ValueError("num_tof_bins must be a positive integer or None")
+
+        super().__init__()
+
+        self._lor_descriptor = lor_descriptor
+        self._target_span = int(target_span)
+        self._num_tof_bins = num_tof_bins
+
+        self._xp = lor_descriptor.xp
+        self._dev = lor_descriptor.dev
+        self._plane_axis = lor_descriptor.plane_axis_num
+
+        # Build the companion span-N descriptor.  Its plane ordering is what
+        # we map onto; we'll cross-check our internally computed multiplicity
+        # against descriptor's to catch any silent convention drift.
+        self._out_lor_descriptor = RegularPolygonPETLORDescriptor(
+            scanner=lor_descriptor.scanner,
+            radial_trim=lor_descriptor.radial_trim,
+            max_ring_difference=lor_descriptor.max_ring_difference,
+            sinogram_order=lor_descriptor.sinogram_order,
+            span=self._target_span,
+        )
+
+        self._build_index_maps()
+
+        # in/out shapes honour sinogram_order's plane_axis_num and optional TOF.
+        spatial_in = tuple(lor_descriptor.spatial_sinogram_shape)
+        spatial_out = tuple(self._out_lor_descriptor.spatial_sinogram_shape)
+        if num_tof_bins is None:
+            self._in_shape = spatial_in
+            self._out_shape = spatial_out
+        else:
+            self._in_shape = spatial_in + (int(num_tof_bins),)
+            self._out_shape = spatial_out + (int(num_tof_bins),)
+
+    def _build_index_maps(self) -> None:
+        """Build the gather/scatter index structures.
+
+        Computes (and stores on ``self``):
+
+        * ``_target_for_p1`` : shape ``(num_planes_1,)``, the output plane
+          index for every input plane.  Used by :meth:`_adjoint`.
+        * ``_idx2d_flat``    : shape ``(num_planes_n * max_mult,)``, flattened
+          index array.  ``xp.take(x, _idx2d_flat, axis=plane_axis)`` followed
+          by a reshape gives ``(num_planes_n, max_mult)`` along the plane axis.
+        * ``_mask2d``        : shape ``(num_planes_n, max_mult)``, ``1.0`` for
+          valid entries and ``0.0`` for right-padding.  Used to zero-out
+          padding contributions in :meth:`_apply`.
+        * ``_multiplicity``  : shape ``(num_planes_n,)``, multiplicity of each
+          output plane.
+        * ``_max_mult``      : the largest plane multiplicity.
+        """
+        lor = self._lor_descriptor
+        S = self._target_span
+        half_span = (S - 1) // 2
+
+        # Span-1 plane endpoints in the *input* sinogram order.  We deliberately
+        # read these from the descriptor rather than recompute, so the operator
+        # is locked to whatever the descriptor produces.
+        start_idx = np.asarray(to_numpy_array(lor.start_plane_index), dtype=np.int64)
+        end_idx = np.asarray(to_numpy_array(lor.end_plane_index), dtype=np.int64)
+
+        rd = end_idx - start_idx
+        mid_int = end_idx + start_idx  # s + e (= 2 * midpoint)
+
+        # Segment under the *target* span S (Siemens / STIR convention).
+        abs_rd = np.abs(rd)
+        seg = np.where(
+            abs_rd <= half_span,
+            0,
+            np.sign(rd) * ((abs_rd - half_span + S - 1) // S),
+        ).astype(np.int64)
+
+        num_planes_1 = int(start_idx.shape[0])
+
+        # Group span-1 planes by (segment, s+e).  Sort key matches
+        # _setup_spanned_plane_indices so the operator's output plane indexing
+        # agrees with the companion span-N descriptor bin-for-bin.
+        keys = list(zip(seg.tolist(), mid_int.tolist()))
+        unique_keys = sorted(set(keys), key=lambda k: (abs(k[0]), -k[0], k[1]))
+        key_to_n = {k: i for i, k in enumerate(unique_keys)}
+        target_for_p1 = np.fromiter(
+            (key_to_n[k] for k in keys), dtype=np.int64, count=num_planes_1
+        )
+        num_planes_n = len(unique_keys)
+
+        # Invert: for each output plane, list its contributing input planes.
+        groups: list[list[int]] = [[] for _ in range(num_planes_n)]
+        for p1, k in enumerate(keys):
+            groups[key_to_n[k]].append(p1)
+        multiplicity = np.fromiter(
+            (len(g) for g in groups), dtype=np.int32, count=num_planes_n
+        )
+        max_mult = int(multiplicity.max()) if num_planes_n > 0 else 0
+
+        # Padded (num_planes_n, max_mult) gather index + 0/1 mask.  Padding
+        # entries hold index 0 with mask 0 so the gather is safe and the
+        # padded reads contribute zero to the sum.
+        idx2d = np.zeros((num_planes_n, max_mult), dtype=np.int64)
+        mask2d = np.zeros((num_planes_n, max_mult), dtype=np.float32)
+        for i, g in enumerate(groups):
+            if g:
+                idx2d[i, : len(g)] = g
+                mask2d[i, : len(g)] = 1.0
+
+        # Convention guard: the auto-built companion descriptor must agree on
+        # the per-plane multiplicity.  If it doesn't, our output plane ordering
+        # has drifted from the descriptor's and downstream visualization tools
+        # would mis-align.
+        comp_mult = np.asarray(
+            to_numpy_array(self._out_lor_descriptor.plane_multiplicity),
+            dtype=np.int32,
+        )
+        if comp_mult.shape != multiplicity.shape or not np.array_equal(
+            comp_mult, multiplicity
+        ):
+            raise RuntimeError(
+                "internal: plane multiplicity disagrees with auto-built span-"
+                f"{S} descriptor — output plane ordering convention drift"
+            )
+
+        xp = self._xp
+        dev = self._dev
+
+        self._num_planes_1 = num_planes_1
+        self._num_planes_n = num_planes_n
+        self._max_mult = max_mult
+        self._target_for_p1 = xp.asarray(target_for_p1, device=dev)
+        # store flat indices because the array API standard only requires
+        # 1-D indices for xp.take (multi-dim take is not portable).
+        self._idx2d_flat = xp.asarray(idx2d.reshape(-1), device=dev)
+        self._mask2d = xp.asarray(mask2d, device=dev)
+        self._multiplicity = xp.asarray(multiplicity, device=dev)
+
+    # ------------------------------------------------------------------
+    # LinearOperator interface
+    # ------------------------------------------------------------------
+
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        return self._in_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        return self._out_shape
+
+    def _apply(self, x: Array) -> Array:
+        """Compress: ``y_n = sum_{p1 in group(n)} x_{p1}`` along the plane axis."""
+        xp = self._xp
+        ax = self._plane_axis
+
+        # gather all contributing input planes per output plane.  After the
+        # 1-D take we still have x.ndim axes, with the plane axis enlarged to
+        # num_planes_n * max_mult; the reshape then splits that into
+        # (num_planes_n, max_mult).
+        gathered = xp.take(x, self._idx2d_flat, axis=ax)
+
+        new_shape = list(x.shape)
+        new_shape[ax] = self._num_planes_n
+        new_shape.insert(ax + 1, self._max_mult)
+        gathered = xp.reshape(gathered, tuple(new_shape))
+
+        # Broadcast the (num_planes_n, max_mult) mask across all other axes.
+        mask_shape = [1] * gathered.ndim
+        mask_shape[ax] = self._num_planes_n
+        mask_shape[ax + 1] = self._max_mult
+        gathered = gathered * xp.reshape(self._mask2d, tuple(mask_shape))
+
+        # Sum over the multiplicity axis (at ax + 1).
+        return xp.sum(gathered, axis=ax + 1)
+
+    def _adjoint(self, y: Array) -> Array:
+        """Expand: replicate each output plane back to every contributing input plane."""
+        return self._xp.take(y, self._target_for_p1, axis=self._plane_axis)
+
+    def norm(
+        self,
+        xp: ModuleType,
+        dev: str,
+        num_iter: int = 30,
+        iscomplex: bool = False,
+        verbose: bool = False,
+    ) -> float:
+        """Operator 2-norm in closed form.
+
+        Because :math:`G` is a 0/1 gather with each input plane belonging to
+        exactly one output plane, :math:`G G^T = \\operatorname{diag}(m_n)`
+        and therefore :math:`\\|G\\|_2 = \\sqrt{\\max_n m_n}`.  This is
+        independent of TOF, ``xp``, and ``dev``; the inherited signature is
+        retained for compatibility with :class:`LinearOperator.norm` but its
+        arguments (``xp``, ``dev``, ``num_iter``, ``iscomplex``, ``verbose``)
+        are ignored.
+        """
+        return float(np.sqrt(self._max_mult))
+
+    # ------------------------------------------------------------------
+    # Public read-only properties
+    # ------------------------------------------------------------------
+
+    @property
+    def lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
+        """The input (span-1) LOR descriptor."""
+        return self._lor_descriptor
+
+    @property
+    def out_lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
+        """Auto-built companion descriptor whose plane ordering matches this
+        operator's output."""
+        return self._out_lor_descriptor
+
+    @property
+    def target_span(self) -> int:
+        """Target span (odd, >= 1)."""
+        return self._target_span
+
+    @property
+    def num_tof_bins(self) -> int | None:
+        """Number of TOF bins, or ``None`` for a non-TOF operator."""
+        return self._num_tof_bins
+
+    @property
+    def plane_multiplicity(self) -> Array:
+        """Number of span-1 planes that collapse into each output plane.
+
+        Shape ``(num_planes_n,)``.  Equals the diagonal of
+        :math:`G G^T`.
+        """
+        return self._multiplicity
+
+    @property
+    def target_plane_for_input_plane(self) -> Array:
+        """Output plane index for each span-1 input plane.
+
+        Shape ``(num_planes_1,)``.  Useful for the closed-form check
+        :math:`(G^T G\\,\\mathbf{1})_{p_1} = m_{\\,\\tau(p_1)}`.
+        """
+        return self._target_for_p1
+
+    @property
+    def max_plane_multiplicity(self) -> int:
+        """Largest plane multiplicity (:math:`\\|G\\|_2^2`)."""
+        return self._max_mult
+
+    @property
+    def num_planes_in(self) -> int:
+        """Number of span-1 input planes."""
+        return self._num_planes_1
+
+    @property
+    def num_planes_out(self) -> int:
+        """Number of span-:math:`S` output planes."""
+        return self._num_planes_n
+
+    def __str__(self) -> str:
+        tof_str = (
+            f", {self._num_tof_bins} TOF bins"
+            if self._num_tof_bins is not None
+            else ""
+        )
+        return (
+            f"{self.__class__.__name__}("
+            f"target_span={self._target_span}, "
+            f"num_planes: {self._num_planes_1} -> {self._num_planes_n}, "
+            f"max_multiplicity={self._max_mult}{tof_str})"
+        )
