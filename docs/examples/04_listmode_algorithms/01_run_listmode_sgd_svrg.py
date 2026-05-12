@@ -92,10 +92,10 @@ xp, dev = suggest_array_backend_and_device(None, None)
 num_subsets = 24
 
 # if run on a CPU limit the number of epochs
-num_epochs = (120 if dev == "cpu" else 240) // num_subsets
+num_epochs = (72 if dev == "cpu" else 240) // num_subsets
 
 # sens factor
-sens_factor = 0.3
+sens_factor = 0.2
 
 # regularisation weight beta
 beta = 10.0

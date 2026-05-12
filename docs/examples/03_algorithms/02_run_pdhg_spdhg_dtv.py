@@ -251,13 +251,13 @@ def spdhg_update(
 # image scale (can be used to simulate more or less counts)
 img_scale = 0.1
 # number of MLEM epochs used to initialize PDHG and SPDHG
-num_epochs_mlem = 20
+num_epochs_mlem = 10
 # number of SPDHG epochs (each = 2 * num_subsets mini-iterations)
-num_epochs_spdhg = 50
+num_epochs_spdhg = 20
 # number of sinogram subsets for SPDHG
 num_subsets = 28
 # number of PDHG epochs
-num_epochs_pdhg = 25 if dev == "cpu" else 50 * num_subsets
+num_epochs_pdhg = 20 if dev == "cpu" else num_epochs_spdhg * num_subsets
 # regularization weight
 beta = 6.0
 # step size ratio (used by both PDHG and SPDHG)

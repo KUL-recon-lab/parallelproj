@@ -104,7 +104,7 @@ num_epochs = num_epochs_mlem // num_subsets
 # run full MLEM only on GPU -- too slow on CPU for the number of iterations used here
 run_mlem = dev != "cpu"
 
-sens_factor = 1.0
+sens_factor = 0.2
 
 num_rings = 5
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
