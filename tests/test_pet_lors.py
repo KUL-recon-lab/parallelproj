@@ -752,6 +752,387 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
         assert bool(xp.all(y_tof[..., t] == op(x_tof[..., t])))
 
 
+def test_michelogram_basic(xp: ModuleType, dev: str) -> None:
+    """Construction, validation, and the basic per-plane metadata for span=1.
+
+    Compares Michelogram outputs directly against the existing
+    :class:`RegularPolygonPETLORDescriptor` for the same parameters, so this
+    test pins Michelogram to the current descriptor behaviour before the
+    descriptor is rewritten to consume it.
+    """
+    import numpy as _np
+
+    # ------------------------------------------------------------------
+    # constructor validation
+    # ------------------------------------------------------------------
+    with pytest.raises(ValueError, match="num_rings"):
+        ppl.Michelogram(num_rings=0, max_ring_difference=0)
+    with pytest.raises(ValueError, match="num_rings"):
+        ppl.Michelogram(num_rings=-1, max_ring_difference=0)
+    with pytest.raises(ValueError, match="max_ring_difference"):
+        ppl.Michelogram(num_rings=3, max_ring_difference=-1)
+    with pytest.raises(ValueError, match="span"):
+        ppl.Michelogram(num_rings=3, max_ring_difference=2, span=0)
+    with pytest.raises(ValueError, match="span"):
+        ppl.Michelogram(num_rings=3, max_ring_difference=2, span=2)
+    with pytest.raises(ValueError, match="span"):
+        ppl.Michelogram(num_rings=3, max_ring_difference=2, span=-3)
+
+    # ------------------------------------------------------------------
+    # span=1: compare to RegularPolygonPETLORDescriptor outputs
+    # ------------------------------------------------------------------
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=4,
+        num_lor_endpoints_per_side=2,
+        lor_spacing=4.0,
+        ring_positions=xp.asarray([0.0, 1.0, 2.0], device=dev),
+        symmetry_axis=2,
+    )
+    lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, radial_trim=2, max_ring_difference=2, span=1
+    )
+    m1 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=1)
+
+    assert m1.num_rings == 3
+    assert m1.max_ring_difference == 2
+    assert m1.span == 1
+    assert m1.num_planes == lor_s1.num_planes
+    assert m1.max_multiplicity == 1
+    assert "span=1" in repr(m1)
+
+    desc_seg = _np.asarray(to_numpy_array(lor_s1.plane_segment), dtype=_np.int32)
+    desc_mult = _np.asarray(to_numpy_array(lor_s1.plane_multiplicity), dtype=_np.int32)
+    assert _np.array_equal(m1.plane_segment, desc_seg)
+    assert _np.array_equal(m1.plane_multiplicity, desc_mult)
+
+    # span=1 axial midpoint is just (start + end) per plane, taken directly
+    # from the descriptor's start_plane_index / end_plane_index.
+    desc_start = _np.asarray(to_numpy_array(lor_s1.start_plane_index), dtype=_np.int64)
+    desc_end = _np.asarray(to_numpy_array(lor_s1.end_plane_index), dtype=_np.int64)
+    expected_mid = (desc_start + desc_end).astype(_np.int32)
+    assert _np.array_equal(m1.plane_axial_midpoint_int, expected_mid)
+
+    # For span=1 the padded layout collapses to a single column; the
+    # contributing start/end rings must match the descriptor's plane indices.
+    assert _np.array_equal(m1.plane_start_rings[:, 0], desc_start.astype(_np.int32))
+    assert _np.array_equal(m1.plane_end_rings[:, 0], desc_end.astype(_np.int32))
+    assert _np.all(m1.plane_mask == 1.0)
+
+
+def test_michelogram_spanned(xp: ModuleType, dev: str) -> None:
+    """Spanned layouts match the descriptor: 3-ring span=3 and 13-ring span=9."""
+    import numpy as _np
+
+    # ------------------------------------------------------------------
+    # 3-ring scanner, span=3 — also pinned by the existing
+    # test_regular_polygon_lor_desc_span hand-computed expectations.
+    # ------------------------------------------------------------------
+    ring_z_3 = xp.asarray([0.0, 1.0, 3.0], device=dev)
+    scanner_3 = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=12,
+        num_lor_endpoints_per_side=1,
+        lor_spacing=2.3,
+        ring_positions=ring_z_3,
+        symmetry_axis=2,
+    )
+    lor_s3 = ppl.RegularPolygonPETLORDescriptor(
+        scanner_3, max_ring_difference=2, span=3
+    )
+    m3 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=3)
+
+    assert m3.num_planes == lor_s3.num_planes == 7
+    assert m3.max_multiplicity == 2
+
+    desc_seg = _np.asarray(to_numpy_array(lor_s3.plane_segment), dtype=_np.int32)
+    desc_mult = _np.asarray(to_numpy_array(lor_s3.plane_multiplicity), dtype=_np.int32)
+    assert _np.array_equal(m3.plane_segment, desc_seg)
+    assert _np.array_equal(m3.plane_multiplicity, desc_mult)
+
+    # Hand-derived per-plane data (matches the test_regular_polygon_lor_desc_span
+    # comment block):
+    #   n=0 (seg 0,  mid 0): (0,0)
+    #   n=1 (seg 0,  mid 1): (0,1),(1,0)
+    #   n=2 (seg 0,  mid 2): (1,1)
+    #   n=3 (seg 0,  mid 3): (1,2),(2,1)
+    #   n=4 (seg 0,  mid 4): (2,2)
+    #   n=5 (seg +1, mid 2): (0,2)
+    #   n=6 (seg -1, mid 2): (2,0)
+    assert _np.array_equal(
+        m3.plane_axial_midpoint_int,
+        _np.asarray([0, 1, 2, 3, 4, 2, 2], dtype=_np.int32),
+    )
+    assert _np.array_equal(
+        m3.plane_segment,
+        _np.asarray([0, 0, 0, 0, 0, 1, -1], dtype=_np.int32),
+    )
+
+    # Padded contributing ring pairs
+    expected_start = _np.asarray(
+        [[0, 0], [0, 1], [1, 0], [1, 2], [2, 0], [0, 0], [2, 0]], dtype=_np.int32
+    )
+    expected_end = _np.asarray(
+        [[0, 0], [1, 0], [1, 0], [2, 1], [2, 0], [2, 0], [0, 0]], dtype=_np.int32
+    )
+    expected_mask = _np.asarray(
+        [[1, 0], [1, 1], [1, 0], [1, 1], [1, 0], [1, 0], [1, 0]], dtype=_np.float32
+    )
+    assert _np.array_equal(m3.plane_start_rings, expected_start)
+    assert _np.array_equal(m3.plane_end_rings, expected_end)
+    assert _np.array_equal(m3.plane_mask, expected_mask)
+
+    # average_z_per_plane against the descriptor's spanned setup
+    desc_start_z = _np.asarray(to_numpy_array(lor_s3.start_plane_z), dtype=_np.float32)
+    desc_end_z = _np.asarray(to_numpy_array(lor_s3.end_plane_z), dtype=_np.float32)
+    m_start_z, m_end_z = m3.average_z_per_plane(_np.asarray([0.0, 1.0, 3.0]))
+    assert _np.allclose(m_start_z, desc_start_z, atol=1e-6)
+    assert _np.allclose(m_end_z, desc_end_z, atol=1e-6)
+
+    # ------------------------------------------------------------------
+    # 13-ring scanner, span=9 — the bigger scenario hand-verified in
+    # test_regular_polygon_lor_desc_span; spot-checks here.
+    # ------------------------------------------------------------------
+    ring_z_13 = xp.asarray([float(i) for i in range(13)], device=dev)
+    scanner_13 = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=12,
+        num_lor_endpoints_per_side=1,
+        lor_spacing=2.3,
+        ring_positions=ring_z_13,
+        symmetry_axis=2,
+    )
+    lor_13 = ppl.RegularPolygonPETLORDescriptor(
+        scanner_13, max_ring_difference=11, span=9
+    )
+    m13 = ppl.Michelogram(num_rings=13, max_ring_difference=11, span=9)
+
+    assert m13.num_planes == lor_13.num_planes == 55
+    assert int(m13.plane_multiplicity.sum()) == 167
+
+    desc_seg_13 = _np.asarray(to_numpy_array(lor_13.plane_segment), dtype=_np.int32)
+    desc_mult_13 = _np.asarray(
+        to_numpy_array(lor_13.plane_multiplicity), dtype=_np.int32
+    )
+    assert _np.array_equal(m13.plane_segment, desc_seg_13)
+    assert _np.array_equal(m13.plane_multiplicity, desc_mult_13)
+
+    # Same hand-computed plane checks as in the existing descriptor test
+    desc_start_z_13 = _np.asarray(
+        to_numpy_array(lor_13.start_plane_z), dtype=_np.float32
+    )
+    desc_end_z_13 = _np.asarray(
+        to_numpy_array(lor_13.end_plane_z), dtype=_np.float32
+    )
+    m_start_z_13, m_end_z_13 = m13.average_z_per_plane(_np.arange(13, dtype=_np.float64))
+    assert _np.allclose(m_start_z_13, desc_start_z_13, atol=1e-5)
+    assert _np.allclose(m_end_z_13, desc_end_z_13, atol=1e-5)
+
+
+def test_michelogram_ring_diff_to_segment(xp: ModuleType, dev: str) -> None:
+    """The segment formula matches the descriptor's _ring_diff_to_segment."""
+    scanner = pps.DemoPETScannerGeometry(xp, dev, 3, symmetry_axis=2)
+    desc_s3 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=3
+    )
+    desc_s9 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, max_ring_difference=2, span=9
+    )
+
+    m3 = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=3)
+    m9 = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=9)
+    m1 = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=1)
+
+    for rd in range(-15, 16):
+        assert m3.ring_diff_to_segment(rd) == desc_s3._ring_diff_to_segment(rd)
+        assert m9.ring_diff_to_segment(rd) == desc_s9._ring_diff_to_segment(rd)
+
+    # Spot checks against the documented formula
+    # span=1: every rd is its own segment
+    for rd in range(-4, 5):
+        assert m1.ring_diff_to_segment(rd) == rd
+    # span=3, half_span=1: rd in {-1,0,1} -> seg 0; rd=±2,±3,±4 -> seg ±1
+    assert m3.ring_diff_to_segment(0) == 0
+    assert m3.ring_diff_to_segment(1) == 0
+    assert m3.ring_diff_to_segment(-1) == 0
+    assert m3.ring_diff_to_segment(2) == 1
+    assert m3.ring_diff_to_segment(-2) == -1
+    assert m3.ring_diff_to_segment(4) == 1
+    assert m3.ring_diff_to_segment(-4) == -1
+    # span=9, half_span=4: rd in [-4,+4] -> seg 0; rd=±5..±13 -> seg ±1
+    assert m9.ring_diff_to_segment(4) == 0
+    assert m9.ring_diff_to_segment(-4) == 0
+    assert m9.ring_diff_to_segment(5) == 1
+    assert m9.ring_diff_to_segment(-5) == -1
+    assert m9.ring_diff_to_segment(13) == 1
+    assert m9.ring_diff_to_segment(-13) == -1
+
+
+def test_michelogram_plane_for_ring_pair(xp: ModuleType, dev: str) -> None:
+    """plane_for_ring_pair lookup matches the (start, end) -> plane mapping
+    derived from the padded plane_start_rings / plane_end_rings arrays."""
+    import numpy as _np
+
+    m = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=3)
+
+    # Forward consistency: for every (pi, k) with mask=1, the inverse must agree.
+    for pi in range(m.num_planes):
+        for k in range(int(m.plane_multiplicity[pi])):
+            s = int(m.plane_start_rings[pi, k])
+            e = int(m.plane_end_rings[pi, k])
+            assert m.plane_for_ring_pair(s, e) == pi
+            assert int(m.plane_for_ring_pair_table[s, e]) == pi
+
+    # Invalid lookups
+    with pytest.raises(IndexError):
+        m.plane_for_ring_pair(-1, 0)
+    with pytest.raises(IndexError):
+        m.plane_for_ring_pair(0, 3)
+
+    # |rd| > max_ring_difference  (max_rd=2, num_rings=3 means all rd fit; use
+    # a smaller max_rd to trigger this case)
+    m_small = ppl.Michelogram(num_rings=3, max_ring_difference=0, span=1)
+    with pytest.raises(ValueError, match="max_ring_difference"):
+        m_small.plane_for_ring_pair(0, 2)
+
+
+def test_michelogram_compression_index_maps(xp: ModuleType, dev: str) -> None:
+    """compression_index_maps validity rules + correctness vs the operator."""
+    import numpy as _np
+
+    m1 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=1)
+
+    # ------------------------------------------------------------------
+    # validity errors
+    # ------------------------------------------------------------------
+    with pytest.raises(ValueError, match="target_span"):
+        m1.compression_index_maps(0)
+    with pytest.raises(ValueError, match="target_span"):
+        m1.compression_index_maps(2)  # even
+
+    # span_a=3 -> span_b=5 : 5/3 not integer
+    m3 = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=3)
+    with pytest.raises(ValueError, match="multiple"):
+        m3.compression_index_maps(5)
+    # span_a=3 -> span_b=1 : smaller than self
+    with pytest.raises(ValueError, match=">= self.span"):
+        m3.compression_index_maps(1)
+
+    # ------------------------------------------------------------------
+    # span 1 -> 3 on the 3-ring scanner: must equal the operator's
+    # target_plane_for_input_plane / multiplicity exactly.
+    # ------------------------------------------------------------------
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=4,
+        num_lor_endpoints_per_side=2,
+        lor_spacing=4.0,
+        ring_positions=xp.asarray([0.0, 1.0, 2.0], device=dev),
+        symmetry_axis=2,
+    )
+    lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, radial_trim=2, max_ring_difference=2, span=1
+    )
+    op = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=3)
+
+    tgt, idx2d, mask, mult = m1.compression_index_maps(3)
+
+    op_target = _np.asarray(
+        to_numpy_array(op.target_plane_for_input_plane), dtype=_np.int64
+    )
+    op_mult = _np.asarray(
+        to_numpy_array(op.plane_multiplicity), dtype=_np.int32
+    )
+    assert _np.array_equal(tgt, op_target)
+    assert _np.array_equal(mult, op_mult)
+    # The padded inverse map must match what the operator builds internally.
+    # The operator stores the flattened version on self._idx2d_flat; reshape
+    # and compare.
+    op_idx_flat = _np.asarray(to_numpy_array(op._idx2d_flat), dtype=_np.int64)
+    op_max_mult = int(op._max_mult)
+    op_idx2d = op_idx_flat.reshape(op.num_planes_out, op_max_mult)
+    op_mask2d = _np.asarray(to_numpy_array(op._mask2d), dtype=_np.float32)
+    assert _np.array_equal(idx2d, op_idx2d)
+    assert _np.array_equal(mask, op_mask2d)
+
+    # ------------------------------------------------------------------
+    # Self-mapping: target_span == self.span must be an identity-style map
+    # (each input plane is its own output, multiplicity all 1).
+    # ------------------------------------------------------------------
+    tgt_id, _, _, mult_id = m3.compression_index_maps(3)
+    assert _np.array_equal(tgt_id, _np.arange(m3.num_planes, dtype=_np.int64))
+    assert _np.all(mult_id == 1)
+
+    # ------------------------------------------------------------------
+    # span 3 -> 9 on a 13-ring scanner: every input plane must map to
+    # exactly one output plane, and the union of contributions covers all
+    # input planes (a partition).
+    # ------------------------------------------------------------------
+    m3_13 = ppl.Michelogram(num_rings=13, max_ring_difference=11, span=3)
+    m9_13 = ppl.Michelogram(num_rings=13, max_ring_difference=11, span=9)
+    tgt_39, idx2d_39, mask_39, mult_39 = m3_13.compression_index_maps(9)
+    assert tgt_39.shape == (m3_13.num_planes,)
+    assert idx2d_39.shape[0] == m9_13.num_planes
+    assert int(mult_39.sum()) == m3_13.num_planes
+    # Each input plane appears exactly once in idx2d_39 (filtered by mask)
+    flat_used = idx2d_39[mask_39 > 0].astype(_np.int64)
+    flat_sorted = _np.sort(flat_used)
+    assert _np.array_equal(flat_sorted, _np.arange(m3_13.num_planes))
+
+
+def test_michelogram_show(xp: ModuleType, dev: str) -> None:
+    """Smoke tests for show() and show_segment_lors()."""
+    import numpy as _np
+
+    # span=1: show only (no merge lines)
+    m1 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=1)
+    fig, ax = plt.subplots()
+    m1.show(ax, show_merge_lines=False)
+    plt.close(fig)
+    fig, ax = plt.subplots()
+    m1.show(ax)  # default show_merge_lines=True (no-op for span=1)
+    plt.close(fig)
+
+    # span=3 on 3 rings: show + show_segment_lors (auto-create axes)
+    m3 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=3)
+    fig, ax = plt.subplots()
+    m3.show(ax)
+    plt.close(fig)
+    fig = m3.show_segment_lors(_np.asarray([0.0, 1.0, 3.0]))
+    plt.close(fig)
+
+    # show_segment_lors with custom kwargs and pre-existing axes
+    fig = m3.show_segment_lors(
+        _np.asarray([0.0, 1.0, 3.0]),
+        uncompressed_lor_kwargs={"alpha": 0.3},
+        compressed_lor_kwargs={"alpha": 0.8, "color": "blue"},
+    )
+    plt.close(fig)
+
+    fig_pre, axs_pre = plt.subplots(2, 2, squeeze=False)
+    m3.show_segment_lors(_np.asarray([0.0, 1.0, 3.0]), axs=axs_pre)
+    plt.close(fig_pre)
+
+    # ring_positions shape validation
+    with pytest.raises(ValueError, match="ring_positions"):
+        m3.show_segment_lors(_np.asarray([0.0, 1.0]))  # wrong length
+    with pytest.raises(ValueError, match="ring_positions"):
+        m3.show_segment_lors(_np.zeros((3, 2)))  # not 1-D
+
+    # average_z_per_plane shape validation (covered by show_segment_lors above,
+    # but also exercise the standalone entry point)
+    with pytest.raises(ValueError, match="ring_positions"):
+        m3.average_z_per_plane(_np.zeros(5))
+
+
 def test_sinogram_axial_compression_operator_convention_drift_guard(
     xp: ModuleType, dev: str
 ) -> None:
