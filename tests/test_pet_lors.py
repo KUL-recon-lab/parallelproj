@@ -166,8 +166,8 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     num_rings = 3
     scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)
 
-    # line 270: even span must raise
-    with pytest.raises(ValueError, match="span must be odd"):
+    # even span must raise (validated by Michelogram inside the descriptor)
+    with pytest.raises(ValueError, match="odd"):
         ppl.RegularPolygonPETLORDescriptor(scanner, span=2)
 
     # span=1 descriptor
@@ -214,12 +214,13 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     _ = lor_desc_s3.plane_multiplicity
     _ = lor_desc_s3.plane_segment
 
-    # lines 426-432: _ring_diff_to_segment with span=3 (half_span=1)
-    assert lor_desc_s3._ring_diff_to_segment(0) == 0
-    assert lor_desc_s3._ring_diff_to_segment(1) == 0  # |rd|=1 <= half_span=1
-    assert lor_desc_s3._ring_diff_to_segment(-1) == 0
-    assert lor_desc_s3._ring_diff_to_segment(2) == 1  # ceil((2-1)/3)=1
-    assert lor_desc_s3._ring_diff_to_segment(-2) == -1
+    # segment formula is exposed via the Michelogram (see also
+    # test_michelogram_ring_diff_to_segment for thorough coverage).
+    assert lor_desc_s3.michelogram.ring_diff_to_segment(0) == 0
+    assert lor_desc_s3.michelogram.ring_diff_to_segment(1) == 0
+    assert lor_desc_s3.michelogram.ring_diff_to_segment(-1) == 0
+    assert lor_desc_s3.michelogram.ring_diff_to_segment(2) == 1
+    assert lor_desc_s3.michelogram.ring_diff_to_segment(-2) == -1
 
     # get_lor_coordinates works end-to-end with span > 1
     xs, xe = lor_desc_s3.get_lor_coordinates()
@@ -402,24 +403,11 @@ def test_show_segment_lors(xp: ModuleType, dev: str) -> None:
     lor_desc_s3.show_segment_lors(axs=axs_pre)
     plt.close(fig_pre)
 
-    # lines 940-941: ax.axis("off") branch when a negative segment is absent.
-    # Symmetric scanners always produce symmetric segments, so we monkeypatch
-    # _plane_segment to {-1, 0, 1, 2} — negative seg -1 exists (→ n_rows=2),
-    # but +2 has no matching -2, so the (row=1, col=2) cell hits ax.axis("off").
-    lor_desc_patch = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=1
-    )
-    lor_desc_patch._plane_segment = xp.asarray(
-        [-1, 0, 1, 2], device=dev, dtype=xp.int32
-    )
-    lor_desc_patch._start_plane_z = xp.asarray(
-        [0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32
-    )
-    lor_desc_patch._end_plane_z = xp.asarray(
-        [0.0, 0.0, 0.0, 0.0], device=dev, dtype=xp.float32
-    )
-    fig = lor_desc_patch.show_segment_lors()
-    plt.close(fig)
+    # NOTE: the descriptor's show_segment_lors is now a thin delegator to
+    # Michelogram.show_segment_lors.  The asymmetric-segment branch (the
+    # ax.axis("off") code path when a negative segment is absent for a given
+    # |seg|) is exercised in test_michelogram_show, where the Michelogram's
+    # internal arrays can be monkey-patched directly.
 
 
 def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
@@ -950,8 +938,8 @@ def test_michelogram_ring_diff_to_segment(xp: ModuleType, dev: str) -> None:
     m1 = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=1)
 
     for rd in range(-15, 16):
-        assert m3.ring_diff_to_segment(rd) == desc_s3._ring_diff_to_segment(rd)
-        assert m9.ring_diff_to_segment(rd) == desc_s9._ring_diff_to_segment(rd)
+        assert m3.ring_diff_to_segment(rd) == desc_s3.michelogram.ring_diff_to_segment(rd)
+        assert m9.ring_diff_to_segment(rd) == desc_s9.michelogram.ring_diff_to_segment(rd)
 
     # Spot checks against the documented formula
     # span=1: every rd is its own segment
@@ -1132,6 +1120,29 @@ def test_michelogram_show(xp: ModuleType, dev: str) -> None:
     with pytest.raises(ValueError, match="ring_positions"):
         m3.average_z_per_plane(_np.zeros(5))
 
+    # ------------------------------------------------------------------
+    # Asymmetric-segment branch: ax.axis("off") fires when, for a given
+    # |seg|, one of the +/- segments is missing in plane_segment.
+    #
+    # Symmetric scanners always produce symmetric segments, so we
+    # construct a normal Michelogram and overwrite its internals to
+    # simulate an asymmetric layout: segments {-1, 0, +1, +2}.  Because
+    # there's a negative segment, n_rows == 2; because +2 has no
+    # matching -2, the (row=1, col=2) cell falls through to ax.axis("off").
+    # ------------------------------------------------------------------
+    m_patch = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=1)
+    m_patch._num_planes = 4
+    m_patch._max_multiplicity = 1
+    m_patch._plane_segment = _np.asarray([-1, 0, 1, 2], dtype=_np.int32)
+    m_patch._plane_multiplicity = _np.asarray([1, 1, 1, 1], dtype=_np.int32)
+    m_patch._plane_start_rings = _np.zeros((4, 1), dtype=_np.int32)
+    m_patch._plane_end_rings = _np.zeros((4, 1), dtype=_np.int32)
+    m_patch._plane_mask = _np.ones((4, 1), dtype=_np.float32)
+    m_patch._plane_axial_midpoint_int = _np.zeros(4, dtype=_np.int32)
+
+    fig = m_patch.show_segment_lors(_np.asarray([0.0, 1.0, 2.0]))
+    plt.close(fig)
+
 
 def test_sinogram_axial_compression_operator_convention_drift_guard(
     xp: ModuleType, dev: str
@@ -1163,13 +1174,13 @@ def test_sinogram_axial_compression_operator_convention_drift_guard(
         symmetry_axis=2,
     )
 
-    # span=1 input descriptor is built before patching, so its plane indices
-    # remain intact; only the companion span-3 descriptor will be corrupted.
+    # span=1 input descriptor is built before patching, so its plane data
+    # remains intact; only the companion span-3 descriptor will be corrupted.
     lor_s1 = ppl.RegularPolygonPETLORDescriptor(
         scanner, radial_trim=2, max_ring_difference=2, span=1
     )
 
-    orig_setup = ppl.RegularPolygonPETLORDescriptor._setup_spanned_plane_indices
+    orig_setup = ppl.RegularPolygonPETLORDescriptor._setup_plane_data
 
     def corrupted_setup(self):
         orig_setup(self)
@@ -1179,7 +1190,7 @@ def test_sinogram_axial_compression_operator_convention_drift_guard(
 
     with patch.object(
         ppl.RegularPolygonPETLORDescriptor,
-        "_setup_spanned_plane_indices",
+        "_setup_plane_data",
         corrupted_setup,
     ):
         with pytest.raises(RuntimeError, match="convention drift"):
