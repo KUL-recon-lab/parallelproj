@@ -1021,6 +1021,29 @@ def test_michelogram_compression_index_maps(xp: ModuleType, dev: str) -> None:
         m3.compression_index_maps(1)
 
     # ------------------------------------------------------------------
+    # compression_index_maps_to (direct entry point) validation branches.
+    # These are only reachable when a target Michelogram is passed
+    # directly, since the compression_index_maps(target_span) wrapper
+    # always builds a target with matching num_rings and
+    # max_ring_difference.
+    # ------------------------------------------------------------------
+    with pytest.raises(TypeError, match="Michelogram"):
+        m1.compression_index_maps_to("not a michelogram")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="num_rings"):
+        m1.compression_index_maps_to(
+            ppl.Michelogram(num_rings=m1.num_rings + 1, max_ring_difference=2, span=3)
+        )
+
+    # target.max_ring_difference smaller than self's (would leave some
+    # input ring pairs without a target plane).
+    m1_with_mrd = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=1)
+    with pytest.raises(ValueError, match="max_ring_difference"):
+        m1_with_mrd.compression_index_maps_to(
+            ppl.Michelogram(num_rings=5, max_ring_difference=2, span=3)
+        )
+
+    # ------------------------------------------------------------------
     # span 1 -> 3 on the 3-ring scanner: must equal the operator's
     # target_plane_for_input_plane / multiplicity exactly.
     # ------------------------------------------------------------------

@@ -330,11 +330,6 @@ class Michelogram:
                 "ring_positions must be a 1-D array of length "
                 f"num_rings={self._num_rings}"
             )
-        if self._num_planes == 0:
-            return (
-                np.empty(0, dtype=np.float32),
-                np.empty(0, dtype=np.float32),
-            )
         mult = self._plane_multiplicity.astype(np.float64)
         start_z = (ring_pos[self._plane_start_rings] * self._plane_mask).sum(
             axis=1
@@ -346,35 +341,38 @@ class Michelogram:
     # Axial compression
     # ------------------------------------------------------------------
 
-    def compression_index_maps(
-        self, target_span: int
+    def compression_index_maps_to(
+        self, target: "Michelogram"
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Build gather/scatter index maps to a higher-span Michelogram.
+        """Build gather/scatter index maps to a pre-built target Michelogram.
 
         Returns the integer index structures needed to map planes of this
-        Michelogram onto planes of
-        ``Michelogram(num_rings, max_ring_difference, span=target_span)``.
+        Michelogram onto planes of ``target``.
 
-        The compression is well-defined only when ``target_span / self.span``
-        is an *odd positive integer* — under that condition every ring pair
-        of any input plane shares the same target plane, so the operation is
-        a single-valued gather.  Otherwise some input plane's contributing
-        ring pairs would split across multiple target planes and the
-        operation is no longer linear; the method raises ``ValueError``.
+        Both Michelograms must describe the same scanner geometry
+        (``target.num_rings == self.num_rings``), and ``target.span`` must
+        be an integer multiple of ``self.span``.  Because both spans are
+        odd by construction, the ratio ``target.span / self.span`` is then
+        automatically odd, which guarantees that every ring pair of any
+        input plane shares the same target plane — so the operation is a
+        single-valued gather.
 
-        For ``self.span = 1`` any odd ``target_span >= 1`` is valid.
+        The target's ``max_ring_difference`` must be at least
+        ``self.max_ring_difference`` so every input ring pair has a target
+        plane.  If it is strictly greater, the resulting maps still work but
+        some output planes will have zero multiplicity (output bins that no
+        input ring pair contributes to).
 
         Parameters
         ----------
-        target_span : int
-            Odd integer ``>= self.span``; additionally
-            ``(target_span // self.span)`` must be odd.
+        target : Michelogram
+            Pre-built target Michelogram.  Validation rules above.
 
         Returns
         -------
         target_for_p1 : np.ndarray, shape ``(self.num_planes,)``, dtype ``int64``
             For each plane of this Michelogram, the corresponding plane index
-            in the target Michelogram.
+            in ``target``.
         idx2d : np.ndarray, shape ``(target.num_planes, target_max_mult)``, ``int64``
             For each target plane, the indices in this Michelogram that
             contribute, right-padded with ``0``.  Use ``mask`` to filter.
@@ -385,32 +383,37 @@ class Michelogram:
 
         Raises
         ------
+        TypeError
+            If ``target`` is not a :class:`Michelogram` instance.
         ValueError
-            If ``target_span`` is not a positive odd integer, if
-            ``target_span < self.span``, if ``self.span`` does not divide
-            ``target_span``, or if the resulting ratio is even.
+            If ``target.num_rings`` differs from ``self.num_rings``;
+            if ``target.span < self.span``;
+            if ``self.span`` does not divide ``target.span``;
+            or if ``target.max_ring_difference < self.max_ring_difference``.
         """
-        if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
-            raise ValueError("target_span must be an odd positive integer")
-        if target_span < self._span:
+        if not isinstance(target, Michelogram):
+            raise TypeError("target must be a Michelogram instance")
+        if target.num_rings != self._num_rings:
             raise ValueError(
-                f"target_span ({target_span}) must be >= self.span ({self._span})"
+                f"target.num_rings ({target.num_rings}) must match "
+                f"self.num_rings ({self._num_rings})"
             )
-        if target_span % self._span != 0:
+        if target.span < self._span:
             raise ValueError(
-                f"target_span ({target_span}) must be an integer multiple "
+                f"target.span ({target.span}) must be >= self.span ({self._span})"
+            )
+        if target.span % self._span != 0:
+            raise ValueError(
+                f"target.span ({target.span}) must be an integer multiple "
                 f"of self.span ({self._span})"
             )
-        ratio = target_span // self._span
-        if ratio % 2 == 0:
+        if target.max_ring_difference < self._max_ring_difference:
             raise ValueError(
-                f"target_span / self.span = {target_span} / {self._span} "
-                f"= {ratio} must be an odd integer"
+                f"target.max_ring_difference ({target.max_ring_difference}) "
+                f"must be >= self.max_ring_difference "
+                f"({self._max_ring_difference}) so every input ring pair "
+                "has a target plane"
             )
-
-        target = Michelogram(
-            self._num_rings, self._max_ring_difference, span=target_span
-        )
 
         num_planes_in = self._num_planes
         target_for_p1 = np.empty(num_planes_in, dtype=np.int64)
@@ -442,6 +445,39 @@ class Michelogram:
                 mask[n, : len(g)] = 1.0
 
         return target_for_p1, idx2d, mask, target_multiplicity
+
+    def compression_index_maps(
+        self, target_span: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Build gather/scatter index maps to a higher-span Michelogram.
+
+        Convenience wrapper around :meth:`compression_index_maps_to` that
+        builds the target Michelogram internally as
+        ``Michelogram(self.num_rings, self.max_ring_difference, span=target_span)``.
+
+        Parameters
+        ----------
+        target_span : int
+            Odd integer ``>= self.span``; additionally
+            ``(target_span // self.span)`` must be odd.
+
+        Returns
+        -------
+        See :meth:`compression_index_maps_to`.
+
+        Raises
+        ------
+        ValueError
+            If ``target_span`` is not a positive odd integer.  Further
+            validation errors are raised by
+            :meth:`compression_index_maps_to`.
+        """
+        if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
+            raise ValueError("target_span must be an odd positive integer")
+        target = Michelogram(
+            self._num_rings, self._max_ring_difference, span=target_span
+        )
+        return self.compression_index_maps_to(target)
 
     # ------------------------------------------------------------------
     # Visualization
@@ -673,13 +709,6 @@ class Michelogram:
         R = self._num_rings
         D = self._max_ring_difference
         S = self._span
-
-        if self._num_planes == 0:
-            ax.set_title(
-                f"Michelogram\n(span={S}, max Dring={D}, empty)",
-                fontsize="small",
-            )
-            return
 
         # Unroll the padded layout into flat arrays of valid ring pairs.
         total = int(self._plane_mask.sum())
@@ -1532,21 +1561,22 @@ class SinogramAxialCompressionOperator(LinearOperator):
         self._dev = lor_descriptor.dev
         self._plane_axis = lor_descriptor.plane_axis_num
 
-        # Build the companion span-N descriptor.  Its plane ordering is what
-        # we map onto; we'll cross-check our internally computed multiplicity
-        # against descriptor's to catch any silent convention drift.
+        # Build the target Michelogram exactly once and reuse it for both
+        # the companion descriptor and the compression index maps below.
+        target_michelogram = Michelogram(
+            num_rings=lor_descriptor.scanner.num_rings,
+            max_ring_difference=lor_descriptor.max_ring_difference,
+            span=self._target_span,
+        )
+
         self._out_lor_descriptor = RegularPolygonPETLORDescriptor(
             scanner=lor_descriptor.scanner,
-            michelogram=Michelogram(
-                num_rings=lor_descriptor.scanner.num_rings,
-                max_ring_difference=lor_descriptor.max_ring_difference,
-                span=self._target_span,
-            ),
+            michelogram=target_michelogram,
             radial_trim=lor_descriptor.radial_trim,
             sinogram_order=lor_descriptor.sinogram_order,
         )
 
-        self._build_index_maps()
+        self._build_index_maps(target_michelogram)
 
         # in/out shapes honour sinogram_order's plane_axis_num and optional TOF.
         spatial_in = tuple(lor_descriptor.spatial_sinogram_shape)
@@ -1558,13 +1588,17 @@ class SinogramAxialCompressionOperator(LinearOperator):
             self._in_shape = spatial_in + (int(num_tof_bins),)
             self._out_shape = spatial_out + (int(num_tof_bins),)
 
-    def _build_index_maps(self) -> None:
+    def _build_index_maps(self, target_michelogram: Michelogram) -> None:
         """Build the gather/scatter index structures from the Michelogram.
 
         All the combinatorial work — segment assignment, ring-pair grouping,
         STIR-standard plane ordering, padded index construction — lives on
         :class:`Michelogram`.  This method just converts those numpy arrays
         to the descriptor's ``xp`` and ``dev`` and stores them.
+
+        ``target_michelogram`` is the pre-built target Michelogram already
+        used to construct the companion span-N descriptor, reused here so
+        the layout is built only once per operator.
 
         Stores on ``self``:
 
@@ -1581,11 +1615,13 @@ class SinogramAxialCompressionOperator(LinearOperator):
         * ``_max_mult``      : the largest plane multiplicity.
 
         Because the companion span-N descriptor is built from the same
-        :class:`Michelogram`, its plane ordering and per-plane multiplicity
+        Michelogram instance, its plane ordering and per-plane multiplicity
         agree with this operator's by construction; no cross-check is needed.
         """
         target_for_p1, idx2d, mask2d, multiplicity = (
-            self._lor_descriptor.michelogram.compression_index_maps(self._target_span)
+            self._lor_descriptor.michelogram.compression_index_maps_to(
+                target_michelogram
+            )
         )
 
         num_planes_n = int(multiplicity.shape[0])
