@@ -1555,14 +1555,19 @@ class SinogramAxialCompressionOperator(LinearOperator):
             self._out_shape = spatial_out + (int(num_tof_bins),)
 
     def _build_index_maps(self) -> None:
-        """Build the gather/scatter index structures.
+        """Build the gather/scatter index structures from the Michelogram.
 
-        Computes (and stores on ``self``):
+        All the combinatorial work — segment assignment, ring-pair grouping,
+        STIR-standard plane ordering, padded index construction — lives on
+        :class:`Michelogram`.  This method just converts those numpy arrays
+        to the descriptor's ``xp`` and ``dev`` and stores them.
+
+        Stores on ``self``:
 
         * ``_target_for_p1`` : shape ``(num_planes_1,)``, the output plane
           index for every input plane.  Used by :meth:`_adjoint`.
         * ``_idx2d_flat``    : shape ``(num_planes_n * max_mult,)``, flattened
-          index array.  ``xp.take(x, _idx2d_flat, axis=plane_axis)`` followed
+          gather index.  ``xp.take(x, _idx2d_flat, axis=plane_axis)`` followed
           by a reshape gives ``(num_planes_n, max_mult)`` along the plane axis.
         * ``_mask2d``        : shape ``(num_planes_n, max_mult)``, ``1.0`` for
           valid entries and ``0.0`` for right-padding.  Used to zero-out
@@ -1570,80 +1575,22 @@ class SinogramAxialCompressionOperator(LinearOperator):
         * ``_multiplicity``  : shape ``(num_planes_n,)``, multiplicity of each
           output plane.
         * ``_max_mult``      : the largest plane multiplicity.
+
+        Because the companion span-N descriptor is built from the same
+        :class:`Michelogram`, its plane ordering and per-plane multiplicity
+        agree with this operator's by construction; no cross-check is needed.
         """
-        lor = self._lor_descriptor
-        S = self._target_span
-        half_span = (S - 1) // 2
-
-        # Span-1 plane endpoints in the *input* sinogram order.  We deliberately
-        # read these from the descriptor rather than recompute, so the operator
-        # is locked to whatever the descriptor produces.
-        start_idx = np.asarray(to_numpy_array(lor.start_plane_index), dtype=np.int64)
-        end_idx = np.asarray(to_numpy_array(lor.end_plane_index), dtype=np.int64)
-
-        rd = end_idx - start_idx
-        mid_int = end_idx + start_idx  # s + e (= 2 * midpoint)
-
-        # Segment under the *target* span S
-        abs_rd = np.abs(rd)
-        seg = np.where(
-            abs_rd <= half_span,
-            0,
-            np.sign(rd) * ((abs_rd - half_span + S - 1) // S),
-        ).astype(np.int64)
-
-        num_planes_1 = int(start_idx.shape[0])
-
-        # Group span-1 planes by (segment, s+e).  Sort key matches
-        # _setup_spanned_plane_indices so the operator's output plane indexing
-        # agrees with the companion span-N descriptor bin-for-bin.
-        keys = list(zip(seg.tolist(), mid_int.tolist()))
-        unique_keys = sorted(set(keys), key=lambda k: (abs(k[0]), -k[0], k[1]))
-        key_to_n = {k: i for i, k in enumerate(unique_keys)}
-        target_for_p1 = np.fromiter(
-            (key_to_n[k] for k in keys), dtype=np.int64, count=num_planes_1
+        target_for_p1, idx2d, mask2d, multiplicity = (
+            self._lor_descriptor.michelogram.compression_index_maps(self._target_span)
         )
-        num_planes_n = len(unique_keys)
 
-        # Invert: for each output plane, list its contributing input planes.
-        groups: list[list[int]] = [[] for _ in range(num_planes_n)]
-        for p1, k in enumerate(keys):
-            groups[key_to_n[k]].append(p1)
-        multiplicity = np.fromiter(
-            (len(g) for g in groups), dtype=np.int32, count=num_planes_n
-        )
-        max_mult = int(multiplicity.max()) if num_planes_n > 0 else 0
-
-        # Padded (num_planes_n, max_mult) gather index + 0/1 mask.  Padding
-        # entries hold index 0 with mask 0 so the gather is safe and the
-        # padded reads contribute zero to the sum.
-        idx2d = np.zeros((num_planes_n, max_mult), dtype=np.int64)
-        mask2d = np.zeros((num_planes_n, max_mult), dtype=np.float32)
-        for i, g in enumerate(groups):
-            if g:
-                idx2d[i, : len(g)] = g
-                mask2d[i, : len(g)] = 1.0
-
-        # Convention guard: the auto-built companion descriptor must agree on
-        # the per-plane multiplicity.  If it doesn't, our output plane ordering
-        # has drifted from the descriptor's and downstream visualization tools
-        # would mis-align.
-        comp_mult = np.asarray(
-            to_numpy_array(self._out_lor_descriptor.plane_multiplicity),
-            dtype=np.int32,
-        )
-        if comp_mult.shape != multiplicity.shape or not np.array_equal(
-            comp_mult, multiplicity
-        ):
-            raise RuntimeError(
-                "internal: plane multiplicity disagrees with auto-built span-"
-                f"{S} descriptor — output plane ordering convention drift"
-            )
+        num_planes_n = int(multiplicity.shape[0])
+        max_mult = int(idx2d.shape[1]) if num_planes_n > 0 else 0
 
         xp = self._xp
         dev = self._dev
 
-        self._num_planes_1 = num_planes_1
+        self._num_planes_1 = int(target_for_p1.shape[0])
         self._num_planes_n = num_planes_n
         self._max_mult = max_mult
         self._target_for_p1 = xp.asarray(target_for_p1, device=dev)
