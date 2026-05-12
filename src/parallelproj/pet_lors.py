@@ -46,14 +46,13 @@ class Michelogram:
 
     Encapsulates the segment / axial-position combinatorics that map every
     valid ring pair :math:`(s, e)` onto a sinogram plane index under
-    Siemens / STIR odd-span conventions.
+    span conventions.
 
     For span :math:`S` (odd) and a maximum ring difference :math:`D`, each
     ring pair with :math:`|e - s| \\le D` is assigned a segment via
     :meth:`ring_diff_to_segment`.  Ring pairs sharing the same
     :math:`(\\text{segment},\\; s + e)` collapse into a single plane.
     Planes are ordered by :math:`(|\\text{seg}|,\\; -\\text{seg},\\; s + e)`
-    — the STIR "standard segment sequence"
     :math:`[0, +1, -1, +2, -2, \\ldots]` with axial bins increasing in
     :math:`s + e` (equivalently in z for equispaced rings).
 
@@ -65,8 +64,7 @@ class Michelogram:
 
     For span ``= 1`` the layout reduces to the unspanned Michelogram (each
     ring pair is its own plane with :attr:`max_multiplicity` ``== 1``); the
-    ordering is the same as STIR's standard segment sequence applied to
-    span 1, i.e. ``rd = 0, +1, -1, +2, -2, ...`` with each ring difference
+    ordering ``rd = 0, +1, -1, +2, -2, ...`` with each ring difference
     sorted by ring sum.
 
     Parameters
@@ -1784,7 +1782,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
     :math:`(\\text{segment}, \\text{axial midpoint})` where
 
     * ``segment`` is determined by the ring difference :math:`rd = e - s` under
-      target span :math:`S` (matches Siemens / STIR conventions; see
+      target span :math:`S`
       :meth:`RegularPolygonPETLORDescriptor._ring_diff_to_segment`),
     * ``axial midpoint`` is :math:`s + e` (an integer equal to twice the actual
       midpoint).
@@ -1936,7 +1934,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         rd = end_idx - start_idx
         mid_int = end_idx + start_idx  # s + e (= 2 * midpoint)
 
-        # Segment under the *target* span S (Siemens / STIR convention).
+        # Segment under the *target* span S
         abs_rd = np.abs(rd)
         seg = np.where(
             abs_rd <= half_span,
