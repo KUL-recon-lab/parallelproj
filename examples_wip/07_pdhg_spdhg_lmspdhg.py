@@ -106,8 +106,8 @@ voxel_size = (2.0, 2.0, 2.0)
 
 lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
     scanner,
+    parallelproj.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=40,
-    max_ring_difference=2,
     sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
 )
 

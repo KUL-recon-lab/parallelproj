@@ -46,8 +46,8 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
 
     lor_desc = ppl.RegularPolygonPETLORDescriptor(
         scanner,
+        ppl.Michelogram(scanner.num_rings, max_ring_difference, span=1),
         radial_trim=radial_trim,
-        max_ring_difference=max_ring_difference,
         sinogram_order=sinogram_order,
     )
 

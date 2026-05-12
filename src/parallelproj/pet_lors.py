@@ -955,48 +955,48 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def __init__(
         self,
         scanner: RegularPolygonPETScannerGeometry,
+        michelogram: Michelogram | None = None,
         radial_trim: int = 3,
-        max_ring_difference: int | None = None,
         sinogram_order: SinogramSpatialAxisOrder = SinogramSpatialAxisOrder.RVP,
-        span: int = 1,
     ) -> None:
         """
 
         Parameters
         ----------
         scanner : RegularPolygonPETScannerGeometry
-            a regular polygon PET scanner
+            a regular polygon PET scanner.
+        michelogram : Michelogram, optional
+            the axial plane layout — the single source of truth for the
+            spanning combinatorics (segments, axial midpoints, ring-pair
+            grouping, ordering).  If ``None`` (default), a span-1 layout with
+            no constraint on the ring difference is used, i.e.
+            ``Michelogram(scanner.num_rings, scanner.num_rings - 1, span=1)``.
+            The Michelogram must have ``num_rings == scanner.num_rings``.
         radial_trim : int, optional
-            number of geometrial LORs to disregard in the radial direction, by default 3
-        max_ring_difference : int | None, optional
-            maximim ring difference to consider for coincidences, by default None means
-            all ring differences are included
+            number of geometrial LORs to disregard in the radial direction.
+            Defaults to 3.
         sinogram_order : SinogramSpatialAxisOrder, optional
-            the order of the sinogram axes, by default SinogramSpatialAxisOrder.RVP
-        span : int, optional
-            axial compression factor (must be odd), by default 1 (no compression).
-            With span > 1, ring pairs whose ring difference falls in the same
-            segment and share the same axial midpoint are merged into a single sinogram plane
-            whose LOR geometry is the average of the constituent ring-pair geometries.
+            the order of the sinogram axes.  Defaults to
+            ``SinogramSpatialAxisOrder.RVP``.
         """
 
         super().__init__(scanner)
 
+        if michelogram is None:
+            michelogram = Michelogram(
+                num_rings=scanner.num_rings,
+                max_ring_difference=scanner.num_rings - 1,
+                span=1,
+            )
+        elif michelogram.num_rings != scanner.num_rings:
+            raise ValueError(
+                f"michelogram.num_rings ({michelogram.num_rings}) must equal "
+                f"scanner.num_rings ({scanner.num_rings})"
+            )
+
         self._scanner = scanner
         self._radial_trim = radial_trim
-
-        if max_ring_difference is None:
-            max_ring_difference = scanner.num_rings - 1
-
-        # The Michelogram is the single source of truth for the axial /
-        # spanning combinatorics.  It validates num_rings >= 1,
-        # max_ring_difference >= 0, and that ``span`` is odd and >= 1.
-        self._michelogram = Michelogram(
-            num_rings=scanner.num_rings,
-            max_ring_difference=max_ring_difference,
-            span=span,
-        )
-
+        self._michelogram = michelogram
         self._max_ring_difference = self._michelogram.max_ring_difference
         self._span = self._michelogram.span
 
@@ -1495,8 +1495,9 @@ class SinogramAxialCompressionOperator(LinearOperator):
     ...     lor_spacing=4.0, ring_positions=xp.asarray([0.0, 1.0, 2.0]),
     ...     symmetry_axis=2,
     ... )
-    >>> lor_s1 = ppl.RegularPolygonPETLORDescriptor(scanner, radial_trim=1,
-    ...                                             max_ring_difference=2, span=1)
+    >>> lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+    ...     scanner, ppl.Michelogram(scanner.num_rings, 2, span=1), radial_trim=1,
+    ... )
     >>> comp = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=3)
     >>> comp.in_shape, comp.out_shape  # doctest: +SKIP
     ((..., ..., 9), (..., ..., 7))
@@ -1536,10 +1537,13 @@ class SinogramAxialCompressionOperator(LinearOperator):
         # against descriptor's to catch any silent convention drift.
         self._out_lor_descriptor = RegularPolygonPETLORDescriptor(
             scanner=lor_descriptor.scanner,
+            michelogram=Michelogram(
+                num_rings=lor_descriptor.scanner.num_rings,
+                max_ring_difference=lor_descriptor.max_ring_difference,
+                span=self._target_span,
+            ),
             radial_trim=lor_descriptor.radial_trim,
-            max_ring_difference=lor_descriptor.max_ring_difference,
             sinogram_order=lor_descriptor.sinogram_order,
-            span=self._target_span,
         )
 
         self._build_index_maps()

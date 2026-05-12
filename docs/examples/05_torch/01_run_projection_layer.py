@@ -232,8 +232,8 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 # setup the LOR descriptor that defines the sinogram
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=1, span=1),
     radial_trim=10,
-    max_ring_difference=1,
     sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
 

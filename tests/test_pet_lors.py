@@ -25,8 +25,8 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
     for sinogram_order in ppl.SinogramSpatialAxisOrder:
         lor_desc = ppl.RegularPolygonPETLORDescriptor(
             scanner,
+            ppl.Michelogram(scanner.num_rings, max_ring_difference, span=1),
             radial_trim=radial_trim,
-            max_ring_difference=max_ring_difference,
             sinogram_order=sinogram_order,
         )
 
@@ -72,7 +72,6 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
         lor_desc2 = ppl.RegularPolygonPETLORDescriptor(
             scanner2,
             radial_trim=10,
-            max_ring_difference=None,
             sinogram_order=sinogram_order,
         )
 
@@ -166,13 +165,19 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     num_rings = 3
     scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)
 
-    # even span must raise (validated by Michelogram inside the descriptor)
+    # even span must raise (validated by Michelogram constructor)
     with pytest.raises(ValueError, match="odd"):
-        ppl.RegularPolygonPETLORDescriptor(scanner, span=2)
+        ppl.Michelogram(scanner.num_rings, 2, span=2)
+
+    # mismatched num_rings between Michelogram and scanner must raise
+    with pytest.raises(ValueError, match="num_rings"):
+        ppl.RegularPolygonPETLORDescriptor(
+            scanner, ppl.Michelogram(scanner.num_rings + 1, 2, span=1)
+        )
 
     # span=1 descriptor
     lor_desc_s1 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=1
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=1)
     )
 
     # line 319: .span property
@@ -192,9 +197,9 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     s = str(lor_desc_s1)
     assert "RegularPolygonPETLORDescriptor" in s
 
-    # span=3 descriptor (lines 439, 506-556: _setup_spanned_plane_indices)
+    # span=3 descriptor
     lor_desc_s3 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=3
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
 
     assert lor_desc_s3.span == 3
@@ -253,7 +258,7 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
         symmetry_axis=2,
     )
     lor_desc_z = ppl.RegularPolygonPETLORDescriptor(
-        scanner_z, max_ring_difference=2, span=3
+        scanner_z, ppl.Michelogram(scanner_z.num_rings, 2, span=3)
     )
 
     assert lor_desc_z.num_planes == 7
@@ -304,7 +309,7 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
         symmetry_axis=2,
     )
     lor_desc_13 = ppl.RegularPolygonPETLORDescriptor(
-        scanner_13, max_ring_difference=11, span=9
+        scanner_13, ppl.Michelogram(scanner_13.num_rings, 11, span=9)
     )
 
     assert lor_desc_13.num_planes == 55
@@ -348,7 +353,7 @@ def test_show_michelogram(xp: ModuleType, dev: str) -> None:
 
     # span=1: basic path, no merge lines (lines 711-799, 825)
     lor_desc_s1 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=1
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=1)
     )
     fig, ax = plt.subplots()
     lor_desc_s1.show_michelogram(ax, show_merge_lines=True)
@@ -356,7 +361,7 @@ def test_show_michelogram(xp: ModuleType, dev: str) -> None:
 
     # span=3: exercises merge-line branch (line 767 condition True)
     lor_desc_s3 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=3
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
     fig, ax = plt.subplots()
     lor_desc_s3.show_michelogram(ax, show_merge_lines=True)
@@ -376,7 +381,7 @@ def test_show_segment_lors(xp: ModuleType, dev: str) -> None:
 
     # span=1, mrd=1: only segment 0, n_rows=1 (no negative segments)
     lor_desc_s1 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=1, span=1
+        scanner, ppl.Michelogram(scanner.num_rings, 1, span=1)
     )
     fig = lor_desc_s1.show_segment_lors()
     plt.close(fig)
@@ -385,7 +390,7 @@ def test_show_segment_lors(xp: ModuleType, dev: str) -> None:
     # covers: Michelogram inset (row=1, col=0), legend (row=0, col=0),
     # compressed kwargs, uncompressed kwargs, tight_layout
     lor_desc_s3 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=3
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
     fig = lor_desc_s3.show_segment_lors()
     plt.close(fig)
@@ -523,10 +528,9 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
 
     lor_s1 = ppl.RegularPolygonPETLORDescriptor(
         scanner,
+        ppl.Michelogram(scanner.num_rings, 2, span=1),
         radial_trim=2,
-        max_ring_difference=2,
         sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
-        span=1,
     )
 
     # ------------------------------------------------------------------
@@ -545,7 +549,7 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
         ppl.SinogramAxialCompressionOperator(lor_s1, 3, num_tof_bins=0)
 
     lor_s3_input = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=3
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
     with pytest.raises(ValueError, match="span=1"):
         ppl.SinogramAxialCompressionOperator(lor_s3_input, 3)
@@ -701,7 +705,9 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     # ------------------------------------------------------------------
     for order in ppl.SinogramSpatialAxisOrder:
         lor = ppl.RegularPolygonPETLORDescriptor(
-            scanner, max_ring_difference=2, sinogram_order=order, span=1
+            scanner,
+            ppl.Michelogram(scanner.num_rings, 2, span=1),
+            sinogram_order=order,
         )
         op_o = ppl.SinogramAxialCompressionOperator(lor, target_span=3)
         p_ax = order.name.find("P")
@@ -780,7 +786,9 @@ def test_michelogram_basic(xp: ModuleType, dev: str) -> None:
         symmetry_axis=2,
     )
     lor_s1 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, radial_trim=2, max_ring_difference=2, span=1
+        scanner,
+        ppl.Michelogram(scanner.num_rings, 2, span=1),
+        radial_trim=2,
     )
     m1 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=1)
 
@@ -830,7 +838,7 @@ def test_michelogram_spanned(xp: ModuleType, dev: str) -> None:
         symmetry_axis=2,
     )
     lor_s3 = ppl.RegularPolygonPETLORDescriptor(
-        scanner_3, max_ring_difference=2, span=3
+        scanner_3, ppl.Michelogram(scanner_3.num_rings, 2, span=3)
     )
     m3 = ppl.Michelogram(num_rings=3, max_ring_difference=2, span=3)
 
@@ -897,7 +905,7 @@ def test_michelogram_spanned(xp: ModuleType, dev: str) -> None:
         symmetry_axis=2,
     )
     lor_13 = ppl.RegularPolygonPETLORDescriptor(
-        scanner_13, max_ring_difference=11, span=9
+        scanner_13, ppl.Michelogram(scanner_13.num_rings, 11, span=9)
     )
     m13 = ppl.Michelogram(num_rings=13, max_ring_difference=11, span=9)
 
@@ -927,10 +935,10 @@ def test_michelogram_ring_diff_to_segment(xp: ModuleType, dev: str) -> None:
     """The segment formula matches the descriptor's _ring_diff_to_segment."""
     scanner = pps.DemoPETScannerGeometry(xp, dev, 3, symmetry_axis=2)
     desc_s3 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=3
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
     desc_s9 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, max_ring_difference=2, span=9
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=9)
     )
 
     m3 = ppl.Michelogram(num_rings=5, max_ring_difference=4, span=3)
@@ -1027,7 +1035,9 @@ def test_michelogram_compression_index_maps(xp: ModuleType, dev: str) -> None:
         symmetry_axis=2,
     )
     lor_s1 = ppl.RegularPolygonPETLORDescriptor(
-        scanner, radial_trim=2, max_ring_difference=2, span=1
+        scanner,
+        ppl.Michelogram(scanner.num_rings, 2, span=1),
+        radial_trim=2,
     )
     op = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=3)
 
