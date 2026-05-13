@@ -4,6 +4,7 @@ channels:
 dependencies:
   - python=3.12
   - pip
+  - joblib
   - parallelproj-core>=2.0.5
   - sphinx
   - sphinx-gallery
