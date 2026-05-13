@@ -483,7 +483,13 @@ class Michelogram:
     # Visualization
     # ------------------------------------------------------------------
 
-    def show(self, ax: Axes, show_merge_lines: bool = True, **kwargs) -> None:
+    def show(
+        self,
+        ax: Axes,
+        show_merge_lines: bool = True,
+        plane_index_fontsize: float = 6,
+        **kwargs,
+    ) -> None:
         """Draw the Michelogram scatter plot onto ``ax``.
 
         Each point represents a valid ring pair ``(s, e)``, colored by
@@ -499,10 +505,20 @@ class Michelogram:
         show_merge_lines : bool, optional
             Draw lines connecting ring pairs that merge into the same plane.
             Defaults to ``True``.  Only has a visible effect for ``span > 1``.
+        plane_index_fontsize : float, optional
+            Font size of the per-plane index annotations placed at each
+            ring-pair (or merged-group) centroid.  Defaults to ``6``.  Useful
+            knob when the Michelogram is large (lower to avoid overlap) or
+            small (raise for readability).
         **kwargs
             Forwarded to ``ax.scatter`` (e.g. ``s=4``, ``cmap="RdBu_r"``).
         """
-        self._draw_axes(ax, show_merge_lines=show_merge_lines, **kwargs)
+        self._draw_axes(
+            ax,
+            show_merge_lines=show_merge_lines,
+            plane_index_fontsize=plane_index_fontsize,
+            **kwargs,
+        )
 
     def show_segment_lors(
         self,
@@ -510,6 +526,7 @@ class Michelogram:
         axs=None,
         uncompressed_lor_kwargs: dict | None = None,
         compressed_lor_kwargs: dict | None = None,
+        inset_plane_index_fontsize: float = 4,
     ):
         """Side-view LOR diagram per segment with a Michelogram inset.
 
@@ -616,7 +633,9 @@ class Michelogram:
                 # [1, 0]: Michelogram inset instead of the non-existent
                 # segment -0.
                 if row_idx == 1 and abs_seg == 0:
-                    self._draw_axes(ax)
+                    self._draw_axes(
+                        ax, plane_index_fontsize=inset_plane_index_fontsize
+                    )
                     continue
 
                 seg_val = abs_seg if row_idx == 0 else -abs_seg
@@ -700,7 +719,13 @@ class Michelogram:
             fig.tight_layout()
         return fig
 
-    def _draw_axes(self, ax: Axes, show_merge_lines: bool = True, **kwargs) -> None:
+    def _draw_axes(
+        self,
+        ax: Axes,
+        show_merge_lines: bool = True,
+        plane_index_fontsize: float = 6,
+        **kwargs,
+    ) -> None:
         """Internal helper: draw the Michelogram onto an existing axes.
 
         Shared between :meth:`show` (main use) and :meth:`show_segment_lors`
@@ -770,7 +795,7 @@ class Michelogram:
                 str(pi),
                 ha="center",
                 va="center",
-                fontsize=4,
+                fontsize=plane_index_fontsize,
                 color="black",
                 fontweight="bold",
                 zorder=10,

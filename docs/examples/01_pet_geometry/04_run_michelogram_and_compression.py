@@ -1,6 +1,6 @@
 """
-The Michelogram and axial sinogram compression
-==============================================
+Michelograms and axial sinogram compression
+===========================================
 
 A *Michelogram* is a diagram of which ring pairs ``(s, e)`` form valid
 coincidences in a cylindrical PET scanner, and how they are grouped into
@@ -62,8 +62,8 @@ print(repr(m_span1))
 print(f"num_planes       = {m_span1.num_planes}")
 print(f"max_multiplicity = {m_span1.max_multiplicity}")
 
-fig, ax = plt.subplots(figsize=(6, 6), tight_layout=True)
-m_span1.show(ax)
+fig, ax = plt.subplots(figsize=(9, 9), tight_layout=True)
+m_span1.show(ax, plane_index_fontsize=8)
 fig.show()
 
 # %%
@@ -82,28 +82,28 @@ configs = [
     (1, num_rings - 1),  # span=1, all ring differences
     (3, num_rings - 1),  # span=3, all ring differences
     (5, num_rings - 1),  # span=5, all ring differences
-    (5, 5),              # span=5, max_ring_difference restricted
+    (5, 5),  # span=5, max_ring_difference restricted
 ]
 
-fig, axes = plt.subplots(2, 2, figsize=(11, 11), tight_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 14), tight_layout=True)
 for ax, (span, mrd) in zip(axes.flat, configs):
     m = parallelproj.pet_lors.Michelogram(
         num_rings=num_rings,
         max_ring_difference=mrd,
         span=span,
     )
-    m.show(ax)
+    m.show(ax, plane_index_fontsize=7)
     ax.set_title(
         f"span={span}, max_ring_difference={mrd}\n"
         f"-> num_planes = {m.num_planes}, "
         f"max_multiplicity = {m.max_multiplicity}",
-        fontsize="small",
+        fontsize="medium",
     )
 fig.show()
 
 # %%
-# Compressing a forward-projected sinogram
-# ----------------------------------------
+# Axial Compression of span-1 sinograms to a span > 1
+# ---------------------------------------------------
 #
 # :class:`.SinogramAxialCompressionOperator` takes a span-1 LOR descriptor
 # and a target odd span, and produces a linear operator that maps a span-1
@@ -111,9 +111,9 @@ fig.show()
 #
 # .. math::
 #
-#     y_n = \\sum_{p_1 \\,\\in\\, \\mathcal{G}(n)} x_{p_1}\\,,
+#     y_n = \sum_{p_1 \,\in\, \mathcal{G}(n)} x_{p_1}\,,
 #
-# where :math:`\\mathcal{G}(n)` is the set of span-1 plane indices that
+# where :math:`\mathcal{G}(n)` is the set of span-1 plane indices that
 # fold into target plane :math:`n`.  Its adjoint replicates each output
 # value back to every input plane that contributed to it.
 #
@@ -200,9 +200,7 @@ sn_np = to_numpy_array(sino_sn)[:, view_idx, :]
 
 fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), tight_layout=True)
 
-axes[0].imshow(
-    phantom_np.max(axis=1).T, origin="lower", cmap="gray", aspect="auto"
-)
+axes[0].imshow(phantom_np.max(axis=1).T, origin="lower", cmap="gray", aspect="auto")
 axes[0].set_title("phantom (max-intensity projection along $y$)")
 axes[0].set_xlabel("x voxel")
 axes[0].set_ylabel("z voxel")
@@ -224,5 +222,164 @@ axes[2].set_title(
 axes[2].set_xlabel("plane index $n$")
 axes[2].set_ylabel("radial bin")
 fig.colorbar(im2, ax=axes[2])
+
+fig.show()
+
+# %%
+# A direct span-:math:`S` projector is **not** the same as compressing a
+# span-1 sinogram
+# ----------------------------------------------------------------------
+#
+# A natural question: instead of forward-projecting at span 1 and then
+# applying the compression operator, can we just build a span-:math:`S`
+# :class:`.RegularPolygonPETProjector` directly?  The answer is "yes, but
+# they are not interchangeable".
+#
+# A span-:math:`S` descriptor uses one *averaged* LOR per compressed
+# plane (the geometric average of the constituent ring-pair LORs), so the
+# direct projector traces **one** ray per output plane:
+#
+# .. math::
+#
+#     (\text{direct span-}S)_n
+#         \;=\; \int_{\,\text{LOR}_{\,\text{avg}}(n)} f(x)\, dx\,.
+#
+# The compression operator, in contrast, **sums** every ring-pair line
+# integral that folds into plane :math:`n`:
+#
+# .. math::
+#
+#     (\text{compressed})_n
+#         \;=\; \sum_{p_1 \,\in\, \mathcal{G}(n)}
+#               \int_{\,\text{LOR}(p_1)} f(x)\, dx\,
+#         \;\approx\; m_n \cdot (\text{direct span-}S)_n\,,
+#
+# where :math:`m_n` is the plane multiplicity.  The compressed result
+# therefore overcounts by a factor of :math:`m_n` relative to the direct
+# span-:math:`S` projection.
+#
+# **Practical consequence.**  In a real reconstruction with spanned data
+# one typically uses the (much faster) span-:math:`S` projector — but the
+# per-plane multiplicities must then be folded into the multiplicative
+# **sensitivity / normalisation sinogram** so that the data model stays
+# consistent.
+
+lor_sn_direct = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+    scanner_small,
+    parallelproj.pet_lors.Michelogram(
+        scanner_small.num_rings,
+        max_ring_difference=num_rings_small - 1,
+        span=target_span,
+    ),
+    radial_trim=10,
+)
+proj_sn_direct = parallelproj.projectors.RegularPolygonPETProjector(
+    lor_sn_direct, img_shape=img_shape, voxel_size=voxel_size
+)
+
+sino_sn_direct = proj_sn_direct(phantom)
+
+# %%
+# Visualise: the direct span-:math:`S` sinogram, the compressed one, and a
+# per-plane sum comparison that makes the :math:`m_n` factor explicit.
+
+sn_direct_np = to_numpy_array(sino_sn_direct)[:, view_idx, :]
+mult_np = to_numpy_array(op.plane_multiplicity)
+direct_per_plane = to_numpy_array(sino_sn_direct).sum(axis=(0, 1))
+compressed_per_plane = to_numpy_array(sino_sn).sum(axis=(0, 1))
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.5), tight_layout=True)
+
+vmax_panels = float(max(sn_direct_np.max(), sn_np.max()))
+
+im_a = axes[0].imshow(
+    sn_direct_np, origin="lower", cmap="inferno", vmax=vmax_panels, aspect="auto"
+)
+axes[0].set_title(
+    f"DIRECT span-{target_span} forward projection (view {view_idx})\n"
+    "one averaged LOR per plane"
+)
+axes[0].set_xlabel("plane index $n$")
+axes[0].set_ylabel("radial bin")
+fig.colorbar(im_a, ax=axes[0])
+
+im_b = axes[1].imshow(
+    sn_np, origin="lower", cmap="inferno", vmax=vmax_panels, aspect="auto"
+)
+axes[1].set_title(
+    f"COMPRESSED span-1 -> span-{target_span} (view {view_idx})\n"
+    "sum of $m_n$ ring-pair LORs per plane"
+)
+axes[1].set_xlabel("plane index $n$")
+axes[1].set_ylabel("radial bin")
+fig.colorbar(im_b, ax=axes[1])
+
+axes[2].plot(direct_per_plane, "o-", label=f"direct span-{target_span}")
+axes[2].plot(
+    compressed_per_plane, "s-", label=f"compressed span-1 $\\to$ {target_span}"
+)
+axes[2].plot(
+    direct_per_plane * mult_np,
+    "x--",
+    label=f"direct span-{target_span} $\\times\\, m_n$",
+)
+axes[2].set_xlabel("plane index $n$")
+axes[2].set_ylabel("sum over (radial, view)")
+axes[2].set_title("per-plane sinogram sum")
+axes[2].legend(fontsize="x-small")
+axes[2].grid(True, ls=":")
+
+fig.show()
+
+# %%
+# Ratio of per-plane sums vs multiplicity
+# ---------------------------------------
+#
+# Plotting the empirical ratio :math:`(\text{compressed})_n /
+# (\text{direct span-}S)_n` against the plane multiplicity :math:`m_n`
+# makes the relationship explicit.  The two are *close* but not identical:
+# every ring-pair LOR within a compressed group has its own length and
+# orientation, so its line integral through the phantom differs slightly
+# from the integral through the single averaged LOR that the direct
+# span-:math:`S` projector uses.  How "close" depends on (a) how strongly
+# the constituent LORs differ within a compressed group and (b) how much
+# axial structure the phantom has where those LORs diverge.
+
+# guard against divide-by-zero for planes that don't intersect the phantom
+threshold = 1e-6 * float(direct_per_plane.max())
+mask_valid = direct_per_plane > threshold
+ratio = np.full_like(direct_per_plane, np.nan, dtype=float)
+ratio[mask_valid] = compressed_per_plane[mask_valid] / direct_per_plane[mask_valid]
+
+fig, ax = plt.subplots(1, 1, figsize=(9, 4), tight_layout=True)
+
+n_idx = np.arange(op.num_planes_out)
+ax.bar(
+    n_idx,
+    mult_np,
+    color="lightgray",
+    edgecolor="black",
+    lw=0.5,
+    label="multiplicity $m_n$",
+)
+ax.plot(
+    n_idx[mask_valid],
+    ratio[mask_valid],
+    "o",
+    color="C3",
+    ms=7,
+    label=r"empirical ratio "
+    r"$(\mathrm{compressed})_n / (\mathrm{direct\;span-}S)_n$",
+)
+ax.set_xlabel("plane index $n$")
+ax.set_ylabel("ratio / multiplicity")
+ax.set_title(
+    "the empirical ratio tracks the multiplicity but is not exactly equal\n"
+    "(constituent ring-pair LORs differ slightly from the averaged LOR)"
+)
+ax.set_xticks(n_idx)
+ax.set_ylim(0, max(float(mult_np.max()), float(np.nanmax(ratio))) * 1.25)
+ax.legend(loc="upper left", fontsize="small")
+ax.grid(True, ls=":", axis="y")
 
 fig.show()
