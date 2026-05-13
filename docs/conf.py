@@ -51,6 +51,7 @@ sphinx_gallery_conf = {
     "ignore_pattern": r"(^|[\\/])(vis|utils|img|array_utils)\.py$",
     "plot_gallery": True,
     "within_subsection_order": FileNameSortKey,
+    "parallel": os.cpu_count(),
 }
 
 # -- Options for HTML output -------------------------------------------------

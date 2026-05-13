@@ -2,6 +2,7 @@ name: readthedocs-pp
 channels:
   - conda-forge
 dependencies:
+  - python=3.12
   - pip
   - parallelproj-core>=2.0.5
   - sphinx
