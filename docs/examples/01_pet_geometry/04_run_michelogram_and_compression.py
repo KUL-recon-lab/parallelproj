@@ -344,6 +344,11 @@ fig.show()
 # span-:math:`S` projector uses.  How "close" depends on (a) how strongly
 # the constituent LORs differ within a compressed group and (b) how much
 # axial structure the phantom has where those LORs diverge.
+#
+# We plot the span-:math:`S` Michelogram alongside the ratio so the
+# multiplicity can be *read off directly*: each merge-line group (or each
+# isolated dot) is one output plane, and the number of ring pairs in that
+# group is :math:`m_n`.
 
 # guard against divide-by-zero for planes that don't intersect the phantom
 threshold = 1e-6 * float(direct_per_plane.max())
@@ -351,10 +356,21 @@ mask_valid = direct_per_plane > threshold
 ratio = np.full_like(direct_per_plane, np.nan, dtype=float)
 ratio[mask_valid] = compressed_per_plane[mask_valid] / direct_per_plane[mask_valid]
 
-fig, ax = plt.subplots(1, 1, figsize=(9, 4), tight_layout=True)
+fig, axes = plt.subplots(
+    1, 2, figsize=(14, 5.5), tight_layout=True, gridspec_kw={"width_ratios": [1, 1.4]}
+)
 
+# --- left: the span-S Michelogram of the 5-ring scanner ---
+op.out_lor_descriptor.michelogram.show(axes[0], plane_index_fontsize=11)
+axes[0].set_title(
+    f"span-{target_span} Michelogram of the 5-ring scanner\n"
+    f"(merge-line groups <-> multiplicity)",
+    fontsize="medium",
+)
+
+# --- right: empirical ratio vs multiplicity bars ---
 n_idx = np.arange(op.num_planes_out)
-ax.bar(
+axes[1].bar(
     n_idx,
     mult_np,
     color="lightgray",
@@ -362,7 +378,7 @@ ax.bar(
     lw=0.5,
     label="multiplicity $m_n$",
 )
-ax.plot(
+axes[1].plot(
     n_idx[mask_valid],
     ratio[mask_valid],
     "o",
@@ -371,15 +387,16 @@ ax.plot(
     label=r"empirical ratio "
     r"$(\mathrm{compressed})_n / (\mathrm{direct\;span-}S)_n$",
 )
-ax.set_xlabel("plane index $n$")
-ax.set_ylabel("ratio / multiplicity")
-ax.set_title(
+axes[1].set_xlabel("plane index $n$")
+axes[1].set_ylabel("ratio / multiplicity")
+axes[1].set_title(
     "the empirical ratio tracks the multiplicity but is not exactly equal\n"
-    "(constituent ring-pair LORs differ slightly from the averaged LOR)"
+    "(constituent ring-pair LORs differ slightly from the averaged LOR)",
+    fontsize="medium",
 )
-ax.set_xticks(n_idx)
-ax.set_ylim(0, max(float(mult_np.max()), float(np.nanmax(ratio))) * 1.25)
-ax.legend(loc="upper left", fontsize="small")
-ax.grid(True, ls=":", axis="y")
+axes[1].set_xticks(n_idx)
+axes[1].set_ylim(0, max(float(mult_np.max()), float(np.nanmax(ratio))) * 1.25)
+axes[1].legend(loc="upper left", fontsize="small")
+axes[1].grid(True, ls=":", axis="y")
 
 fig.show()

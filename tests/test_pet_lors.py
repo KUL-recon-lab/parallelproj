@@ -545,6 +545,9 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     with pytest.raises(ValueError, match="target_span"):
         ppl.SinogramAxialCompressionOperator(lor_s1, 0)
 
+    with pytest.raises(ValueError, match="mode"):
+        ppl.SinogramAxialCompressionOperator(lor_s1, 3, mode="bogus")
+
     with pytest.raises(ValueError, match="num_tof_bins"):
         ppl.SinogramAxialCompressionOperator(lor_s1, 3, num_tof_bins=0)
 
@@ -560,6 +563,7 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     op = ppl.SinogramAxialCompressionOperator(lor_s1, target_span=3)
 
     assert op.target_span == 3
+    assert op.mode == "sum"  # default
     assert op.num_tof_bins is None
     assert op.lor_descriptor is lor_s1
     assert op.in_shape == lor_s1.spatial_sinogram_shape
@@ -567,6 +571,7 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     assert op.num_planes_in == lor_s1.num_planes
     assert op.num_planes_out == op.out_lor_descriptor.num_planes
     assert "target_span=3" in str(op)
+    assert "mode='sum'" in str(op)
 
     op_mult_np = _np.asarray(to_numpy_array(op.plane_multiplicity))
     desc_mult_np = _np.asarray(
@@ -744,6 +749,142 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     for t in range(num_tof):
         # op_tof(x)[..., t]  ==  op(x[..., t])
         assert bool(xp.all(y_tof[..., t] == op(x_tof[..., t])))
+
+
+def test_sinogram_axial_compression_operator_average_mode(
+    xp: ModuleType, dev: str
+) -> None:
+    """``mode="average"`` produces the per-multiplicity mean and a matching adjoint.
+
+    For the 3-ring span=1 -> span=3 layout used in the main test, the
+    multiplicities are ``[1, 2, 1, 2, 1, 1, 1]``.  With the synthetic input
+    ``x[r, v, p1] = p1``, the sum-mode output per plane is
+    ``[0, 8, 1, 10, 2, 7, 8]``; dividing by the multiplicity gives the
+    average-mode output ``[0, 4, 1, 5, 2, 7, 8]``.
+
+    Likewise, on a deterministic ``y[r, v, n] = 10 + n``, the sum-mode
+    adjoint replicates ``10 + tau(p1)``; the average-mode adjoint divides
+    by ``m_{tau(p1)}``.
+    """
+    import numpy as _np
+
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=4,
+        num_lor_endpoints_per_side=2,
+        lor_spacing=4.0,
+        ring_positions=xp.asarray([0.0, 1.0, 2.0], device=dev),
+        symmetry_axis=2,
+    )
+    lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, 2, span=1),
+        radial_trim=2,
+    )
+
+    op_sum = ppl.SinogramAxialCompressionOperator(
+        lor_s1, target_span=3, mode="sum"
+    )
+    op_avg = ppl.SinogramAxialCompressionOperator(
+        lor_s1, target_span=3, mode="average"
+    )
+
+    assert op_sum.mode == "sum"
+    assert op_avg.mode == "average"
+    assert "mode='average'" in str(op_avg)
+
+    # The two operators share the same plane structure
+    assert op_avg.num_planes_in == op_sum.num_planes_in
+    assert op_avg.num_planes_out == op_sum.num_planes_out
+    assert op_avg.in_shape == op_sum.in_shape
+    assert op_avg.out_shape == op_sum.out_shape
+    assert bool(xp.all(op_avg.plane_multiplicity == op_sum.plane_multiplicity))
+    assert bool(
+        xp.all(op_avg.target_plane_for_input_plane == op_sum.target_plane_for_input_plane)
+    )
+
+    # ------------------------------------------------------------------
+    # Closed-form norms
+    # ------------------------------------------------------------------
+    mult_np = _np.asarray(to_numpy_array(op_avg.plane_multiplicity))
+    expected_sum_norm = float(_np.sqrt(int(mult_np.max())))
+    expected_avg_norm = float(1.0 / _np.sqrt(int(mult_np.min())))
+    assert abs(op_sum.norm(xp, dev) - expected_sum_norm) < 1e-6
+    assert abs(op_avg.norm(xp, dev) - expected_avg_norm) < 1e-6
+
+    # ------------------------------------------------------------------
+    # Adjointness for average mode
+    # ------------------------------------------------------------------
+    assert op_avg.adjointness_test(xp, dev)
+
+    # ------------------------------------------------------------------
+    # Forward in average mode = sum-mode result / multiplicity
+    # ------------------------------------------------------------------
+    P_in = op_avg.num_planes_in
+    P_out = op_avg.num_planes_out
+
+    plane_vals = xp.astype(xp.arange(P_in, device=dev), xp.float32)
+    x_in = xp.zeros(op_avg.in_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        plane_vals, (1, 1, P_in)
+    )
+
+    y_avg = op_avg(x_in)
+
+    # Expected per-plane: sum mode [0, 8, 1, 10, 2, 7, 8] divided by
+    # multiplicity [1, 2, 1, 2, 1, 1, 1] -> [0, 4, 1, 5, 2, 7, 8].
+    expected_avg = xp.asarray(
+        [0.0, 4.0, 1.0, 5.0, 2.0, 7.0, 8.0], device=dev, dtype=xp.float32
+    )
+    expected_y_avg = xp.zeros(op_avg.out_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        expected_avg, (1, 1, P_out)
+    )
+    assert bool(xp.all(y_avg == expected_y_avg))
+
+    # ------------------------------------------------------------------
+    # Adjoint in average mode = sum-mode adjoint / m_{tau(p1)}
+    # ------------------------------------------------------------------
+    plane_vals_out = 10.0 + xp.astype(
+        xp.arange(P_out, device=dev), xp.float32
+    )
+    y_in = xp.zeros(op_avg.out_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        plane_vals_out, (1, 1, P_out)
+    )
+    x_adj = op_avg.adjoint(y_in)
+
+    # Sum-mode adjoint values along the plane axis would be
+    # [10, 12, 14, 11, 13, 11, 13, 15, 16] (see the main test). Divided by
+    # multiplicity at the target: m[target_for_p1] = [1, 1, 1, 2, 2, 2, 2, 1, 1]
+    # -> [10, 12, 14, 5.5, 6.5, 5.5, 6.5, 15, 16].
+    expected_adj = xp.asarray(
+        [10.0, 12.0, 14.0, 5.5, 6.5, 5.5, 6.5, 15.0, 16.0],
+        device=dev,
+        dtype=xp.float32,
+    )
+    expected_x_adj = xp.zeros(op_avg.in_shape, dtype=xp.float32, device=dev) + xp.reshape(
+        expected_adj, (1, 1, P_in)
+    )
+    assert bool(xp.all(x_adj == expected_x_adj))
+
+    # ------------------------------------------------------------------
+    # Round-trip identity check:  G_avg^T G_avg 1 = 1 / m_{tau(p1)} * m_{tau(p1)}
+    #
+    # Because G_avg = D^{-1} G_sum, we have
+    #     G_avg^T G_avg = G_sum^T D^{-2} G_sum
+    # and  (G_avg^T G_avg 1)_{p1} = m_{tau(p1)} / m_{tau(p1)}^2 = 1 / m_{tau(p1)}.
+    # ------------------------------------------------------------------
+    x_ones = xp.ones(op_avg.in_shape, dtype=xp.float32, device=dev)
+    rt = op_avg.adjoint(op_avg(x_ones))
+    target = op_avg.target_plane_for_input_plane
+    inv_mult_at_target = 1.0 / xp.astype(
+        xp.take(op_avg.plane_multiplicity, target, axis=0), xp.float32
+    )
+    rt_np = _np.asarray(to_numpy_array(rt))
+    expected_np = _np.asarray(to_numpy_array(inv_mult_at_target))
+    P_axis = op_avg.lor_descriptor.plane_axis_num
+    moved = _np.moveaxis(rt_np, P_axis, -1)
+    assert _np.all(moved == expected_np[None, None, :])
 
 
 def test_michelogram_basic(xp: ModuleType, dev: str) -> None:

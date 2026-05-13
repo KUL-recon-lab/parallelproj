@@ -1494,15 +1494,40 @@ class SinogramAxialCompressionOperator(LinearOperator):
     All span-1 ring pairs sharing the same
     :math:`(\\text{segment}, s + e)` collapse into a single output plane.
 
-    .. math::
+    Two reduction modes are supported:
 
-        y_n \\;=\\; \\sum_{p_1 \\in \\mathcal{G}(n)} x_{p_1}
-        \\qquad
-        \\left(G^T y\\right)_{p_1} \\;=\\; y_{\\,\\tau(p_1)}
+    * ``mode="sum"`` (default).  The output plane is the **sum** of the
+      contributing input planes:
 
-    where :math:`\\mathcal{G}(n)` is the set of input plane indices mapped to
-    output plane :math:`n` and :math:`\\tau(p_1)` is the output plane index for
-    input plane :math:`p_1`.
+      .. math::
+
+          y_n \\;=\\; \\sum_{p_1 \\in \\mathcal{G}(n)} x_{p_1}
+          \\qquad
+          \\left(G^T y\\right)_{p_1} \\;=\\; y_{\\,\\tau(p_1)}\\,.
+
+      This is the natural reduction for **counts-like** sinograms — emission
+      data, measured counts, randoms, etc. — which add when ring pairs are
+      grouped together.
+
+    * ``mode="average"``.  The output plane is the **mean** of the
+      contributing input planes:
+
+      .. math::
+
+          y_n \\;=\\; \\frac{1}{m_n} \\sum_{p_1 \\in \\mathcal{G}(n)} x_{p_1}
+          \\qquad
+          \\left(G_{\\rm avg}^T y\\right)_{p_1}
+              \\;=\\; \\frac{y_{\\,\\tau(p_1)}}{m_{\\,\\tau(p_1)}}\\,.
+
+      This is the natural reduction for **multiplicative-factor** sinograms —
+      attenuation factors, sensitivity / normalisation factors, geometric
+      efficiency — which should *average* rather than *sum* when ring pairs
+      are grouped together.
+
+    In both expressions, :math:`\\mathcal{G}(n)` is the set of input plane
+    indices mapped to output plane :math:`n`, :math:`m_n = |\\mathcal{G}(n)|`
+    is the plane multiplicity, and :math:`\\tau(p_1)` is the output plane
+    index for input plane :math:`p_1`.
 
     Output plane ordering matches that of
     :class:`RegularPolygonPETLORDescriptor` constructed with the same scanner,
@@ -1512,17 +1537,16 @@ class SinogramAxialCompressionOperator(LinearOperator):
     ``show_segment_lors``) or for composing the operator with a span-:math:`S`
     projector.
 
-    Because :math:`G` is a 0/1 row-stochastic gather (each column has exactly
-    one ``1``),
+    The closed-form operator 2-norms are
 
     .. math::
 
-        G G^T = \\operatorname{diag}(m_n), \\qquad
-        \\|G\\|_2 \\;=\\; \\sqrt{\\max_n m_n}
+        \\|G_{\\rm sum}\\|_2 = \\sqrt{\\max_n m_n}\\,, \\qquad
+        \\|G_{\\rm avg}\\|_2 = 1 / \\sqrt{\\min_n m_n}\\,,
 
-    where :math:`m_n` is the multiplicity of output plane :math:`n` (the number
-    of span-1 planes that collapse into it).  The operator's :meth:`norm` returns
-    this closed-form value directly without power iteration.
+    derived from :math:`G_{\\rm sum} G_{\\rm sum}^T = \\operatorname{diag}(m_n)`
+    and :math:`G_{\\rm avg} G_{\\rm avg}^T = \\operatorname{diag}(1/m_n)`.
+    :meth:`norm` returns these directly without power iteration.
 
     Parameters
     ----------
@@ -1532,6 +1556,10 @@ class SinogramAxialCompressionOperator(LinearOperator):
         Odd integer ``>= 1`` giving the target axial compression.  ``1`` is
         accepted and yields an identity-like operator (each input plane maps to
         a single output plane in the same span-1 order).
+    mode : {"sum", "average"}, optional
+        Reduction mode.  ``"sum"`` (default) is appropriate for counts-like
+        sinograms; ``"average"`` is appropriate for multiplicative-factor
+        sinograms such as attenuation or sensitivity factors.
     num_tof_bins : int or None, optional
         If ``None`` (default), the operator acts on the 3D spatial sinogram
         with shape :attr:`RegularPolygonPETLORDescriptor.spatial_sinogram_shape`.
@@ -1563,6 +1591,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         self,
         lor_descriptor: RegularPolygonPETLORDescriptor,
         target_span: int,
+        mode: str = "sum",
         num_tof_bins: int | None = None,
     ) -> None:
         if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
@@ -1571,6 +1600,10 @@ class SinogramAxialCompressionOperator(LinearOperator):
             raise ValueError("input lor_descriptor must have span=1")
         if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
             raise ValueError("target_span must be an odd positive integer")
+        if mode not in ("sum", "average"):
+            raise ValueError(
+                f"mode must be 'sum' or 'average', got {mode!r}"
+            )
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
         ):
@@ -1580,6 +1613,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
 
         self._lor_descriptor = lor_descriptor
         self._target_span = int(target_span)
+        self._mode = mode
         self._num_tof_bins = num_tof_bins
 
         self._xp = lor_descriptor.xp
@@ -1658,12 +1692,25 @@ class SinogramAxialCompressionOperator(LinearOperator):
         self._num_planes_1 = int(target_for_p1.shape[0])
         self._num_planes_n = num_planes_n
         self._max_mult = max_mult
+        self._min_mult = int(multiplicity.min()) if num_planes_n > 0 else 0
         self._target_for_p1 = xp.asarray(target_for_p1, device=dev)
         # store flat indices because the array API standard only requires
         # 1-D indices for xp.take (multi-dim take is not portable).
         self._idx2d_flat = xp.asarray(idx2d.reshape(-1), device=dev)
         self._mask2d = xp.asarray(mask2d, device=dev)
         self._multiplicity = xp.asarray(multiplicity, device=dev)
+
+        # Pre-computed reciprocals used by mode="average".  Stored as
+        # multiplications instead of divisions inside the hot path.
+        inv_multiplicity = (1.0 / multiplicity.astype(np.float32)).astype(np.float32)
+        self._inv_multiplicity = xp.asarray(inv_multiplicity, device=dev)
+        # inv-multiplicity broadcast onto the input-plane axis (one entry per
+        # input plane, equal to 1/m_{tau(p1)}).  Used by the average-mode
+        # adjoint.
+        inv_multiplicity_at_target = inv_multiplicity[target_for_p1]
+        self._inv_multiplicity_at_target = xp.asarray(
+            inv_multiplicity_at_target, device=dev
+        )
 
     # ------------------------------------------------------------------
     # LinearOperator interface
@@ -1678,7 +1725,11 @@ class SinogramAxialCompressionOperator(LinearOperator):
         return self._out_shape
 
     def _apply(self, x: Array) -> Array:
-        """Compress: ``y_n = sum_{p1 in group(n)} x_{p1}`` along the plane axis."""
+        """Compress along the plane axis.
+
+        For ``mode="sum"``: ``y_n = sum_{p1 in group(n)} x_{p1}``.
+        For ``mode="average"``: divide the sum by the per-plane multiplicity.
+        """
         xp = self._xp
         ax = self._plane_axis
 
@@ -1700,11 +1751,37 @@ class SinogramAxialCompressionOperator(LinearOperator):
         gathered = gathered * xp.reshape(self._mask2d, tuple(mask_shape))
 
         # Sum over the multiplicity axis (at ax + 1).
-        return xp.sum(gathered, axis=ax + 1)
+        result = xp.sum(gathered, axis=ax + 1)
+
+        if self._mode == "average":
+            # Divide every output plane by its multiplicity m_n.
+            inv_shape = [1] * result.ndim
+            inv_shape[ax] = self._num_planes_n
+            result = result * xp.reshape(self._inv_multiplicity, tuple(inv_shape))
+
+        return result
 
     def _adjoint(self, y: Array) -> Array:
-        """Expand: replicate each output plane back to every contributing input plane."""
-        return self._xp.take(y, self._target_for_p1, axis=self._plane_axis)
+        """Expand the compressed sinogram back along the plane axis.
+
+        For ``mode="sum"``: ``x_{p1} = y_{tau(p1)}`` — each input plane gets
+        the value of its target output plane.
+        For ``mode="average"``: the broadcast value is additionally divided
+        by the multiplicity of the target output plane.
+        """
+        xp = self._xp
+        ax = self._plane_axis
+        result = xp.take(y, self._target_for_p1, axis=ax)
+
+        if self._mode == "average":
+            # Divide every input plane by m_{tau(p1)}.
+            inv_shape = [1] * result.ndim
+            inv_shape[ax] = self._num_planes_1
+            result = result * xp.reshape(
+                self._inv_multiplicity_at_target, tuple(inv_shape)
+            )
+
+        return result
 
     def norm(
         self,
@@ -1716,15 +1793,23 @@ class SinogramAxialCompressionOperator(LinearOperator):
     ) -> float:
         """Operator 2-norm in closed form.
 
-        Because :math:`G` is a 0/1 gather with each input plane belonging to
-        exactly one output plane, :math:`G G^T = \\operatorname{diag}(m_n)`
-        and therefore :math:`\\|G\\|_2 = \\sqrt{\\max_n m_n}`.  This is
-        independent of TOF, ``xp``, and ``dev``; the inherited signature is
-        retained for compatibility with :class:`LinearOperator.norm` but its
-        arguments (``xp``, ``dev``, ``num_iter``, ``iscomplex``, ``verbose``)
-        are ignored.
+        Because each input plane belongs to exactly one output plane,
+
+        * ``mode="sum"``:    :math:`G G^T = \\operatorname{diag}(m_n)`
+          and therefore :math:`\\|G\\|_2 = \\sqrt{\\max_n m_n}`.
+        * ``mode="average"``: :math:`G_{\\rm avg} G_{\\rm avg}^T
+          = \\operatorname{diag}(1/m_n)`
+          and therefore :math:`\\|G_{\\rm avg}\\|_2 = 1 / \\sqrt{\\min_n m_n}`.
+
+        Both norms are independent of TOF, ``xp``, and ``dev``; the inherited
+        signature is retained for compatibility with
+        :class:`LinearOperator.norm` but its arguments (``xp``, ``dev``,
+        ``num_iter``, ``iscomplex``, ``verbose``) are ignored.
         """
-        return float(np.sqrt(self._max_mult))
+        if self._mode == "sum":
+            return float(np.sqrt(self._max_mult))
+        # mode == "average"
+        return float(1.0 / np.sqrt(self._min_mult))
 
     # ------------------------------------------------------------------
     # Public read-only properties
@@ -1745,6 +1830,11 @@ class SinogramAxialCompressionOperator(LinearOperator):
     def target_span(self) -> int:
         """Target span (odd, >= 1)."""
         return self._target_span
+
+    @property
+    def mode(self) -> str:
+        """Reduction mode, either ``"sum"`` or ``"average"``."""
+        return self._mode
 
     @property
     def num_tof_bins(self) -> int | None:
@@ -1790,7 +1880,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         )
         return (
             f"{self.__class__.__name__}("
-            f"target_span={self._target_span}, "
+            f"target_span={self._target_span}, mode={self._mode!r}, "
             f"num_planes: {self._num_planes_1} -> {self._num_planes_n}, "
             f"max_multiplicity={self._max_mult}{tof_str})"
         )
