@@ -12,29 +12,29 @@ license = {text = "Apache-2.0"}
 authors = [
   {name = "Georg Schramm"},
 ]
-dependencies = [
-  # NOTE: ``parallelproj-core`` is intentionally NOT listed here.  It is a
-  # conda-forge-only binary backend with no PyPI distribution; the
-  # conda-forge recipe declares it independently, and pixi pulls it in via
-  # ``[tool.pixi.dependencies]`` below.  Listing it as a PEP 621 dependency
-  # would cause any PyPI-based resolver (pip, uv, pixi's PyPI resolver) to
-  # fail because the package cannot be found on PyPI.
-  "numpy>=1.23",
-  "scipy>=1.15",
-  "array-api-compat>=1.7",
-  "matplotlib",
-]
+# Runtime dependencies are intentionally NOT enumerated here.
+#
+# ``parallelproj`` is distributed only via conda-forge.  The two channels
+# that actually install the package have their own dependency declarations:
+#
+#   * the conda-forge feedstock (recipe/meta.yaml) -> ``conda install``
+#   * ``[tool.pixi.dependencies]`` further down in this file        -> ``pixi install``
+#
+# Enumerating the runtime deps again under PEP 621 would just duplicate them
+# and force a "conda-or-PyPI?" decision every time they change.  The conda
+# answer is canonical for this project, so [tool.pixi.dependencies] is the
+# single source of truth on the pixi side.  ``parallelproj-core`` (the binary
+# backend) is conda-forge-only and listing it here would also break PyPI
+# resolution.
+dependencies = []
 
 # NOTE: there is intentionally no ``[project.optional-dependencies]`` block.
-# ``parallelproj`` is distributed only via conda-forge, so pip-installable
-# "extras" (``pip install 'parallelproj[test]'``) are not a supported path.
-# In addition, pixi auto-imports any ``[project.optional-dependencies]``
-# entries as features with the same name, which then *merges* with the
-# explicit ``[tool.pixi.feature.*]`` blocks below — leading to duplicate
-# definitions resolved via two different package indices.  Test- and
-# docs-time dependencies are declared once, conda-forge-side, under
-# ``[tool.pixi.feature.test.dependencies]`` and
-# ``[tool.pixi.feature.docs.dependencies]``.
+# Test- and docs-time dependencies are declared once, conda-forge-side,
+# under ``[tool.pixi.feature.test.dependencies]`` and
+# ``[tool.pixi.feature.docs.dependencies]``.  Pixi auto-imports any
+# ``[project.optional-dependencies]`` entries as features with the same
+# name, which would then *merge* with the explicit ``[tool.pixi.feature.*]``
+# blocks below and pull duplicate definitions in from PyPI.
 
 [tool.setuptools_scm]
 parentdir_prefix_version = "v"
@@ -91,6 +91,14 @@ pytest-cov = "*"
 array-api-strict = "*"
 pytorch = "*"
 
+# Tasks defined under a feature are only available in environments that
+# include that feature.  When the user runs ``pixi run test`` (no -e flag),
+# pixi picks the first environment that has the task — which, with the
+# environment ordering below, is the dedicated ``test`` env.
+[tool.pixi.feature.test.tasks]
+test = "pytest tests/ -v"
+test-cov = "pytest tests/ --cov=parallelproj --cov-report=term-missing"
+
 [tool.pixi.feature.docs.dependencies]
 sphinx = "*"
 sphinx-gallery = "*"
@@ -100,6 +108,10 @@ sphinxcontrib-bibtex = "*"
 joblib = "*"        # used by sphinx-gallery for parallel example execution
 pytorch = "*"        # docs/examples/05_torch/01_run_projection_layer.py uses torch
 # matplotlib is declared in [tool.pixi.dependencies] (runtime dep of parallelproj)
+
+[tool.pixi.feature.docs.tasks]
+docs = "sphinx-build -b html docs docs/_build/html"
+docs-clean = "rm -rf docs/_build docs/auto_examples"
 
 # CUDA 12 stack ---------------------------------------------------------
 #
@@ -129,23 +141,22 @@ cupy = "*"
 # Each entry composes one or more features into a named environment that
 # pixi can solve, lock, and install independently:
 #
-#   default   - CPU-only dev / test environment (the implicit `pixi install`).
-#   docs      - everything sphinx + sphinx-gallery need to build the docs.
-#   cuda12    - default + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
-#   cuda13    - default + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
+#   default   - minimal "runtime only" env -- just parallelproj + its
+#               runtime deps.  Useful for ``pixi shell`` -based interactive
+#               use, notebooks, or downstream consumers who don't need the
+#               test stack.
+#   test      - default + pytest / array-api-strict / pytorch (CPU).
+#   docs      - default + sphinx + sphinx-gallery + friends.
+#   cuda12    - test + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
+#   cuda13    - test + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
+#
+# Order matters when tasks are shared across envs: ``pixi run <task>``
+# picks the first env that has the task.  Putting ``test`` before the cuda
+# envs makes ``pixi run test`` default to the CPU-only test env, which is
+# what we want.
 [tool.pixi.environments]
-default = { features = ["test"] }
+default = { features = [] }
+test = { features = ["test"] }
 docs = { features = ["docs"] }
 cuda12 = { features = ["test", "cuda12"] }
 cuda13 = { features = ["test", "cuda13"] }
-
-# ---- tasks ----
-#
-# Named commands runnable via `pixi run <task>` (default env) or
-# `pixi run -e <env> <task>` (specific env).  Keep these in sync with what
-# CI runs so contributors can reproduce CI failures locally with one command.
-[tool.pixi.tasks]
-test = "pytest tests/ -v"
-test-cov = "pytest tests/ --cov=parallelproj --cov-report=term-missing"
-docs = "sphinx-build -b html docs docs/_build/html"
-docs-clean = "rm -rf docs/_build docs/auto_examples"
