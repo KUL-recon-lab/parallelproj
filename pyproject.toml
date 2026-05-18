@@ -13,23 +13,28 @@ authors = [
   {name = "Georg Schramm"},
 ]
 dependencies = [
-  "parallelproj-core>=2.0.5",
+  # NOTE: ``parallelproj-core`` is intentionally NOT listed here.  It is a
+  # conda-forge-only binary backend with no PyPI distribution; the
+  # conda-forge recipe declares it independently, and pixi pulls it in via
+  # ``[tool.pixi.dependencies]`` below.  Listing it as a PEP 621 dependency
+  # would cause any PyPI-based resolver (pip, uv, pixi's PyPI resolver) to
+  # fail because the package cannot be found on PyPI.
   "numpy>=1.23",
   "scipy>=1.15",
   "array-api-compat>=1.7",
+  "matplotlib",
 ]
 
-[project.optional-dependencies]
-test = [
-  "pytest>=8",
-  "pytest-cov",
-  "array-api-strict",
-  "pytorch"
-]
-docs = [
-  "sphinx",
-  "furo",
-]
+# NOTE: there is intentionally no ``[project.optional-dependencies]`` block.
+# ``parallelproj`` is distributed only via conda-forge, so pip-installable
+# "extras" (``pip install 'parallelproj[test]'``) are not a supported path.
+# In addition, pixi auto-imports any ``[project.optional-dependencies]``
+# entries as features with the same name, which then *merges* with the
+# explicit ``[tool.pixi.feature.*]`` blocks below — leading to duplicate
+# definitions resolved via two different package indices.  Test- and
+# docs-time dependencies are declared once, conda-forge-side, under
+# ``[tool.pixi.feature.test.dependencies]`` and
+# ``[tool.pixi.feature.docs.dependencies]``.
 
 [tool.setuptools_scm]
 parentdir_prefix_version = "v"
@@ -62,14 +67,17 @@ channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
 
 # Default dependencies present in *every* environment.  These are the runtime
-# dependencies of parallelproj itself (binary backend + numerical stack);
-# higher-level dev / test / docs / GPU deps are added in features below.
+# dependencies of parallelproj itself (binary backend + numerical stack +
+# matplotlib for the show_* visualization methods on the scanner / LOR
+# descriptor / projector classes); higher-level dev / test / docs / GPU deps
+# are added in features below.
 [tool.pixi.dependencies]
 python = "3.12.*"
 parallelproj-core = ">=2.0.5"
 numpy = ">=1.23"
 scipy = ">=1.15"
 array-api-compat = ">=1.7"
+matplotlib = "*"
 
 # Install the package itself in editable mode for development.
 [tool.pixi.pypi-dependencies]
@@ -89,9 +97,9 @@ sphinx-gallery = "*"
 sphinx-design = "*"
 furo = "*"
 sphinxcontrib-bibtex = "*"
-matplotlib = "*"
 joblib = "*"        # used by sphinx-gallery for parallel example execution
 pytorch = "*"        # docs/examples/05_torch/01_run_projection_layer.py uses torch
+# matplotlib is declared in [tool.pixi.dependencies] (runtime dep of parallelproj)
 
 # CUDA 12 stack ---------------------------------------------------------
 #
