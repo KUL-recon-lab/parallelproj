@@ -39,3 +39,105 @@ local_scheme = "node-and-date"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# pixi configuration
+# ---------------------------------------------------------------------------
+#
+# This section configures the pixi package manager (https://pixi.sh/) for
+# development, testing, documentation, and GPU workflows.  Pixi reads the
+# project metadata from [project] above (name, version, dependencies) and
+# augments it with conda-forge packages and named environments below.
+#
+# Quick start:
+#   pixi install                  # default env (test feature, CPU)
+#   pixi run test                 # run the test suite
+#   pixi run -e docs docs         # build the documentation locally
+#   pixi run -e cuda12 test       # run tests against a CUDA 12 stack
+#   pixi run -e cuda13 test       # run tests against a CUDA 13 stack
+# ---------------------------------------------------------------------------
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
+
+# Default dependencies present in *every* environment.  These are the runtime
+# dependencies of parallelproj itself (binary backend + numerical stack);
+# higher-level dev / test / docs / GPU deps are added in features below.
+[tool.pixi.dependencies]
+python = "3.12.*"
+parallelproj-core = ">=2.0.5"
+numpy = ">=1.23"
+scipy = ">=1.15"
+array-api-compat = ">=1.7"
+
+# Install the package itself in editable mode for development.
+[tool.pixi.pypi-dependencies]
+parallelproj = { path = ".", editable = true }
+
+# ---- features ----
+
+[tool.pixi.feature.test.dependencies]
+pytest = ">=8"
+pytest-cov = "*"
+array-api-strict = "*"
+pytorch = "*"
+
+[tool.pixi.feature.docs.dependencies]
+sphinx = "*"
+sphinx-gallery = "*"
+sphinx-design = "*"
+furo = "*"
+sphinxcontrib-bibtex = "*"
+matplotlib = "*"
+joblib = "*"        # used by sphinx-gallery for parallel example execution
+pytorch = "*"        # docs/examples/05_torch/01_run_projection_layer.py uses torch
+
+# CUDA 12 stack ---------------------------------------------------------
+#
+# GPU environments only make sense on linux-64 (where conda-forge ships
+# CUDA-enabled builds of pytorch and cupy).  The cuda-version constraint
+# plus system-requirements.cuda steer the solver towards the cuda-12
+# variants of pytorch/cupy automatically.
+[tool.pixi.feature.cuda12]
+platforms = ["linux-64"]
+system-requirements = { cuda = "12" }
+
+[tool.pixi.feature.cuda12.dependencies]
+cuda-version = "12.*"
+cupy = "*"
+
+# CUDA 13 stack ---------------------------------------------------------
+[tool.pixi.feature.cuda13]
+platforms = ["linux-64"]
+system-requirements = { cuda = "13" }
+
+[tool.pixi.feature.cuda13.dependencies]
+cuda-version = "13.*"
+cupy = "*"
+
+# ---- environments ----
+#
+# Each entry composes one or more features into a named environment that
+# pixi can solve, lock, and install independently:
+#
+#   default   - CPU-only dev / test environment (the implicit `pixi install`).
+#   docs      - everything sphinx + sphinx-gallery need to build the docs.
+#   cuda12    - default + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
+#   cuda13    - default + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
+[tool.pixi.environments]
+default = { features = ["test"] }
+docs = { features = ["docs"] }
+cuda12 = { features = ["test", "cuda12"] }
+cuda13 = { features = ["test", "cuda13"] }
+
+# ---- tasks ----
+#
+# Named commands runnable via `pixi run <task>` (default env) or
+# `pixi run -e <env> <task>` (specific env).  Keep these in sync with what
+# CI runs so contributors can reproduce CI failures locally with one command.
+[tool.pixi.tasks]
+test = "pytest tests/ -v"
+test-cov = "pytest tests/ --cov=parallelproj --cov-report=term-missing"
+docs = "sphinx-build -b html docs docs/_build/html"
+docs-clean = "rm -rf docs/_build docs/auto_examples"
