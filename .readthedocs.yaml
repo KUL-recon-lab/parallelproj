@@ -1,16 +1,35 @@
 version: 2
 
+# Read the Docs build configuration -- see
+# https://docs.readthedocs.io/en/stable/config-file/v2.html for the full
+# schema reference.
+#
+# This project uses pixi to manage its docs build environment.  The
+# ``docs`` environment is defined in pyproject.toml under
+# ``[tool.pixi.environments]`` and locked by ``pixi.lock``; the two
+# files together are the single source of truth shared between local
+# development, CI, and RTD.
+#
+# ``build.commands`` fully overrides the RTD build pipeline -- the
+# default sphinx-build invocation is *not* run.  Therefore the
+# ``conda:``, ``sphinx:``, and ``python:`` top-level blocks are
+# intentionally absent (they would be ignored if present).
+
 build:
-  os: "ubuntu-24.04"
+  os: ubuntu-24.04
   tools:
-    python: "miniconda3-3.12-24.9"
-  jobs:
-    post_install:
-      - pip install --no-deps .
+    pixi: "latest"
+  commands:
+    # Solve and install the ``docs`` env.  When ``pixi.lock`` is committed
+    # (which it should be), this step downloads pre-resolved packages
+    # without re-solving -- typically <90 s including caches.
+    - pixi install -e docs
 
-conda:
-  environment: docs/environment.yml
-
-sphinx:
-  fail_on_warning: true
-  configuration: docs/conf.py
+    # Build the HTML output.  Flags mirror RTD's default sphinx call so
+    # behaviour is preserved across the migration:
+    #   -T            show full traceback on errors
+    #   -W            treat warnings as errors  (was sphinx.fail_on_warning)
+    #   --keep-going  accumulate warnings before failing
+    #   -d ...        where to cache parsed-doctree pickles
+    #   -D language=en   match RTD's default
+    - pixi run -e docs sphinx-build -T -W --keep-going -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html
