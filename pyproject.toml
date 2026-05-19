@@ -1,10 +1,15 @@
 [build-system]
-requires = ["setuptools>=80", "setuptools-scm>=8"]
-build-backend = "setuptools.build_meta"
+# pixi-build-python invokes hatchling via PEP 517 to produce the wheel.
+# The version is declared statically in [project] below and mirrored by
+# [package].version in pixi.toml.
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "parallelproj"
-dynamic = ["version"]
+# IMPORTANT: this version must be kept in sync with [package].version in
+# pixi.toml.  Bumping a release requires editing both files.
+version = "2.0.0"
 description = "Python tools for PET projection and reconstruction workflows."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -14,7 +19,7 @@ authors = [
 ]
 # Runtime dependencies are intentionally NOT enumerated here.
 #
-# ``parallelproj`` is distributed only via conda-forge.  The two channels
+# ``parallelproj`` is distributed only via conda-forge.  The channels
 # that actually install the package have their own dependency declarations:
 #
 #   * the conda-forge feedstock (recipe/meta.yaml) -> ``conda install``
@@ -27,14 +32,13 @@ authors = [
 dependencies = []
 
 # Dev / test / docs / GPU environments are defined in ``pixi.toml`` under
-# ``[feature.*]`` and ``[environments]``.  See ``pixi.toml`` for the
-# canonical list of features and named environments.
+# ``[feature.*]`` and ``[environments]``.
 
-[tool.setuptools_scm]
-parentdir_prefix_version = "v"
-fallback_version = "0.0.0"
-version_scheme = "no-guess-dev"
-local_scheme = "node-and-date"
+# Tell hatchling that the importable package lives at ``src/parallelproj``.
+# Hatchling's auto-discovery handles flat layouts out of the box but
+# wants this explicit for the ``src/`` layout we use.
+[tool.hatch.build.targets.wheel]
+packages = ["src/parallelproj"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
