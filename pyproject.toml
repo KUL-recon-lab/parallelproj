@@ -71,13 +71,27 @@ platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
 # matplotlib for the show_* visualization methods on the scanner / LOR
 # descriptor / projector classes); higher-level dev / test / docs / GPU deps
 # are added in features below.
+#
+# NOTE: ``python`` is intentionally NOT pinned here.  It's pinned by the
+# ``py312`` / ``py-latest`` features below so each environment can lock to
+# a specific Python version (useful for the CI matrix).
 [tool.pixi.dependencies]
-python = "3.12.*"
 parallelproj-core = ">=2.0.5"
 numpy = ">=1.23"
 scipy = ">=1.15"
 array-api-compat = ">=1.7"
 matplotlib = "*"
+
+# ---- Python-version features ----
+#
+# Each environment below picks exactly one of these so its Python version
+# is unambiguous.  Add a new ``py3xx`` feature when a new Python release
+# is worth pinning to.
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+
+[tool.pixi.feature.py-latest.dependencies]
+python = ">=3.13"
 
 # Install the package itself in editable mode for development.
 [tool.pixi.pypi-dependencies]
@@ -139,24 +153,30 @@ cupy = "*"
 # ---- environments ----
 #
 # Each entry composes one or more features into a named environment that
-# pixi can solve, lock, and install independently:
+# pixi can solve, lock, and install independently.  Every env picks
+# exactly one Python-version feature (``py312`` or ``py-latest``) so its
+# Python version is unambiguous.
 #
-#   default   - minimal "runtime only" env -- just parallelproj + its
-#               runtime deps.  Useful for ``pixi shell`` -based interactive
-#               use, notebooks, or downstream consumers who don't need the
-#               test stack.
-#   test      - default + pytest / array-api-strict / pytorch (CPU).
-#   docs      - default + sphinx + sphinx-gallery + friends.
-#   cuda12    - test + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
-#   cuda13    - test + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
+#   default        - minimal "runtime only" env -- just parallelproj + its
+#                    runtime deps on Python 3.12.  Useful for
+#                    ``pixi shell`` -based interactive use, notebooks, or
+#                    downstream consumers who don't need the test stack.
+#   test           - default + pytest / array-api-strict / pytorch on
+#                    Python 3.12 (CPU).
+#   test-py-latest - same as ``test`` but on the newest available Python.
+#   docs           - default + sphinx + sphinx-gallery + friends on
+#                    Python 3.12.
+#   cuda12         - test + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
+#   cuda13         - test + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
 #
 # Order matters when tasks are shared across envs: ``pixi run <task>``
-# picks the first env that has the task.  Putting ``test`` before the cuda
-# envs makes ``pixi run test`` default to the CPU-only test env, which is
-# what we want.
+# picks the first env that has the task.  Putting ``test`` before
+# ``test-py-latest`` makes ``pixi run test`` default to the Python 3.12
+# env, which is what we want for local development.
 [tool.pixi.environments]
-default = { features = [] }
-test = { features = ["test"] }
-docs = { features = ["docs"] }
-cuda12 = { features = ["test", "cuda12"] }
-cuda13 = { features = ["test", "cuda13"] }
+default = { features = ["py312"] }
+test = { features = ["test", "py312"] }
+test-py-latest = { features = ["test", "py-latest"] }
+docs = { features = ["docs", "py312"] }
+cuda12 = { features = ["test", "cuda12", "py312"] }
+cuda13 = { features = ["test", "cuda13", "py312"] }
