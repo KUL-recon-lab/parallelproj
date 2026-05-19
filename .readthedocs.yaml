@@ -26,6 +26,16 @@ build:
   tools:
     python: "latest"
   jobs:
+    # Unshallow the clone and fetch tags so setuptools-scm can derive a
+    # proper version (e.g. ``2.0.5.dev3+gabcd123``) instead of falling
+    # back to the ``0.0.0.post1.dev`` placeholder declared in
+    # ``[tool.setuptools_scm].fallback_version``.  RTD does a depth-1
+    # clone by default; ``--unshallow`` downloads the rest of the
+    # history including all tags.  ``|| true`` keeps the build moving
+    # in the rare case the repo is already fully cloned.
+    post_checkout:
+      - git fetch --unshallow || true
+      - git fetch --tags --force || true
     create_environment:
       - asdf plugin add pixi
       - asdf install pixi latest
