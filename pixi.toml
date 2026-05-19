@@ -1,0 +1,86 @@
+[workspace]
+name = "parallelproj"
+description = "Python tools for PET projection and reconstruction workflows."
+authors = ["Georg Schramm <georg.schramm@kuleuven.be>"]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
+
+# Default dependencies present in *every* environment.
+# NOTE: ``python`` is intentionally NOT pinned here.  It's pinned by the
+# ``py312`` / ``py-latest``
+[dependencies]
+parallelproj-core = ">=2.0.5"
+numpy = ">=1.23"
+scipy = ">=1.15"
+array-api-compat = ">=1.7"
+matplotlib = "*"
+
+# Install the package itself in editable mode for development.  uv reads
+# pyproject.toml for the actual build (setuptools + setuptools-scm).
+[pypi-dependencies]
+parallelproj = { path = ".", editable = true }
+
+# ---- Python-version features ----
+
+[feature.py312.dependencies]
+python = "3.12.*"
+
+[feature.py-latest.dependencies]
+python = ">=3.13"
+
+# ---- test feature ----
+
+[feature.test.dependencies]
+pytest = ">=8"
+pytest-cov = "*"
+array-api-strict = "*"
+pytorch = "*"
+
+[feature.test.tasks]
+test = "pytest tests/ -v"
+test-cov = "pytest tests/ --cov=parallelproj --cov-report=term-missing"
+
+# ---- docs feature ----
+
+[feature.docs.dependencies]
+sphinx = "*"
+sphinx-gallery = "*"
+sphinx-design = "*"
+furo = "*"
+sphinxcontrib-bibtex = "*"
+joblib = "*"        # used by sphinx-gallery for parallel example execution
+pytorch = "*"        # docs/examples/05_torch/01_run_projection_layer.py uses torch
+
+[feature.docs.tasks]
+docs = "sphinx-build -b html docs docs/_build/html"
+docs-clean = "rm -rf docs/_build docs/auto_examples"
+
+# ---- CUDA 12 stack ----
+
+[feature.cuda12]
+platforms = ["linux-64"]
+system-requirements = { cuda = "12" }
+
+[feature.cuda12.dependencies]
+cuda-version = "12.*"
+cupy = "*"
+
+# ---- CUDA 13 stack ----
+
+[feature.cuda13]
+platforms = ["linux-64"]
+system-requirements = { cuda = "13" }
+
+[feature.cuda13.dependencies]
+cuda-version = "13.*"
+cupy = "*"
+
+# ---- environments ----
+
+[environments]
+default = { features = ["py312"] }
+test = { features = ["test", "py312"] }
+test-py-latest = { features = ["test", "py-latest"] }
+docs = { features = ["docs", "py312"] }
+cuda12 = { features = ["test", "cuda12", "py312"] }
+cuda13 = { features = ["test", "cuda13", "py312"] }

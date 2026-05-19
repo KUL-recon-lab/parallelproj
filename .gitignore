@@ -141,3 +141,6 @@ wip/*
 .vscode/*
 compiled_libs/*
 .DS_Store
+# pixi environments
+.pixi/*
+!.pixi/config.toml
