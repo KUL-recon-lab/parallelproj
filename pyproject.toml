@@ -123,12 +123,31 @@ parallelproj = { path = "." }
 # ---- Workspace-level tasks ----
 #
 # Tasks that aren't tied to a specific feature (test/docs) live here.
-# ``setup-hooks`` opts this clone into the repo-tracked git hooks in
-# ``.githooks/`` -- in particular the pre-push tag/version check.  Run
-# once per fresh clone.
+#
+#   setup-hooks - Opts this clone into the repo-tracked git hooks in
+#                 ``.githooks/`` (the pre-push tag/version check).  Run
+#                 once per fresh clone; the test / docs / release tasks
+#                 ``depends-on`` it so a contributor who runs any of
+#                 them gets hooks activated implicitly.
+#   release         - Tag HEAD with ``v<[project].version>`` and push.
+#                     Logic lives in scripts/release.py; this task just
+#                     invokes it.  The script validates that
+#                     [project].version looks like a PEP 440
+#                     release/pre-release string, refuses if the
+#                     v<version> tag already exists, then tags and
+#                     pushes.  The pre-push hook in .githooks/ still
+#                     validates the result as the final safety net.
+#   release-dry-run - Same as release but with ``--dry-run`` -- runs all
+#                     the checks and prints what *would* happen, without
+#                     creating any tag or pushing.  Use this to verify
+#                     the release will work before committing to it.
+#                     ``pixi run release --dry-run`` also works (pixi
+#                     forwards extra args).
 
 [tool.pixi.tasks]
 setup-hooks = { cmd = "git config core.hooksPath .githooks", description = "Activate the repo-tracked git hooks in .githooks/" }
+release = { cmd = "python scripts/release.py", description = "Validate [project].version, refuse if v<version> tag exists, then tag HEAD and push.", depends-on = ["setup-hooks"] }
+release-dry-run = { cmd = "python scripts/release.py --dry-run", description = "Same as release, but only run the checks and print what would happen.", depends-on = ["setup-hooks"] }
 
 # ---- Python-version features ----
 #
