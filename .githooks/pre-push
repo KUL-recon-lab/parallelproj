@@ -30,10 +30,16 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             TAG="${local_ref#refs/tags/}"
             TAG_VERSION="${TAG#v}"
 
+            # ``local_sha`` is the tag *object* SHA for annotated tags
+            # (``git tag -a``) and the commit SHA for lightweight tags.
+            # Dereference to the underlying commit explicitly so the
+            # ``git show <sha>:<path>`` lookup below always works.
+            COMMIT_SHA=$(git rev-parse "${local_sha}^{commit}")
+
             # Read [project].version from pyproject.toml *at the tagged
             # commit* (not the working tree), so we validate what's
             # actually being shipped.
-            PROJ_VERSION=$(git show "${local_sha}:pyproject.toml" \
+            PROJ_VERSION=$(git show "${COMMIT_SHA}:pyproject.toml" \
                 | python3 -c "import sys, tomllib; print(tomllib.loads(sys.stdin.read())['project']['version'])")
 
             echo "pre-push: checking tag ${TAG}" >&2

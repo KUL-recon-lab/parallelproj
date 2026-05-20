@@ -151,8 +151,14 @@ array-api-strict = "*"
 pytorch = "*"
 
 [tool.pixi.feature.test.tasks]
-test = "pytest tests/ -v"
-test-cov = "pytest tests/ --cov=parallelproj --cov-report=term-missing"
+# ``depends-on = ["setup-hooks"]`` is the contributor-friendly workaround
+# for git's refusal to auto-activate hooks on clone: the first time
+# anyone runs ``pixi run test`` on a fresh clone, ``setup-hooks`` runs
+# first and points ``core.hooksPath`` at ``.githooks/``.  Subsequent
+# runs are no-ops -- ``git config`` is idempotent.  In CI this is also
+# harmless (it just touches the runner's disposable local git config).
+test = { cmd = "pytest tests/ -v", depends-on = ["setup-hooks"] }
+test-cov = { cmd = "pytest tests/ --cov=parallelproj --cov-report=term-missing", depends-on = ["setup-hooks"] }
 
 # ---- docs feature ----
 
@@ -166,7 +172,8 @@ joblib = "*"        # used by sphinx-gallery for parallel example execution
 pytorch = "*"       # docs/examples/05_torch/01_run_projection_layer.py uses torch
 
 [tool.pixi.feature.docs.tasks]
-docs = "sphinx-build -b html docs docs/_build/html"
+# See note on ``depends-on = ["setup-hooks"]`` under the test feature.
+docs = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"] }
 docs-clean = "rm -rf docs/_build docs/auto_examples"
 
 # ---- CUDA 12 stack ----
