@@ -120,6 +120,16 @@ matplotlib = "*"
 [tool.pixi.dependencies]
 parallelproj = { path = "." }
 
+# ---- Workspace-level tasks ----
+#
+# Tasks that aren't tied to a specific feature (test/docs) live here.
+# ``setup-hooks`` opts this clone into the repo-tracked git hooks in
+# ``.githooks/`` -- in particular the pre-push tag/version check.  Run
+# once per fresh clone.
+
+[tool.pixi.tasks]
+setup-hooks = { cmd = "git config core.hooksPath .githooks", description = "Activate the repo-tracked git hooks in .githooks/" }
+
 # ---- Python-version features ----
 #
 # Each environment below picks exactly one of these so its Python version
