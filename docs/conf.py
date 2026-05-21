@@ -5,9 +5,8 @@
 
 import os
 import sys
-
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _get_version
+import tomllib
+from pathlib import Path
 
 from sphinx_gallery.sorting import FileNameSortKey
 
@@ -21,10 +20,8 @@ project = "parallelproj"
 # copyright = "2026, parallelproj team"
 # author = "parallelproj team"
 
-try:
-    release = _get_version("parallelproj")
-except PackageNotFoundError:
-    release = "unknown"
+with open(Path(__file__).parent.parent / "pyproject.toml", "rb") as _f:
+    release = tomllib.load(_f)["project"]["version"]
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
