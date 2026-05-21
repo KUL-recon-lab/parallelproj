@@ -40,7 +40,7 @@ dependencies = []
 
 [project.urls]
 Homepage = "https://parallelproj.readthedocs.io/"
-Repository = "https://github.com/gschramm/parallelproj"
+Repository = "https://github.com/KUL-recon-lab/parallelproj"
 Documentation = "https://parallelproj.readthedocs.io/"
 
 # Tell hatchling that the importable package lives at ``src/parallelproj``.
