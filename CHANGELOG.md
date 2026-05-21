@@ -1,3 +1,77 @@
+## 2.0.0 (TBD)
+
+### Breaking Changes
+
+- **Python ≥ 3.12 required** (dropped support for 3.9, 3.10, 3.11)
+- **New required dependency: `parallelproj-core >= 2.0.5`** — the compiled C/CUDA
+  projection kernels have been extracted into a separate conda-forge package
+  (`parallelproj-core`). The old shared-library loading via ctypes is gone.
+- **Low-level projection functions moved to `parallelproj_core`**: `joseph3d_fwd`,
+  `joseph3d_back`, and all TOF variants (e.g. `joseph3d_fwd_tof_sino`) are no longer
+  in the `parallelproj` namespace. Import them from `parallelproj_core` instead. Note
+  that the TOF function names were also reordered (e.g. `joseph3d_fwd_tof_sino` →
+  `joseph3d_tof_sino_fwd`).
+- **Top-level namespace reduced**: only `Array`, `empty_cuda_cache`,
+  `to_numpy_array`, and `count_event_multiplicity` are exported from `parallelproj`
+  directly. All other classes must now be imported from their submodules:
+  ```python
+  from parallelproj.operators import LinearOperator
+  from parallelproj.projectors import RegularPolygonPETProjector
+  from parallelproj.pet_scanners import RegularPolygonPETScannerGeometry
+  from parallelproj.pet_lors import RegularPolygonPETLORDescriptor
+  ```
+- **Runtime-detection variables removed** from the `parallelproj` namespace:
+  `cuda_present`, `cupy_enabled`, `torch_enabled`, `num_visible_cuda_devices`,
+  `lib_parallelproj_c_fname`, `lib_parallelproj_cuda_fname`, `cuda_kernel_file`,
+  `is_cuda_array`. Use `parallelproj_core.cuda_enabled` for CUDA detection.
+- **`RegularPolygonPETLORDescriptor` signature changed**: `max_ring_difference`
+  parameter replaced by a `michelogram` parameter that accepts a `Michelogram`
+  object. See new `Michelogram` class below.
+- **`TOFNonTOFElementwiseMultiplicationOperator` removed**.
+- **`MatrixOperator.iscomplex` and `ElementwiseMultiplicationOperator.iscomplex`
+  changed from method to property**: replace `op.iscomplex()` calls with
+  `op.iscomplex`.
+- **`GradientFieldProjectionOperator` numeric change**: the `eta` normalisation
+  formula was corrected (`sqrt(sum(g^2) + eta^2)` instead of `sqrt(sum(g^2 + eta^2))`).
+  Results will differ from v1.x.
+- **License changed** from MIT to Apache-2.0.
+- `scipy >= 1.15` now required (was `~=1.0`).
+- `array-api-compat >= 1.7` now required.
+- Import-time banner and `PARALLELPROJ_SILENT_IMPORT` environment variable removed;
+  `import parallelproj` is now silent.
+
+### New Features
+
+- **`parallelproj.functions` submodule**: new module providing abstract base classes
+  (`C1Function`, `C2Function`, `FunctionWithProx`, `FunctionWithConjProx`) and
+  concrete loss/regularisation implementations for optimisation:
+  - `NegPoissonLogL`, `NegPoissonLogLSafe` — Poisson log-likelihood (sinogram and
+    masked variants)
+  - `NegPoissonLogLListmode` — listmode Poisson log-likelihood with built-in forward
+    model
+  - `HalfSquaredL2Deviation` — weighted least-squares deviation
+  - `SumC1Function` / `SumC2Function` — also created via `f1 + f2` operator
+    overloading
+  - `C1AffineObjective` / `C2AffineObjective` — compose a loss with an affine
+    forward model
+  - `NonNegativeIndicator` — non-negativity constraint with proximal operator
+  - `MixedL21Norm` — mixed L2,1 norm for group sparsity / TV-type regularisation
+- **`Michelogram` class** (`parallelproj.pet_lors`): encapsulates the full axial
+  plane layout for cylindrical PET scanners under odd-span compression, including
+  ring-pair-to-plane tables and visualisation methods.
+- **`SinogramAxialCompressionOperator`** (`parallelproj.pet_lors`): `LinearOperator`
+  that axially compresses a span-1 sinogram to a higher odd span (`mode="sum"` or
+  `mode="average"`).
+- **`LinearOperator.H` property** and **`AdjointLinearOperator`** class: obtain the
+  adjoint of any operator via `A.H`.
+- **`EqualBlockPETProjector` `num_chunks` parameter**: split block-pair projections
+  into chunks to reduce peak GPU memory usage.
+- **`RegularPolygonPETProjector.convert_sinogram_to_listmode`** gained a `shuffle`
+  parameter to randomly permute the returned event list.
+- **`VstackOperator`** now raises `ValueError` on inconsistent `in_shape` across
+  stacked operators (previously silent).
+- **`parallelproj.__version__`** is now exposed at the top level.
+
 ## 1.10.2 (Aug 20, 2025)
 
 - add compatibility for latest cupy version (>= 13.5) which require `from_dlpack` to convert
