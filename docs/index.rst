@@ -28,6 +28,7 @@ Content
 
     Installation <installation>
     Examples <auto_examples/index>
+    Changelog <changelog>
 
 .. toctree::
     :maxdepth: 1
