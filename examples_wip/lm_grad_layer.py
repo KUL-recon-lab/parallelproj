@@ -75,8 +75,8 @@ voxel_size = (2.0, 2.0, 2.0)
 
 lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
     scanner,
+    parallelproj.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=10,
-    max_ring_difference=2,
     sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
 )
 
@@ -120,17 +120,18 @@ proj.tof_parameters = parallelproj.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-# setup the attenuation multiplication operator which is different
-# for TOF and non-TOF since the attenuation sinogram is always non-TOF
-if proj.tof:
-    att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-        proj.out_shape, att_sino
-    )
-else:
-    att_op = parallelproj.ElementwiseMultiplicationOperator(att_sino)
+# For TOF, att_sino has no TOF-bins dimension while the projector output does.
+# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
+# the TOF-bins axis without copying data (zero-stride view).
+att_values = (
+    xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
+    if proj.tof
+    else att_sino
+)
+att_op = parallelproj.ElementwiseMultiplicationOperator(att_values)
 
 res_model = parallelproj.GaussianFilterOperator(
-    proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
+    proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
 )
 
 # compose all 3 operators into a single linear operator
@@ -211,7 +212,7 @@ contamination_list = xp.full(
 lm_pet_lin_op = parallelproj.CompositeLinearOperator((lm_att_op, lm_proj, res_model))
 
 # %%
-# calculate what is needed for a pytorch negative Poisson logL gradient descent layer 
+# calculate what is needed for a pytorch negative Poisson logL gradient descent layer
 # note that pet_lin_op in the current form, because of attenuation, is object dependent
 # the same holds for adjoint_ones (should be precomputed and saved to disk)
 
@@ -223,20 +224,22 @@ x = xp.asarray(np.random.rand(*proj.in_shape), device=dev, dtype=xp.float32)
 z_sino = pet_lin_op(x) + contamination
 
 adjoint_ones = pet_lin_op.adjoint(xp.ones(z_sino.shape, device=dev, dtype=xp.float32))
-sino_grad = adjoint_ones - pet_lin_op.adjoint(y/z_sino)
+sino_grad = adjoint_ones - pet_lin_op.adjoint(y / z_sino)
 
-# %% 
+# %%
 # calculate the gradient of the negative Poisson log-likelihood using LM data and projector
 
 z_lm = lm_pet_lin_op(x) + contamination_list
-lm_grad = adjoint_ones - lm_pet_lin_op.adjoint(1/z_lm)
+lm_grad = adjoint_ones - lm_pet_lin_op.adjoint(1 / z_lm)
 
 # now sino_grad and lm_grad should be numerically very close demonstrating that
 # both approaches are equivalent
 # but for 3D real world low count PET data, the 2nd approach is much faster and
 # more memory efficient
 
-assert xp.allclose(lm_grad,sino_grad, atol = 1e-2) # lower limit to the abs tolerance is needed
+assert xp.allclose(
+    lm_grad, sino_grad, atol=1e-2
+)  # lower limit to the abs tolerance is needed
 
 # to minimize computation time, we should keep z_sino / z_lm in memory (using the ctx object) after the fwd pass
 # however, if memory is limited, we could also recompute it in the backward pass
@@ -249,13 +252,15 @@ assert xp.allclose(lm_grad,sino_grad, atol = 1e-2) # lower limit to the abs tole
 
 # grad_output next to ctx is usually the input passed to the backward pass
 grad_output = xp.asarray(np.random.rand(*proj.in_shape), device=dev, dtype=xp.float32)
-hess_app_grad_output =  pet_lin_op.adjoint(y * pet_lin_op(grad_output) / (z_sino**2))
+hess_app_grad_output = pet_lin_op.adjoint(y * pet_lin_op(grad_output) / (z_sino**2))
 hess_app_grad_output_lm = lm_pet_lin_op.adjoint(lm_pet_lin_op(grad_output) / z_lm**2)
 
 # again both ways of computing the Hessian to grad_output should be numerically very close
 # the 2nd way should be faster and more memory efficient for real world low count PET data
 
-assert xp.allclose(hess_app_grad_output, hess_app_grad_output_lm, atol = 1e-2) # lower limit to the abs tolerance is needed
+assert xp.allclose(
+    hess_app_grad_output, hess_app_grad_output_lm, atol=1e-2
+)  # lower limit to the abs tolerance is needed
 
 # the only thing that is now left is to properly wrap everything in a pytorch autograd layer
 # as done in ../examples/07_torch/01_run_projection_layer.py

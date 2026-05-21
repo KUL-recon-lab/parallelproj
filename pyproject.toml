@@ -1,56 +1,253 @@
 [build-system]
-requires = ["setuptools >= 61.0", "wheel", "setuptools-scm"]
-build-backend = "setuptools.build_meta"
+# pixi-build-python invokes hatchling via PEP 517 to produce the wheel.
+# The version is declared statically in [project] below and is the
+# single source of truth -- pixi-build-python extracts it (and other
+# package metadata) from [project] when building the conda package, so
+# there is no need to repeat it under [tool.pixi.package].
+#
+# We tried dynamic versioning (hatch-vcs) but pixi-build-python's preview
+# doesn't trigger PEP 517 metadata resolution for [project] -- it reads
+# the static value directly and errors out with "There was no version
+# defined for the recipe" when ``version`` is dynamic.  Revisit once
+# pixi-build is no longer in preview.
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "parallelproj"
-version = "1.10.2"
-description = "Python wrappers for parallelproj projectors."
-authors = [
-    {name = "Georg Schramm", email = "georg.schramm@kuleuven.be"},
-]
-dependencies = [
-    "numpy>=1.23",
-    "scipy~=1.0",
-    "array-api-compat~=1.7",
-    "matplotlib~=3.8",
-]
-requires-python = ">=3.9"
+# IMPORTANT: bumping a release requires editing this one line.
+version = "2.0.0dev0"
+description = "Python tools for PET projection and reconstruction workflows."
 readme = "README.md"
-license = {text = "MIT"}
-classifiers = [
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python",
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+authors = [
+  {name = "Georg Schramm", email = "georg.schramm@kuleuven.be"},
 ]
+# Runtime dependencies are intentionally NOT enumerated here.
+#
+# ``parallelproj`` is distributed only via conda-forge.  The channels
+# that actually install the package have their own dependency declarations:
+#
+#   * the conda-forge feedstock (recipe/meta.yaml) -> ``conda install``
+#   * [tool.pixi.package.run-dependencies] below   -> ``pixi install``
+#
+# Listing them here would duplicate them and force a "conda-or-PyPI?"
+# decision every time they change.  ``parallelproj-core`` (the binary
+# backend) is conda-forge-only and listing it here would also break PyPI
+# resolution outright.
+dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/gschramm/parallelproj"
+Homepage = "https://parallelproj.readthedocs.io/"
+Repository = "https://github.com/gschramm/parallelproj"
+Documentation = "https://parallelproj.readthedocs.io/"
 
-[tool.coverage.report]
-exclude_lines = [
-    "def __repr__",
-    "if verbose:",
-    "if self._debug:",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-    "if parallelproj.is_cuda_array",
-    "if is_cuda_array",
-    "if cuda_present:",
-    "def is_cuda_array",
-    "def empty_cuda_cache",
-    "if num_visible_cuda_devices > 0",
-    "if cupy_enabled",
-    "lib_parallelproj_c_fname",
-    "empty_cuda_cache",
-    "__str__",
-    "Array =",
-    "elif not cupy_enabled and torch_enabled",
-    "elif cupy_enabled and not torch_enabled"
-]
+# Tell hatchling that the importable package lives at ``src/parallelproj``.
+# Hatchling's auto-discovery handles flat layouts out of the box but
+# wants this explicit for the ``src/`` layout we use.
+[tool.hatch.build.targets.wheel]
+packages = ["src/parallelproj"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# Pixi configuration -- everything below this point is consumed by Pixi,
+# not by hatchling / PEP 517.
+#
+# Build chain:
+#   pixi install -> pixi-build-python -> hatchling (PEP 517) -> wheel
+#                -> conda package -> installed into the pixi env
+#
+# Quick start:
+#   pixi install                 # default env (runtime-only, Python 3.12)
+#   pixi run test                # run the test suite (Python 3.12)
+#   pixi run -e test-py-latest test
+#                                # run the test suite (newest Python)
+#   pixi run -e docs docs        # build the documentation locally
+#   pixi run -e cuda12 test      # run tests against a CUDA 12 stack
+#   pixi run -e cuda13 test      # run tests against a CUDA 13 stack
+#
+# See:
+#   * https://pixi.prefix.dev/latest/reference/pixi_manifest/
+#   * https://pixi.prefix.dev/latest/build/backends/pixi-build-python/
+#   * https://pixi.prefix.dev/latest/python/pyproject_toml/
+# ---------------------------------------------------------------------------
+
+[tool.pixi.workspace]
+# Workspace ``name`` / ``description`` / ``authors`` / ``license`` / readme
+# / URLs are auto-derived from [project] above when the manifest is in
+# pyproject.toml form, so only the pixi-specific bits need to live here.
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
+preview = ["pixi-build"]
+
+[tool.pixi.package]
+# Empty: pixi-build-python's default (``ignore-pyproject-manifest = false``)
+# extracts ``name``, ``version``, ``description``, ``license`` and URLs
+# from [project] above, so we don't repeat them here.
+
+[tool.pixi.package.build]
+# Pin to a minor for stability across pixi-build-python's own preview
+# iteration.  Bump when you've validated a new backend release.
+# ``channels`` is omitted so pixi uses its built-in defaults for resolving
+# the build backend and build-time conda deps.
+backend = { name = "pixi-build-python", version = "0.4.*" }
+
+[tool.pixi.package.host-dependencies]
+# Build-time deps: what hatchling needs to produce the wheel.
+python = "*"
+hatchling = "*"
+
+[tool.pixi.package.run-dependencies]
+# Runtime deps: what every consumer of the built parallelproj conda
+# package needs.  Mirrors what the conda-forge feedstock declares.
+parallelproj-core = ">=2.0.5"
+numpy = ">=1.23"
+scipy = ">=1.15"
+array-api-compat = ">=1.7"
+matplotlib = "*"
+
+# ---------------------------------------------------------------------------
+# Workspace-level dependencies (i.e. what shows up in every environment).
+#
+# The only "dependency" the workspace itself declares is the local package,
+# referenced as a path-dep so pixi-build-python builds and installs it.
+# Its run-dependencies (declared above) are pulled in transitively.
+# ---------------------------------------------------------------------------
+
+[tool.pixi.dependencies]
+parallelproj = { path = "." }
+
+# ---- Workspace-level tasks ----
+#
+# Tasks that aren't tied to a specific feature (test/docs) live here.
+#
+#   setup-hooks - Opts this clone into the repo-tracked git hooks in
+#                 ``.githooks/`` (the pre-push tag/version check).  Run
+#                 once per fresh clone; the test / docs / release tasks
+#                 ``depends-on`` it so a contributor who runs any of
+#                 them gets hooks activated implicitly.
+#   release         - Tag HEAD with ``v<[project].version>`` and push.
+#                     Logic lives in scripts/release.py; this task just
+#                     invokes it.  The script validates that
+#                     [project].version looks like a PEP 440
+#                     release/pre-release string, refuses if the
+#                     v<version> tag already exists, then tags and
+#                     pushes.  The pre-push hook in .githooks/ still
+#                     validates the result as the final safety net.
+#   release-dry-run - Same as release but with ``--dry-run`` -- runs all
+#                     the checks and prints what *would* happen, without
+#                     creating any tag or pushing.  Use this to verify
+#                     the release will work before committing to it.
+#                     ``pixi run release --dry-run`` also works (pixi
+#                     forwards extra args).
+
+[tool.pixi.tasks]
+setup-hooks = { cmd = "git config core.hooksPath .githooks", description = "Activate the repo-tracked git hooks in .githooks/" }
+release = { cmd = "python scripts/release.py", description = "Validate [project].version, refuse if v<version> tag exists, then tag HEAD and push.", depends-on = ["setup-hooks"] }
+release-dry-run = { cmd = "python scripts/release.py --dry-run", description = "Same as release, but only run the checks and print what would happen.", depends-on = ["setup-hooks"] }
+
+# ---- Python-version features ----
+#
+# Each environment below picks exactly one of these so its Python version
+# is unambiguous.  Add a new ``py3xx`` feature when a new Python release
+# is worth pinning to.
+
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+
+[tool.pixi.feature.py-latest.dependencies]
+python = ">=3.13"
+
+# ---- test feature ----
+
+[tool.pixi.feature.test.dependencies]
+pytest = ">=8"
+pytest-cov = "*"
+array-api-strict = "*"
+pytorch = "*"
+
+[tool.pixi.feature.test.tasks]
+# ``depends-on = ["setup-hooks"]`` is the contributor-friendly workaround
+# for git's refusal to auto-activate hooks on clone: the first time
+# anyone runs ``pixi run test`` on a fresh clone, ``setup-hooks`` runs
+# first and points ``core.hooksPath`` at ``.githooks/``.  Subsequent
+# runs are no-ops -- ``git config`` is idempotent.  In CI this is also
+# harmless (it just touches the runner's disposable local git config).
+test = { cmd = "pytest tests/ -v", depends-on = ["setup-hooks"] }
+test-cov = { cmd = "pytest tests/ --cov=parallelproj --cov-report=term-missing", depends-on = ["setup-hooks"] }
+
+# ---- docs feature ----
+
+[tool.pixi.feature.docs.dependencies]
+sphinx = "*"
+sphinx-gallery = "*"
+sphinx-design = "*"
+furo = "*"
+sphinxcontrib-bibtex = "*"
+joblib = "*"        # used by sphinx-gallery for parallel example execution
+pytorch = "*"       # docs/examples/05_torch/01_run_projection_layer.py uses torch
+
+[tool.pixi.feature.docs.tasks]
+# See note on ``depends-on = ["setup-hooks"]`` under the test feature.
+docs = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"] }
+docs-clean = "rm -rf docs/_build docs/auto_examples"
+
+# ---- CUDA 12 stack ----
+#
+# GPU environments only make sense on linux-64 (where conda-forge ships
+# CUDA-enabled builds of pytorch and cupy).  The cuda-version constraint
+# plus system-requirements.cuda steer the solver towards the cuda-12
+# variants of pytorch/cupy automatically.
+
+[tool.pixi.feature.cuda12]
+platforms = ["linux-64"]
+system-requirements = { cuda = "12" }
+
+[tool.pixi.feature.cuda12.dependencies]
+cuda-version = "12.*"
+cupy = "*"
+
+# ---- CUDA 13 stack ----
+
+[tool.pixi.feature.cuda13]
+platforms = ["linux-64"]
+system-requirements = { cuda = "13" }
+
+[tool.pixi.feature.cuda13.dependencies]
+cuda-version = "13.*"
+cupy = "*"
+
+# ---- environments ----
+#
+# Each entry composes one or more features into a named environment that
+# pixi can solve, lock, and install independently.  Every env picks
+# exactly one Python-version feature (``py312`` or ``py-latest``) so its
+# Python version is unambiguous.
+#
+#   default        - minimal "runtime only" env -- just parallelproj + its
+#                    run-dependencies on Python 3.12.  Useful for
+#                    ``pixi shell``-based interactive use, notebooks, or
+#                    downstream consumers who don't need the test stack.
+#   test           - default + pytest / array-api-strict / pytorch on
+#                    Python 3.12 (CPU).
+#   test-py-latest - same as ``test`` but on the newest available Python.
+#   docs           - default + sphinx + sphinx-gallery + friends on
+#                    Python 3.12.
+#   cuda12         - test + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
+#   cuda13         - test + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
+#
+# Order matters when tasks are shared across envs: ``pixi run <task>``
+# picks the first env that has the task.  Putting ``test`` before
+# ``test-py-latest`` makes ``pixi run test`` default to the Python 3.12
+# env, which is what we want for local development.
+
+[tool.pixi.environments]
+default = { features = ["py312"] }
+test = { features = ["test", "py312"] }
+test-py-latest = { features = ["test", "py-latest"] }
+docs = { features = ["docs", "py312"] }
+cuda12 = { features = ["test", "cuda12", "py312"] }
+cuda13 = { features = ["test", "cuda13", "py312"] }

@@ -1,2 +1,0 @@
-Low-level projection examples
------------------------------

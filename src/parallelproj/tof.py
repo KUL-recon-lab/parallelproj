@@ -1,4 +1,5 @@
 """PET time-of-flight (TOF) related classes and functions"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,7 +30,3 @@ class TOFParameters:
     )  # (speed_of_light [mm/ns] / 2) * TOF FWHM [ns] / 2.355
     num_sigmas: float = 3.0
     tofcenter_offset: float = 0
-
-    def __post_init__(self):
-        if self.num_tofbins % 2 == 0:
-            raise ValueError("num_tofbins must be odd")

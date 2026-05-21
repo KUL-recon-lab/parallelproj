@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import parallelproj
+import pytest
+import parallelproj.pet_scanners as pps
 import matplotlib.pyplot as plt
 
 from types import ModuleType
@@ -25,7 +26,7 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     ax0 = 1
     ax1 = 0
 
-    mod = parallelproj.RegularPolygonPETScannerModule(
+    mod = pps.RegularPolygonPETScannerModule(
         xp,
         dev,
         radius=radius,
@@ -65,7 +66,7 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     plt.close(fig)
 
     # test module withput affine transformation matrix
-    mod2 = parallelproj.RegularPolygonPETScannerModule(
+    mod2 = pps.RegularPolygonPETScannerModule(
         xp,
         dev,
         radius=radius,
@@ -77,7 +78,7 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     )
 
     aff_mat2 = xp.eye(4, device=dev)
-    aff_mat2[-1, -1] = 0
+    aff_mat2[-1, -1] = 1
 
     assert xp.all(mod2.affine_transformation_matrix == aff_mat2)
 
@@ -86,7 +87,7 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     num_rings = 4
 
     for symmetry_axis in [0, 1, 2]:
-        scanner = parallelproj.DemoPETScannerGeometry(
+        scanner = pps.DemoPETScannerGeometry(
             xp, dev, num_rings=num_rings, symmetry_axis=symmetry_axis
         )
 
@@ -148,7 +149,7 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     # test scanner with manually specified azimuthal angles of the sides
     phis = xp.asarray([0.0, xp.pi / 4], dtype=xp.float32, device=dev)
 
-    scanner2 = parallelproj.RegularPolygonPETScannerGeometry(
+    scanner2 = pps.RegularPolygonPETScannerGeometry(
         xp,
         dev,
         radius=150,
@@ -161,6 +162,22 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     )
 
     assert xp.all(scanner2.modules[0].phis == phis)
+
+
+def test_regular_polygon_pet_scanner_invalid_symmetry_axis(
+    xp: ModuleType, dev: str
+) -> None:
+    with pytest.raises(ValueError, match="symmetry_axis"):
+        pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=150,
+            num_sides=4,
+            num_lor_endpoints_per_side=2,
+            lor_spacing=4.0,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=3,
+        )
 
 
 def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
@@ -178,7 +195,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
     aff2 = xp.eye(4, device=dev)
     aff2[1, -1] = -scanner_radius
 
-    block1 = parallelproj.BlockPETScannerModule(
+    block1 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -186,7 +203,7 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
         affine_transformation_matrix=aff1,
     )
 
-    block2 = parallelproj.BlockPETScannerModule(
+    block2 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -213,10 +230,22 @@ def test_regular_equal_block_scanner(xp: ModuleType, dev: str) -> None:
 
     assert xp.max(xp.abs(lor_endpoints1a - lor_endpoints1b)) < 1e-7
 
-    scanner = parallelproj.ModularizedPETScannerGeometry([block1, block2])
+    scanner = pps.ModularizedPETScannerGeometry([block1, block2])
 
     fig = plt.figure(tight_layout=True)
     ax = fig.add_subplot(111, projection="3d")
     scanner.show_lor_endpoints(ax, annotation_fontsize=4, show_linear_index=False)
     fig.show()
     plt.close(fig)
+
+
+def test_pet_scanner_module_get_raw_lor_endpoints_not_implemented(
+    xp: ModuleType, dev: str
+) -> None:
+    class MinimalModule(pps.PETScannerModule):
+        def get_raw_lor_endpoints(self, inds=None):
+            return super().get_raw_lor_endpoints(inds)
+
+    mod = MinimalModule(xp, dev, num_lor_endpoints=4)
+    with pytest.raises(NotImplementedError):
+        mod.get_raw_lor_endpoints()

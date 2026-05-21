@@ -1,25 +1,44 @@
 version: 2
 
+# Read the Docs build configuration -- see
+# https://docs.readthedocs.io/en/stable/config-file/v2.html for the schema.
+#
+# This project uses pixi to manage its docs build environment.  The
+# ``docs`` environment is defined in pyproject.toml under
+# ``[tool.pixi.environments]`` and locked by ``pixi.lock``; the two
+# files are the single source of truth shared between local
+# development, CI, and RTD.
+#
+# Pixi is not (yet) a first-class entry under ``build.tools``, so we
+# follow RTD's official "Install dependencies with pixi" recipe:
+# https://docs.readthedocs.com/platform/stable/build-customization.html#install-dependencies-with-pixi
+#
+# - ``tools.python: "latest"`` only satisfies RTD's schema requirement
+#   that at least one tool be declared.  The Python it installs is not
+#   used; pixi installs its own (pinned by the ``py312`` feature).
+# - ``build.jobs.create_environment`` installs pixi via asdf.
+# - ``build.jobs.install`` then materialises the pre-locked ``docs`` env
+#   from ``pixi.lock``.
+# - ``build.jobs.build.html`` runs sphinx-build via pixi.
+
 build:
-  os: "ubuntu-lts-latest"
+  os: ubuntu-24.04
   tools:
-    python: "mambaforge-latest"
+    python: "latest"
   jobs:
-    post_install:
-      - cmake -B ./build -DCMAKE_INSTALL_PREFIX=/tmp/libparallelproj_install
-      - cmake --build ./build --target install
-      - ls -l /tmp/libparallelproj_install/lib
-      - echo ${PARALLELPROJ_C_LIB} # defined in the RTD project settings
-      - ls -l ${PARALLELPROJ_C_LIB} 
-
-conda:
-  environment: docs/environment.yml
-# This part is necessary otherwise the project is not built
-python:
-  install:
-    - method: pip
-      path: .
-
-sphinx:
-  fail_on_warning: true
-  configuration: docs/source/conf.py
+    create_environment:
+      - asdf plugin add pixi
+      - asdf install pixi latest
+      - asdf global pixi latest
+    install:
+      - pixi install -e docs
+    build:
+      html:
+        # Flags mirror RTD's default sphinx invocation so behaviour is
+        # preserved across the migration:
+        #   -T              show full traceback on errors
+        #   -W              treat warnings as errors  (was sphinx.fail_on_warning)
+        #   --keep-going    accumulate warnings before failing
+        #   -d ...          where to cache parsed-doctree pickles
+        #   -D language=en  match RTD's default
+        - pixi run -e docs sphinx-build -T -W --keep-going -b html -d docs/_build/doctrees -D language=en docs $READTHEDOCS_OUTPUT/html

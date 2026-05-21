@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-import array_api_compat.numpy as np
-from parallelproj import Array
+from typing import Any
+from types import ModuleType
+
+import numpy as np
 import array_api_compat
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
-from types import ModuleType
+from mpl_toolkits.mplot3d import Axes3D
 from array_api_compat import device, get_namespace, size
-import parallelproj
 
+import parallelproj_core
+
+from ._backend import Array, to_numpy_array, empty_cuda_cache
 from .operators import LinearOperator
 from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
-from .backend import is_cuda_array, empty_cuda_cache, to_numpy_array
 
 
 class ParallelViewProjector2D(LinearOperator):
@@ -102,11 +106,11 @@ class ParallelViewProjector2D(LinearOperator):
         return self._xp
 
     @property
-    def in_shape(self) -> tuple[int, int]:
+    def in_shape(self) -> tuple[int, ...]:
         return self._image_shape
 
     @property
-    def out_shape(self) -> tuple[int, int]:
+    def out_shape(self) -> tuple[int, ...]:
         return (self._num_rad, self._num_views)
 
     @property
@@ -150,20 +154,26 @@ class ParallelViewProjector2D(LinearOperator):
         return self._device
 
     def _apply(self, x: Array) -> Array:
-        y = parallelproj.joseph3d_fwd(
+        y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
+        parallelproj_core.joseph3d_fwd(
             self._xstart,
             self._xend,
             self.xp.expand_dims(x, axis=0),
             self._image_origin,
             self._voxel_size,
+            y,
         )
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = parallelproj.joseph3d_back(
+        x = self.xp.zeros(
+            (1,) + self._image_shape, dtype=self.xp.float32, device=self._device
+        )
+
+        parallelproj_core.joseph3d_back(
             self._xstart,
             self._xend,
-            (1,) + self._image_shape,
+            x,
             self._image_origin,
             self._voxel_size,
             y,
@@ -171,8 +181,11 @@ class ParallelViewProjector2D(LinearOperator):
         return self.xp.squeeze(x, axis=0)
 
     def show_views(
-        self, views_to_show: None | Array = None, image: None | Array = None, **kwargs
-    ) -> plt.Figure:
+        self,
+        views_to_show: None | Array = None,
+        image: None | Array = None,
+        **kwargs: Any,
+    ) -> Figure:
         """visualize the geometry of certrain projection views
 
         Parameters
@@ -181,12 +194,18 @@ class ParallelViewProjector2D(LinearOperator):
             view numbers to show
         image : None | Array
             show an image inside the projector geometry
-        **kwargs : some type
+        **kwargs : dict
             passed to matplotlib.pyplot.imshow
 
+        Returns
+        -------
+        plt.Figure
+            the matplotlib figure
         """
         if views_to_show is None:
-            views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)
+            views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)  # type: ignore[assignment]
+
+        assert views_to_show is not None
 
         num_cols = len(views_to_show)
         fig, ax = plt.subplots(1, num_cols, figsize=(num_cols * 3, 3))
@@ -267,7 +286,7 @@ class ParallelViewProjector3D(LinearOperator):
         view_angles: Array,
         radius: float,
         image_origin: tuple[float, float, float],
-        voxel_size: tuple[float, float],
+        voxel_size: tuple[float, float, float],
         ring_positions: Array,
         span: int = 1,
         max_ring_diff: int | None = None,
@@ -287,7 +306,7 @@ class ParallelViewProjector3D(LinearOperator):
         image_origin : tuple[float, float, float]
             world coordinates of the [0,0,0] voxel
         voxel_size : tuple[float, float, float]
-            the voxel size in all directions (last direction is axial)
+            the voxel size in all three directions (n0, n1, axial)
         ring_positions : Array
             position of the rings in world coordinates
         span : int
@@ -450,16 +469,18 @@ class ParallelViewProjector3D(LinearOperator):
         return self._xend
 
     def _apply(self, x: Array) -> Array:
-        y = parallelproj.joseph3d_fwd(
-            self._xstart, self._xend, x, self.image_origin, self.voxel_size
+        y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
+        parallelproj_core.joseph3d_fwd(
+            self._xstart, self._xend, x, self.image_origin, self.voxel_size, y
         )
         return y
 
     def _adjoint(self, y: Array) -> Array:
-        x = parallelproj.joseph3d_back(
+        x = self.xp.zeros(self._image_shape, dtype=self.xp.float32, device=self._device)
+        parallelproj_core.joseph3d_back(
             self._xstart,
             self._xend,
-            self.image_shape,
+            x,
             self.image_origin,
             self.voxel_size,
             y,
@@ -468,12 +489,7 @@ class ParallelViewProjector3D(LinearOperator):
 
 
 class RegularPolygonPETProjector(LinearOperator):
-    """geometric non-TOF and TOF sinogram projector for regular polygon PET scanners
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.RegularPolygonPETProjector
-    """
+    """geometric non-TOF and TOF sinogram projector for regular polygon PET scanners"""
 
     def __init__(
         self,
@@ -543,19 +559,24 @@ class RegularPolygonPETProjector(LinearOperator):
         self._xstart = None
         self._xend = None
 
+        self._out_shape = self._compute_out_shape()
+
     @property
     def in_shape(self) -> tuple[int, int, int]:
         return self._img_shape
 
-    @property
-    def out_shape(self) -> tuple[int, int, int]:
+    def _compute_out_shape(self) -> tuple[int, ...]:
         out_shape = list(self._lor_descriptor.spatial_sinogram_shape)
         out_shape[self._lor_descriptor.view_axis_num] = self._views.shape[0]
 
-        if self.tof:
-            out_shape += [self.tof_parameters.num_tofbins]
+        if self._tof and self._tof_parameters is not None:
+            out_shape += [self._tof_parameters.num_tofbins]
 
         return tuple(out_shape)
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        return self._out_shape
 
     @property
     def xp(self) -> ModuleType:
@@ -569,10 +590,9 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        self._tof = value
-
         if self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
+        self._tof = value
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
@@ -589,6 +609,8 @@ class RegularPolygonPETProjector(LinearOperator):
             self._tof = False
         else:
             self._tof = True
+
+        self._out_shape = self._compute_out_shape()
 
     @property
     def lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
@@ -608,6 +630,7 @@ class RegularPolygonPETProjector(LinearOperator):
     @views.setter
     def views(self, value: Array) -> None:
         self._views = value
+        self._out_shape = self._compute_out_shape()
         # we need to reset the LOR start and end points in case
         # they were cached
         self.clear_cached_lor_endpoints()
@@ -629,18 +652,10 @@ class RegularPolygonPETProjector(LinearOperator):
 
     def clear_cached_lor_endpoints(self) -> None:
         """clear cached LOR endpoints"""
-        was_cuda_start = False
-        was_cuda_end = False
-        if self._xstart is not None:
-            was_cuda_start = is_cuda_array(self._xstart)
-        if self._xend is not None:
-            was_cuda_end = is_cuda_array(self._xend)
-
         self._xstart = None
         self._xend = None
 
-        if was_cuda_start or was_cuda_end:
-            empty_cuda_cache(self.xp)
+        empty_cuda_cache(self.xp)
 
     def __str__(self) -> str:
         """string representation"""
@@ -656,90 +671,103 @@ class RegularPolygonPETProjector(LinearOperator):
             )
         )
 
-        if self.tof:
-            st += f", {self.tof_parameters.num_tofbins} TOF bins"
+        if self.tof and self._tof_parameters is not None:
+            st += f", {self._tof_parameters.num_tofbins} TOF bins"
 
         st += ")"
 
         return st
 
-    def _apply(self, x):
+    def _apply(self, x: Array) -> Array:
         """nonTOF forward projection of input image x including image based resolution model"""
 
         dev = array_api_compat.device(x)
 
         # calculate LOR endpoints if not done yet
-        if (self.xstart is None) or (self.xend is None):
+        needs_compute = (self.xstart is None) or (self.xend is None)
+        if needs_compute:
             xstart, xend = self._lor_descriptor.get_lor_coordinates(views=self._views)
-            if is_cuda_array(xstart):
-                empty_cuda_cache(self.xp)
+            empty_cuda_cache(self.xp)
         else:
             xstart = self.xstart
             xend = self.xend
+            assert xstart is not None
+            assert xend is not None
 
         # cache LOR endpoints if requested
-        if self._cache_lor_endpoints and ((self.xstart is None) or (self.xend is None)):
+        if self._cache_lor_endpoints and needs_compute:
             self._xstart = xstart
             self._xend = xend
 
+        x_fwd = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=dev)
+
         if not self.tof:
-            x_fwd = parallelproj.joseph3d_fwd(
-                xstart, xend, x, self._img_origin, self._voxel_size
+            parallelproj_core.joseph3d_fwd(
+                xstart, xend, x, self._img_origin, self._voxel_size, x_fwd
             )
         else:
-            x_fwd = parallelproj.joseph3d_fwd_tof_sino(
+            assert self._tof_parameters is not None
+            parallelproj_core.joseph3d_tof_sino_fwd(
                 xstart,
                 xend,
                 x,
                 self._img_origin,
                 self._voxel_size,
+                x_fwd,
                 self._tof_parameters.tofbin_width,
                 self.xp.asarray(
-                    [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
+                    [self._tof_parameters.sigma_tof],
+                    dtype=self.xp.float32,
+                    device=dev,
                 ),
                 self.xp.asarray(
                     [self._tof_parameters.tofcenter_offset],
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
-                self.tof_parameters.num_tofbins,
+                self._tof_parameters.num_tofbins,
+                self._tof_parameters.num_sigmas,
             )
 
         return x_fwd
 
-    def _adjoint(self, y):
+    def _adjoint(self, y: Array) -> Array:
         """nonTOF back projection of sinogram y"""
         dev = array_api_compat.device(y)
 
         # calculate LOR endpoints if not done yet
-        if (self.xstart is None) or (self.xend is None):
+        needs_compute = (self.xstart is None) or (self.xend is None)
+        if needs_compute:
             xstart, xend = self._lor_descriptor.get_lor_coordinates(views=self._views)
-            if is_cuda_array(xstart):
-                empty_cuda_cache(self.xp)
+            empty_cuda_cache(self.xp)
         else:
             xstart = self.xstart
             xend = self.xend
+            assert xstart is not None
+            assert xend is not None
 
         # cache LOR endpoints if requested
-        if self._cache_lor_endpoints and ((self.xstart is None) or (self.xend is None)):
+        if self._cache_lor_endpoints and needs_compute:
             self._xstart = xstart
             self._xend = xend
 
+        y_back = self.xp.zeros(self.in_shape, dtype=self.xp.float32, device=dev)
+
         if not self.tof:
-            y_back = parallelproj.joseph3d_back(
+            parallelproj_core.joseph3d_back(
                 xstart,
                 xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
             )
         else:
-            y_back = parallelproj.joseph3d_back_tof_sino(
+            assert self._tof_parameters is not None
+            parallelproj_core.joseph3d_tof_sino_back(
                 xstart,
                 xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
@@ -752,15 +780,15 @@ class RegularPolygonPETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
-                self.tof_parameters.num_tofbins,
+                self._tof_parameters.num_tofbins,
+                self._tof_parameters.num_sigmas,
             )
 
         return y_back
 
     def show_geometry(
         self,
-        ax: plt.Axes,
+        ax: Axes3D,
         color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         edgecolor: str = "grey",
         alpha: float = 0.1,
@@ -769,7 +797,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         Parameters
         ----------
-        ax : plt.Axes
+        ax : Axes3D
             matplotlib axes object with projection = '3d'
         color : tuple[float, float, float], optional
             color to use for the FOV cube, by default (1.,0.,0.)
@@ -807,7 +835,7 @@ class RegularPolygonPETProjector(LinearOperator):
             x,
             y,
             z,
-            filled=np.ones(sh, dtype=np.bool),
+            filled=np.ones(sh, dtype=bool),
             facecolors=colors,
             edgecolors=edgecolor,
         )
@@ -815,7 +843,7 @@ class RegularPolygonPETProjector(LinearOperator):
         self.lor_descriptor.scanner.show_lor_endpoints(ax)
 
     def convert_sinogram_to_listmode(
-        self, sinogram: Array
+        self, sinogram: Array, shuffle: bool = False
     ) -> tuple[Array, Array, Array | None]:
         """convert a non-TOF or TOF emission sinogram to listmode events
 
@@ -823,6 +851,12 @@ class RegularPolygonPETProjector(LinearOperator):
         ----------
         sinogram : Array
             an integer (TOF or non-TOF) emission sinogram
+        shuffle : bool, optional
+            if True, randomly shuffle the order of the output events,
+            by default False. Shuffling is implemented via
+            ``numpy.random.permutation(num_events)``, which draws from
+            numpy's global random state. Use ``numpy.random.seed()``
+            before calling this method for reproducible results.
 
         Returns
         -------
@@ -830,6 +864,21 @@ class RegularPolygonPETProjector(LinearOperator):
             event_start_coordinates, event_end_coordinates, event_tofbin
             in case of non-TOF, event_tofbin is None
         """
+
+        integer_dtypes = (
+            self.xp.int8,
+            self.xp.int16,
+            self.xp.int32,
+            self.xp.int64,
+            self.xp.uint8,
+            self.xp.uint16,
+            self.xp.uint32,
+            self.xp.uint64,
+        )
+        if sinogram.dtype not in integer_dtypes:
+            raise TypeError(
+                f"sinogram must have an integer dtype, got {sinogram.dtype}"
+            )
 
         num_events = int(self.xp.sum(sinogram))
 
@@ -840,8 +889,8 @@ class RegularPolygonPETProjector(LinearOperator):
             (num_events, 3), device=self._dev, dtype=self.xp.float32
         )
 
-        if self.tof:
-            num_tofbins = self.tof_parameters.num_tofbins
+        if self.tof and self._tof_parameters is not None:
+            num_tofbins = self._tof_parameters.num_tofbins
             event_tofbins = self.xp.empty(
                 (num_events,), device=self._dev, dtype=self.xp.int16
             )
@@ -851,7 +900,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         event_offset = 0
 
-        # we convert view by view and tofbin by tofbin to save memory
+        # we convert view by view to save memory
         for view in range(self.lor_descriptor.num_views):
             xstart, xend = self.lor_descriptor.get_lor_coordinates(
                 views=self.xp.asarray([view], device=self._dev)
@@ -868,52 +917,50 @@ class RegularPolygonPETProjector(LinearOperator):
                 sino_view, axis=self.lor_descriptor.view_axis_num
             )
 
-            for it in range(num_tofbins):
-                if self.tof:
-                    ss = sino_view[..., it]
-                else:
-                    ss = sino_view
+            # flatten all dims (lor dims + optional tofbin last dim) to 1D
+            # for TOF: flat_idx = lor_idx * num_tofbins + tofbin_idx
+            # for non-TOF: num_tofbins == 1, flat_idx == lor_idx
+            ss = self.xp.reshape(sino_view, (size(sino_view),))
 
-                ss = self.xp.reshape(ss, (size(ss),))
+            # array_api_strict does not support repeat with array-valued counts;
+            # we convert back and forth to numpy cpu array as a workaround
+            flat_counts = to_numpy_array(ss).astype(int)
+            event_flat_inds = np.repeat(np.arange(ss.shape[0]), flat_counts)
+            num_events_view = int(event_flat_inds.shape[0])
 
-                # currently there is no "repeat" function in array-api, so
-                # we convert back and forth to numpy cpu array
-                event_sino_inds = self.xp.asarray(
-                    np.repeat(np.arange(ss.shape[0]), to_numpy_array(ss)),
-                    device=self._dev,
-                )
+            event_lor_inds = self.xp.asarray(
+                event_flat_inds // num_tofbins, device=self._dev
+            )
 
-                num_events_ss = int(self.xp.sum(ss))
+            event_start_coords[event_offset : (event_offset + num_events_view), :] = (
+                self.xp.take(xstart, event_lor_inds, axis=0)
+            )
+            event_end_coords[event_offset : (event_offset + num_events_view), :] = (
+                self.xp.take(xend, event_lor_inds, axis=0)
+            )
 
-                event_start_coords[event_offset : (event_offset + num_events_ss), :] = (
-                    self.xp.take(xstart, event_sino_inds, axis=0)
-                )
-                event_end_coords[event_offset : (event_offset + num_events_ss), :] = (
-                    self.xp.take(xend, event_sino_inds, axis=0)
-                )
-
-                if self.tof:
-                    event_tofbins[event_offset : (event_offset + num_events_ss)] = (
-                        self.xp.full(
-                            num_events_ss,
-                            it - num_tofbins // 2,
-                            device=self._dev,
-                            dtype=self.xp.int16,
-                        )
+            if event_tofbins is not None:
+                event_tofbins[event_offset : (event_offset + num_events_view)] = (
+                    self.xp.asarray(
+                        (event_flat_inds % num_tofbins).astype(np.int16),
+                        device=self._dev,
                     )
+                )
 
-                event_offset += num_events_ss
+            event_offset += num_events_view
+
+        if shuffle:
+            perm = self.xp.asarray(np.random.permutation(num_events), device=self._dev)
+            event_start_coords = self.xp.take(event_start_coords, perm, axis=0)
+            event_end_coords = self.xp.take(event_end_coords, perm, axis=0)
+            if event_tofbins is not None:
+                event_tofbins = self.xp.take(event_tofbins, perm, axis=0)
 
         return event_start_coords, event_end_coords, event_tofbins
 
 
 class ListmodePETProjector(LinearOperator):
-    """non-TOF and TOF listmode projector for regular polygon PET scanners
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.ListmodePETProjector
-    """
+    """non-TOF and TOF listmode projector for regular polygon PET scanners"""
 
     def __init__(
         self,
@@ -977,7 +1024,7 @@ class ListmodePETProjector(LinearOperator):
         return self._img_shape
 
     @property
-    def out_shape(self) -> tuple[int]:
+    def out_shape(self) -> tuple[int, ...]:
         return (self._xstart.shape[0],)
 
     @property
@@ -1053,49 +1100,65 @@ class ListmodePETProjector(LinearOperator):
     def _apply(self, x: Array) -> Array:
         dev = array_api_compat.device(x)
 
+        x_fwd = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=dev)
+
         if not self.tof:
-            x_fwd = parallelproj.joseph3d_fwd(
-                self._xstart, self._xend, x, self._img_origin, self._voxel_size
-            )
-        else:
-            x_fwd = parallelproj.joseph3d_fwd_tof_lm(
+            parallelproj_core.joseph3d_fwd(
                 self._xstart,
                 self._xend,
                 x,
                 self._img_origin,
                 self._voxel_size,
+                x_fwd,
+            )
+        else:
+            assert self._tof_parameters is not None
+            assert self._tofbin is not None
+            parallelproj_core.joseph3d_tof_lm_fwd(
+                self._xstart,
+                self._xend,
+                x,
+                self._img_origin,
+                self._voxel_size,
+                x_fwd,
                 self._tof_parameters.tofbin_width,
                 self.xp.asarray(
-                    [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
+                    [self._tof_parameters.sigma_tof],
+                    dtype=self.xp.float32,
+                    device=dev,
                 ),
                 self.xp.asarray(
                     [self._tof_parameters.tofcenter_offset],
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
                 self._tofbin,
+                self._tof_parameters.num_tofbins,
+                self._tof_parameters.num_sigmas,
             )
 
         return x_fwd
 
     def _adjoint(self, y: Array) -> Array:
         dev = array_api_compat.device(y)
+        y_back = self.xp.zeros(self.in_shape, dtype=self.xp.float32, device=dev)
 
         if not self.tof:
-            y_back = parallelproj.joseph3d_back(
+            parallelproj_core.joseph3d_back(
                 self._xstart,
                 self._xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
             )
         else:
-            y_back = parallelproj.joseph3d_back_tof_lm(
+            assert self._tof_parameters is not None
+            assert self._tofbin is not None
+            parallelproj_core.joseph3d_tof_lm_back(
                 self._xstart,
                 self._xend,
-                self._img_shape,
+                y_back,
                 self._img_origin,
                 self._voxel_size,
                 y,
@@ -1108,20 +1171,16 @@ class ListmodePETProjector(LinearOperator):
                     dtype=self.xp.float32,
                     device=dev,
                 ),
-                self.tof_parameters.num_sigmas,
                 self._tofbin,
+                self._tof_parameters.num_tofbins,
+                self.tof_parameters.num_sigmas,
             )
 
         return y_back
 
 
 class EqualBlockPETProjector(LinearOperator):
-    """geometric non-TOF and TOF sinogram projector for regular polygon PET scanners
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.RegularPolygonPETProjector
-    """
+    """geometric non-TOF and TOF sinogram projector for equal block PET scanners"""
 
     def __init__(
         self,
@@ -1129,11 +1188,12 @@ class EqualBlockPETProjector(LinearOperator):
         img_shape: tuple[int, int, int],
         voxel_size: tuple[float, float, float],
         img_origin: None | Array = None,
+        num_chunks: int = 1,
     ) -> None:
         """
         Parameters
         ----------
-        lor_descriptor : RegularPolygonPETLORDescriptor
+        lor_descriptor : EqualBlockPETLORDescriptor
             descriptor of the LOR start / end points
         img_shape : tuple[int, int, int]
             shape of the image to be projected
@@ -1142,6 +1202,11 @@ class EqualBlockPETProjector(LinearOperator):
         img_origin : None | Array, optional
             the origin of the image to be projected, by default None
             means that the center of the image is at world coordinate (0,0,0)
+        num_chunks : int, optional
+            number of chunks to split the block pairs into during projection,
+            by default 1 (all block pairs processed in a single call).
+            Increase this value to reduce peak memory usage at the cost of
+            more projection kernel calls.
         """
 
         super().__init__()
@@ -1170,6 +1235,7 @@ class EqualBlockPETProjector(LinearOperator):
 
         self._tof_parameters = None
         self._tof = False
+        self._num_chunks = num_chunks
 
     @property
     def xp(self) -> ModuleType:
@@ -1186,16 +1252,14 @@ class EqualBlockPETProjector(LinearOperator):
         return self._img_shape
 
     @property
-    def out_shape(self) -> tuple[int, int, int]:
-        out_shape = list(
-            [
-                self._lor_descriptor.num_block_pairs,
-                self._lor_descriptor.num_lors_per_block_pair,
-            ]
-        )
+    def out_shape(self) -> tuple[int, ...]:
+        out_shape = [
+            self._lor_descriptor.num_block_pairs,
+            self._lor_descriptor.num_lors_per_block_pair,
+        ]
 
-        if self.tof:
-            out_shape += [self.tof_parameters.num_tofbins]
+        if self.tof and self._tof_parameters is not None:
+            out_shape += [self._tof_parameters.num_tofbins]
 
         return tuple(out_shape)
 
@@ -1206,10 +1270,9 @@ class EqualBlockPETProjector(LinearOperator):
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        self._tof = value
-
         if self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
+        self._tof = value
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
@@ -1242,29 +1305,51 @@ class EqualBlockPETProjector(LinearOperator):
         """voxel size"""
         return self._voxel_size
 
-    def _apply(self, x):
-        """nonTOF forward projection of input image x including image based resolution model"""
+    @property
+    def num_chunks(self) -> int:
+        """number of chunks to split the block pairs into during projection"""
+        return self._num_chunks
+
+    @num_chunks.setter
+    def num_chunks(self, value: int) -> None:
+        self._num_chunks = value
+
+    def _apply(self, x: Array) -> Array:
+        """forward projection of input image x"""
 
         dev = array_api_compat.device(x)
 
         x_fwd = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=dev)
 
-        for i in range(self.lor_descriptor.num_block_pairs):
-            xstart, xend = self.lor_descriptor.get_lor_coordinates(
-                self.xp.asarray([i], device=dev)
-            )
+        num_bp = self.lor_descriptor.num_block_pairs
+        chunk_size = -(-num_bp // self._num_chunks)  # ceiling division
+
+        for chunk_start in range(0, num_bp, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, num_bp)
+            bp_chunk = self.xp.arange(chunk_start, chunk_end, device=dev)
+            xstart, xend = self.lor_descriptor.get_lor_coordinates(bp_chunk)
 
             if not self.tof:
-                x_fwd[i, ...] = parallelproj.joseph3d_fwd(
-                    xstart, xend, x, self._img_origin, self._voxel_size
-                )
-            else:
-                x_fwd[i, ...] = parallelproj.joseph3d_fwd_tof_sino(
+                parallelproj_core.joseph3d_fwd(
                     xstart,
                     xend,
                     x,
                     self._img_origin,
                     self._voxel_size,
+                    self.xp.reshape(x_fwd[chunk_start:chunk_end, ...], (-1,)),
+                )
+            else:
+                assert self._tof_parameters is not None
+                parallelproj_core.joseph3d_tof_sino_fwd(
+                    xstart,
+                    xend,
+                    x,
+                    self._img_origin,
+                    self._voxel_size,
+                    self.xp.reshape(
+                        x_fwd[chunk_start:chunk_end, ...],
+                        (-1, self._tof_parameters.num_tofbins),
+                    ),
                     self._tof_parameters.tofbin_width,
                     self.xp.asarray(
                         [self._tof_parameters.sigma_tof],
@@ -1276,39 +1361,47 @@ class EqualBlockPETProjector(LinearOperator):
                         dtype=self.xp.float32,
                         device=dev,
                     ),
-                    self.tof_parameters.num_sigmas,
                     self.tof_parameters.num_tofbins,
+                    self.tof_parameters.num_sigmas,
                 )
 
         return x_fwd
 
-    def _adjoint(self, y):
-        """nonTOF back projection of sinogram y"""
+    def _adjoint(self, y: Array) -> Array:
+        """back projection of sinogram y"""
         dev = array_api_compat.device(y)
 
         y_back = self.xp.zeros(self.in_shape, dtype=self.xp.float32, device=dev)
 
-        for i in range(self.lor_descriptor.num_block_pairs):
-            xstart, xend = self.lor_descriptor.get_lor_coordinates(
-                self.xp.asarray([i], device=dev)
-            )
+        num_bp = self.lor_descriptor.num_block_pairs
+        chunk_size = -(-num_bp // self._num_chunks)  # ceiling division
+
+        for chunk_start in range(0, num_bp, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, num_bp)
+            bp_chunk = self.xp.arange(chunk_start, chunk_end, device=dev)
+            xstart, xend = self.lor_descriptor.get_lor_coordinates(bp_chunk)
+
             if not self.tof:
-                y_back += parallelproj.joseph3d_back(
+                parallelproj_core.joseph3d_back(
                     xstart,
                     xend,
-                    self._img_shape,
+                    y_back,
                     self._img_origin,
                     self._voxel_size,
-                    y[i, ...],
+                    self.xp.reshape(y[chunk_start:chunk_end, ...], (-1,)),
                 )
             else:
-                y_back += parallelproj.joseph3d_back_tof_sino(
+                assert self._tof_parameters is not None
+                parallelproj_core.joseph3d_tof_sino_back(
                     xstart,
                     xend,
-                    self._img_shape,
+                    y_back,
                     self._img_origin,
                     self._voxel_size,
-                    y[i, ...],
+                    self.xp.reshape(
+                        y[chunk_start:chunk_end, ...],
+                        (-1, self._tof_parameters.num_tofbins),
+                    ),
                     self._tof_parameters.tofbin_width,
                     self.xp.asarray(
                         [self._tof_parameters.sigma_tof],
@@ -1320,15 +1413,15 @@ class EqualBlockPETProjector(LinearOperator):
                         dtype=self.xp.float32,
                         device=dev,
                     ),
-                    self.tof_parameters.num_sigmas,
                     self.tof_parameters.num_tofbins,
+                    self.tof_parameters.num_sigmas,
                 )
 
         return y_back
 
     def show_geometry(
         self,
-        ax: plt.Axes,
+        ax: Axes3D,
         color: tuple[float, float, float] = (1.0, 0.0, 0.0),
         edgecolor: str = "grey",
         alpha: float = 0.1,
@@ -1337,7 +1430,7 @@ class EqualBlockPETProjector(LinearOperator):
 
         Parameters
         ----------
-        ax : plt.Axes
+        ax : Axes3D
             matplotlib axes object with projection = '3d'
         color : tuple[float, float, float], optional
             color to use for the FOV cube, by default (1.,0.,0.)
@@ -1375,7 +1468,7 @@ class EqualBlockPETProjector(LinearOperator):
             x,
             y,
             z,
-            filled=np.ones(sh, dtype=np.bool),
+            filled=np.ones(sh, dtype=bool),
             facecolors=colors,
             edgecolors=edgecolor,
         )

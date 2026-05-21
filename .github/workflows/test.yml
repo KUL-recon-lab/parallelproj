@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["**"]
+  pull_request:
+
+jobs:
+  # Guard against the "I tagged v2.1.0 but forgot to bump pyproject.toml"
+  # mistake.  Runs only on tags shaped like ``v<something>`` (e.g. v2.1.0,
+  # v2.1.0a1, v2.1.0rc1, v2.1.0.dev0).  Pushing such a tag triggers this
+  # job; the rest of the workflow continues regardless, so the test
+  # matrix still runs and the CI dashboard makes the mismatch obvious.
+  version-check:
+    name: Tag matches [project].version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare git tag to [project].version in pyproject.toml
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          TAG_VERSION="${TAG#v}"
+          PROJ_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "git tag:           $TAG"
+          echo "tag version:       $TAG_VERSION"
+          echo "[project].version: $PROJ_VERSION"
+          if [ "$TAG_VERSION" != "$PROJ_VERSION" ]; then
+            echo "::error::Tag '$TAG_VERSION' does not match [project].version '$PROJ_VERSION' in pyproject.toml.  Bump [project].version (and pixi.lock if needed) before tagging."
+            exit 1
+          fi
+
+  test:
+    name: pytest (${{ matrix.os }}, ${{ matrix.env }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest  -> linux-64
+        # windows-latest -> win-64
+        # macos-latest   -> osx-arm64 (Apple Silicon).
+        # Add ``macos-13`` if you specifically need Intel-mac coverage.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Pixi environments defined in pyproject.toml's [tool.pixi.environments].
+        # ``test`` -> Python 3.12;  ``test-py-latest`` -> newest Python.
+        env: [test, test-py-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history (harmless; would be needed if we go dynamic again)
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@v0.8.14
+        with:
+          pixi-version: latest
+          environments: ${{ matrix.env }}
+          cache: true
+
+      - name: Print parallelproj and Python version
+        # Single-line ``python -c`` for cross-shell portability
+        # (Linux/macOS = bash, Windows = pwsh by default).
+        run: pixi run -e ${{ matrix.env }} python -c "import sys, parallelproj; print('Python', sys.version.split()[0]); print('parallelproj', parallelproj.__version__)"
+
+      - name: Run tests
+        run: pixi run -e ${{ matrix.env }} test-cov

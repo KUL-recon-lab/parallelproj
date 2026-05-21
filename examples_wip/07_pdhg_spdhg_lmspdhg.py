@@ -2,8 +2,8 @@
 PDHG, SPDHG and LM-SPHG to optimize the Poisson logL and total variation
 ========================================================================
 
-This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm, 
-the stochastic PDHG (SPDHG) and the listmode SPDHG (LM-SPDHG) to minimize the negative 
+This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm,
+the stochastic PDHG (SPDHG) and the listmode SPDHG (LM-SPDHG) to minimize the negative
 Poisson log-likelihood function combined with a total variation regularizer:
 
 .. math::
@@ -13,14 +13,14 @@ subject to
 
 .. math::
     x \geq 0
-    
+
 using the linear forward model
 
 .. math::
     \\bar{d}(x) = A x + s
 
 .. tip::
-    parallelproj is python array API compatible meaning it supports different 
+    parallelproj is python array API compatible meaning it supports different
     array backends (e.g. numpy, cupy, torch, ...) and devices (CPU or GPU).
     Choose your preferred array API ``xp`` and device ``dev`` below.
 
@@ -106,8 +106,8 @@ voxel_size = (2.0, 2.0, 2.0)
 
 lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
     scanner,
+    parallelproj.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=40,
-    max_ring_difference=2,
     sinogram_order=parallelproj.SinogramSpatialAxisOrder.RVP,
 )
 
@@ -154,17 +154,18 @@ proj.tof_parameters = parallelproj.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-# setup the attenuation multiplication operator which is different
-# for TOF and non-TOF since the attenuation sinogram is always non-TOF
-if proj.tof:
-    att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-        proj.out_shape, att_sino
-    )
-else:
-    att_op = parallelproj.ElementwiseMultiplicationOperator(att_sino)
+# For TOF, att_sino has no TOF-bins dimension while the projector output does.
+# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
+# the TOF-bins axis without copying data (zero-stride view).
+att_values = (
+    xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
+    if proj.tof
+    else att_sino
+)
+att_op = parallelproj.ElementwiseMultiplicationOperator(att_values)
 
 res_model = parallelproj.GaussianFilterOperator(
-    proj.in_shape, sigma=4.5 / (2.35 * proj.voxel_size)
+    proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
 )
 
 # compose all 3 operators into a single linear operator
@@ -355,14 +356,16 @@ for i in range(num_subsets):
     subset_proj = copy(proj)
     subset_proj.views = subset_views[i]
 
-    if subset_proj.tof:
-        subset_att_op = parallelproj.TOFNonTOFElementwiseMultiplicationOperator(
-            subset_proj.out_shape, att_sino[subset_slices_non_tof[i]]
+    # same TOF/non-TOF broadcasting as for the full operator above
+    att_values_k = (
+        xp.broadcast_to(
+            xp.expand_dims(att_sino[subset_slices_non_tof[i]], axis=-1),
+            subset_proj.out_shape,
         )
-    else:
-        subset_att_op = parallelproj.ElementwiseMultiplicationOperator(
-            att_sino[subset_slices_non_tof[i]]
-        )
+        if subset_proj.tof
+        else att_sino[subset_slices_non_tof[i]]
+    )
+    subset_att_op = parallelproj.ElementwiseMultiplicationOperator(att_values_k)
 
     # add the resolution model and multiplication with a subset of the attenuation sinogram
     pet_subset_linop_seq.append(
@@ -564,9 +567,7 @@ for i, sl in enumerate(subset_slices_lm):
     # enable TOF in the LM projector
     subset_lm_proj.tof_parameters = proj.tof_parameters
     if proj.tof:
-        # we need to make a copy of the 1D subset event_tofbins array
-        # stupid way of doing this, but torch asarray copy doesn't seem to work
-        subset_lm_proj.event_tofbins = 1 * event_tofbins[sl]
+        subset_lm_proj.event_tofbins = xp.asarray(event_tofbins[sl], copy=True)
         subset_lm_proj.tof = proj.tof
 
     subset_lm_att_op = parallelproj.ElementwiseMultiplicationOperator(subset_att_list)

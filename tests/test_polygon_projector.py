@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import parallelproj
 import array_api_compat.numpy as np
-from array_api_compat import to_device
 import pytest
 import matplotlib.pyplot as plt
 from types import ModuleType
+
+import parallelproj.pet_lors as ppl
+import parallelproj.pet_scanners as pps
+import parallelproj.projectors as ppp
+import parallelproj.tof as ppt
+from parallelproj import to_numpy_array
 
 from .config import pytestmark
 
@@ -22,7 +26,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
 
     voxel_size = (4.0, 4.0, 2.66)
     img_shape = (53, 53, 5)
-    sinogram_order = parallelproj.SinogramSpatialAxisOrder.RVP
+    sinogram_order = ppl.SinogramSpatialAxisOrder.RVP
 
     # setup a test image with 3 hot rods
     x = xp.zeros(img_shape, dtype=xp.float32, device=dev)
@@ -31,7 +35,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     x[img_shape[0] // 2, -3, 1:] = 1.0
 
     # define the scanner geometry, lor descriptor and projector
-    scanner = parallelproj.DemoPETScannerGeometry(
+    scanner = pps.DemoPETScannerGeometry(
         xp,
         dev,
         num_rings=num_rings,
@@ -40,20 +44,27 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
         symmetry_axis=symmetry_axis,
     )
 
-    lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+    lor_desc = ppl.RegularPolygonPETLORDescriptor(
         scanner,
+        ppl.Michelogram(scanner.num_rings, max_ring_difference, span=1),
         radial_trim=radial_trim,
-        max_ring_difference=max_ring_difference,
         sinogram_order=sinogram_order,
     )
 
-    proj = parallelproj.RegularPolygonPETProjector(lor_desc, img_shape, voxel_size)
+    proj = ppp.RegularPolygonPETProjector(lor_desc, img_shape, voxel_size)
     assert proj.out_shape == (lor_desc.num_rad, lor_desc.num_views, lor_desc.num_planes)
 
     # non-TOF projections
+    assert isinstance(str(proj), str)
     x_fwd = proj(x)
     y = xp.ones(x_fwd.shape, dtype=xp.float32, device=dev)
     y_back = proj.adjoint(y)
+
+    # test that a non-integer sinogram raises a TypeError
+    with pytest.raises(TypeError):
+        proj.convert_sinogram_to_listmode(
+            xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
+        )
 
     # test conversion to LM
     # LM converter run over views and TOF bins which determines the output order
@@ -68,6 +79,16 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
         event_end_coords,
         event_tofbins,
     ) = proj.convert_sinogram_to_listmode(test_sino)
+
+    # test shuffle=True (non-TOF): output should have same shape, tofbins still None
+    (
+        event_start_coords_sh,
+        event_end_coords_sh,
+        event_tofbins_sh,
+    ) = proj.convert_sinogram_to_listmode(test_sino, shuffle=True)
+    assert event_start_coords_sh.shape == event_start_coords.shape
+    assert event_end_coords_sh.shape == event_end_coords.shape
+    assert event_tofbins_sh is None
 
     assert event_start_coords.shape == (4, 3)
     assert event_end_coords.shape == (4, 3)
@@ -85,12 +106,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     assert xp.all(event_end_coords[2, :] == xend[1, 0, 0, :])
     assert xp.all(event_end_coords[3, :] == xend[0, 1, 1, :])
 
-    # TOF projections
-    with pytest.raises(ValueError):
-        # number of TOF bins must be odd
-        tof_params = parallelproj.TOFParameters(num_tofbins=6)
-
-    tof_params = parallelproj.TOFParameters(num_tofbins=7, tofbin_width=30.6)
+    tof_params = ppt.TOFParameters(num_tofbins=7, tofbin_width=30.6)
     proj.tof_parameters = tof_params
     assert proj.out_shape == (
         lor_desc.num_rad,
@@ -99,6 +115,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
         tof_params.num_tofbins,
     )
 
+    assert isinstance(str(proj), str)
     x_fwd_tof = proj(x)
     y_tof = xp.ones(x_fwd_tof.shape, dtype=xp.float32, device=dev)
     y_back_tof = proj.adjoint(y_tof)
@@ -154,14 +171,24 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
                 device=dev,
                 dtype=xp.int16,
             )
-            - proj.tof_parameters.num_tofbins // 2
         )
     )
+
+    # test shuffle=True (TOF): output should have same shape, tofbins not None
+    (
+        event_start_coords_sh,
+        event_end_coords_sh,
+        event_tofbins_sh,
+    ) = proj.convert_sinogram_to_listmode(test_sino, shuffle=True)
+    assert event_start_coords_sh.shape == event_start_coords.shape
+    assert event_end_coords_sh.shape == event_end_coords.shape
+    assert event_tofbins_sh is not None
+    assert event_tofbins_sh.shape == event_tofbins.shape
 
     # setup a projector with non default image origin and views
     views = xp.asarray([0, 1], device=dev)
     img_origin = xp.asarray([-100, -100, -5], device=dev, dtype=xp.float32)
-    proj2 = parallelproj.RegularPolygonPETProjector(
+    proj2 = ppp.RegularPolygonPETProjector(
         lor_desc, img_shape, voxel_size, views=views, img_origin=img_origin
     )
 
@@ -222,16 +249,16 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
     vox_value = 2.7
     img_size = 3
 
-    img_shape = 3 * (img_size,)
+    img_shape = (img_size, img_size, img_size)
 
     # setup a test image with a single voxel != 0 at the center of the image
-    x = xp.zeros(img_shape, device=dev)
+    x = xp.zeros(img_shape, device=dev, dtype=xp.float32)
     x[img_shape[0] // 2, img_shape[1] // 2, img_shape[2] // 2] = vox_value
     # setup a test image where all voxels have the same value
-    x2 = vox_value * xp.ones(img_shape, device=dev)
+    x2 = vox_value * xp.ones(img_shape, device=dev, dtype=xp.float32)
 
     for symmetry_axis in [0, 1, 2]:
-        scanner = parallelproj.RegularPolygonPETScannerGeometry(
+        scanner = pps.RegularPolygonPETScannerGeometry(
             xp,
             dev,
             radius=radius,
@@ -242,13 +269,13 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             symmetry_axis=symmetry_axis,
         )
 
-        for sinogram_order in parallelproj.SinogramSpatialAxisOrder:
-            lor_desc = parallelproj.RegularPolygonPETLORDescriptor(
+        for sinogram_order in ppl.SinogramSpatialAxisOrder:
+            lor_desc = ppl.RegularPolygonPETLORDescriptor(
                 scanner, radial_trim=1, sinogram_order=sinogram_order
             )
 
-            proj = parallelproj.RegularPolygonPETProjector(
-                lor_desc, img_shape=img_shape, voxel_size=3 * (vox_size,)
+            proj = ppp.RegularPolygonPETProjector(
+                lor_desc, img_shape=img_shape, voxel_size=(vox_size, vox_size, vox_size)
             )
 
             x_fwd = proj(x)
@@ -357,15 +384,15 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             )
 
             # setup the same projector without caching of the LOR endpoints
-            projb = parallelproj.RegularPolygonPETProjector(
+            projb = ppp.RegularPolygonPETProjector(
                 lor_desc,
                 img_shape=img_shape,
-                voxel_size=3 * (vox_size,),
+                voxel_size=(vox_size, vox_size, vox_size),
                 cache_lor_endpoints=False,
             )
             x_fwd2b = projb(x2)
 
-            assert projb.adjointness_test(xp, dev)
+            assert projb.adjointness_test(xp, dev, dtype=xp.float32)
 
             assert projb.xstart is None
             assert projb.xend is None
@@ -374,13 +401,16 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             # check whether the projections with and without caching the LOR
             # endpoints are the same
             assert np.allclose(
-                parallelproj.to_numpy_array(x_fwd2b),
-                parallelproj.to_numpy_array(x_fwd2),
+                to_numpy_array(x_fwd2b),
+                to_numpy_array(x_fwd2),
             )
 
             # check whether the caching works if we first call the adjoint
-            proj4 = parallelproj.RegularPolygonPETProjector(
-                lor_desc, img_shape=img_shape, voxel_size=3 * (vox_size,)
+            proj4 = ppp.RegularPolygonPETProjector(
+                lor_desc,
+                img_shape=img_shape,
+                voxel_size=(vox_size, vox_size, vox_size),
+                cache_lor_endpoints=True,
             )
 
             y = xp.ones(proj4.out_shape, dtype=xp.float32, device=dev)
@@ -389,26 +419,23 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             assert proj4.xstart is not None
             assert proj4.xend is not None
 
-            assert bool(xp.all(proj.xstart == proj4.xstart))
-            assert bool(xp.all(proj.xend == proj4.xend))
-
             proj4.clear_cached_lor_endpoints()
             assert proj4.xstart is None
             assert proj4.xend is None
+
+            tmp = proj4.adjoint(y)
+
+            assert proj4.xstart is not None
+            assert proj4.xend is not None
 
             proj5 = copy(proj)
             subset_views = xp.asarray([0, 1], device=dev)
             proj5.views = xp.asarray(subset_views, device=dev)
 
-            assert proj.xstart is not None
-            assert proj.xend is not None
-
+            # if we reset the views, the cached LOR endpoints should be cleared
             assert proj5.xstart is None
             assert proj5.xend is None
 
             x_fwd5 = proj5(x)
-
-            assert proj5.xstart is not None
-            assert proj5.xend is not None
 
             assert bool(xp.all(proj5.views == subset_views))

@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 _build/
 libparallelproj_install/
+.claude/
 
 # C extensions
 *.so
@@ -140,3 +141,6 @@ wip/*
 .vscode/*
 compiled_libs/*
 .DS_Store
+# pixi environments
+.pixi/*
+!.pixi/config.toml

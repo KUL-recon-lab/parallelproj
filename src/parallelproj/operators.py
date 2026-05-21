@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import ModuleType
 import abc
+import os
+
 import numpy as np
 import array_api_compat
-from array_api_compat import device, get_namespace
-from parallelproj import Array
-from collections.abc import Sequence
 
-import parallelproj
+# Enable scipy's experimental array API support so that scipy.ndimage functions
+# dispatch correctly for NumPy, CuPy, and PyTorch CPU arrays uniformly.
+os.environ.setdefault("SCIPY_ARRAY_API", "1")
+import scipy.ndimage as ndimage
+from array_api_compat import device, get_namespace
+
+try:
+    import cupy as cp
+except Exception:
+    cp = None
+
+from parallelproj import Array
 
 
 class LinearOperator(abc.ABC):
     """abstract base class for linear operators"""
 
     def __init__(self) -> None:
-        self._scale = 1
+        self._scale: float | complex = 1.0
 
     @property
     @abc.abstractmethod
@@ -32,15 +43,15 @@ class LinearOperator(abc.ABC):
         raise NotImplementedError
 
     @property
-    def scale(self) -> int | float | complex:
+    def scale(self) -> float | complex:
         """scalar factor applied to the linear operator"""
         return self._scale
 
     @scale.setter
-    def scale(self, value: int | float | complex):
+    def scale(self, value: float | complex):
         if not np.isscalar(value):
-            raise ValueError
-        self._scale = value
+            raise ValueError("scale must be a scalar value")
+        self._scale = complex(value) if isinstance(value, complex) else float(value)
 
     @abc.abstractmethod
     def _apply(self, x: Array) -> Array:
@@ -63,7 +74,7 @@ class LinearOperator(abc.ABC):
         -------
         Array
         """
-        if self._scale == 1:
+        if self._scale == 1.0:
             return self._apply(x)
         else:
             return self._scale * self._apply(x)
@@ -84,7 +95,7 @@ class LinearOperator(abc.ABC):
         Array
         """
 
-        if self._scale == 1:
+        if self._scale == 1.0:
             return self._adjoint(y)
         else:
             return self._scale.conjugate() * self._adjoint(y)
@@ -95,6 +106,7 @@ class LinearOperator(abc.ABC):
         dev: str,
         verbose: bool = False,
         iscomplex: bool = False,
+        dtype: type | None = None,
         **kwargs,
     ) -> bool:
         """test whether the adjoint is correctly implemented
@@ -109,6 +121,8 @@ class LinearOperator(abc.ABC):
             verbose output
         iscomplex : bool, optional
             use complex arrays
+        dtype : type | None, optional
+            data type of the arrays
         **kwargs : dict
             passed to np.isclose
 
@@ -118,10 +132,11 @@ class LinearOperator(abc.ABC):
             whether the adjoint is correctly implemented
         """
 
-        if iscomplex:
-            dtype = xp.complex128
-        else:
-            dtype = xp.float64
+        if dtype is None:
+            if iscomplex:
+                dtype = xp.complex128
+            else:
+                dtype = xp.float64
 
         x = xp.asarray(np.random.rand(*self.in_shape), device=dev, dtype=dtype)
         y = xp.asarray(np.random.rand(*self.out_shape), device=dev, dtype=dtype)
@@ -137,6 +152,7 @@ class LinearOperator(abc.ABC):
             )
 
         x_fwd = self.apply(x)
+
         y_adj = self.adjoint(y)
 
         if iscomplex:
@@ -149,7 +165,7 @@ class LinearOperator(abc.ABC):
         if verbose:
             print(ip1, ip2)
 
-        return np.isclose(ip1, ip2, **kwargs)
+        return bool(np.isclose(ip1, ip2, **kwargs))
 
     def norm(
         self,
@@ -198,19 +214,66 @@ class LinearOperator(abc.ABC):
             x /= float(norm_squared)
 
             if verbose:
-                print(f"{(i+1):03} {xp.sqrt(norm_squared):.2E}")
+                print(f"{(i+1):03} {float(xp.sqrt(norm_squared)):.2E}")
 
         return float(xp.sqrt(norm_squared))
 
+    @property
+    def H(self) -> AdjointLinearOperator:
+        """adjoint operator :math:`A^H`"""
+        return AdjointLinearOperator(self)
+
+
+class AdjointLinearOperator(LinearOperator):
+    """Adjoint of a linear operator
+
+    Wraps an existing :class:`LinearOperator` so that ``__call__`` applies
+    :math:`A^H` and ``adjoint`` applies :math:`A`.  The scale of this operator
+    is always the complex conjugate of the wrapped operator's scale; setting
+    the scale on either one propagates to the other.
+
+    Use the :attr:`LinearOperator.H` property rather than constructing this
+    class directly.
+    """
+
+    def __init__(self, operator: LinearOperator) -> None:
+        """init method
+
+        Parameters
+        ----------
+        operator : LinearOperator
+            the operator whose adjoint is to be represented
+        """
+        super().__init__()
+        self._operator = operator
+
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        return self._operator.out_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        return self._operator.in_shape
+
+    @property
+    def scale(self) -> float | complex:
+        """conjugate of the wrapped operator's scale"""
+        return self._operator.scale.conjugate()
+
+    @scale.setter
+    def scale(self, value: float | complex):
+        # setting A.H.scale = a sets A.scale = conj(a)
+        self._operator.scale = value.conjugate()
+
+    def _apply(self, x: Array) -> Array:
+        return self._operator._adjoint(x)
+
+    def _adjoint(self, y: Array) -> Array:
+        return self._operator._apply(y)
+
 
 class MatrixOperator(LinearOperator):
-    """Linear Operator defined by dense matrix multiplication
-
-    Examples
-    --------
-
-    .. minigallery:: parallelproj.MatrixOperator
-    """
+    """Linear Operator defined by dense matrix multiplication"""
 
     def __init__(self, A: Array) -> None:
         """init method
@@ -224,11 +287,11 @@ class MatrixOperator(LinearOperator):
         self._A = A
 
     @property
-    def in_shape(self) -> tuple[int]:
+    def in_shape(self) -> tuple[int, ...]:
         return (self._A.shape[1],)
 
     @property
-    def out_shape(self) -> tuple[int]:
+    def out_shape(self) -> tuple[int, ...]:
         return (self._A.shape[0],)
 
     @property
@@ -241,6 +304,7 @@ class MatrixOperator(LinearOperator):
         """array module of the operator"""
         return array_api_compat.get_namespace(self._A)
 
+    @property
     def iscomplex(self) -> bool:
         """bool whether the operator is complex"""
         return self.xp.isdtype(self._A.dtype, self.xp.complex64) or self.xp.isdtype(
@@ -251,7 +315,7 @@ class MatrixOperator(LinearOperator):
         return self.xp.matmul(self._A, x)
 
     def _adjoint(self, y: Array) -> Array:
-        if self.iscomplex():
+        if self.iscomplex:
             return self.xp.matmul(self.xp.conj(self._A).T, y)
         else:
             return self.xp.matmul(self._A.T, y)
@@ -269,10 +333,6 @@ class CompositeLinearOperator(LinearOperator):
 
     .. math::
         A(x) = A^0( A^1( ... ( A^{n-1}(x) ) ) )
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.CompositeLinearOperator
     """
 
     def __init__(self, operators: Sequence[LinearOperator]):
@@ -280,7 +340,7 @@ class CompositeLinearOperator(LinearOperator):
 
         Parameters
         ----------
-        operators : Sequence[LinearOperator, ...]
+        operators : Sequence[LinearOperator]
             Sequence of linear operators
         """
         super().__init__()
@@ -301,7 +361,7 @@ class CompositeLinearOperator(LinearOperator):
 
     def _apply(self, x: Array) -> Array:
         y = x
-        for op in self[::-1]:
+        for op in reversed(self._operators):
             y = op(y)
         return y
 
@@ -317,12 +377,7 @@ class CompositeLinearOperator(LinearOperator):
 
 
 class ElementwiseMultiplicationOperator(LinearOperator):
-    """Element-wise multiplication operator (multiplication with a diagonal matrix)
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.ElementwiseMultiplicationOperator
-    """
+    """Element-wise multiplication operator (multiplication with a diagonal matrix)"""
 
     def __init__(self, values: Array):
         """init method
@@ -357,76 +412,12 @@ class ElementwiseMultiplicationOperator(LinearOperator):
         return self._values * x
 
     def _adjoint(self, y: Array) -> Array:
-        if self.iscomplex():
+        if self.iscomplex:
             return self.xp.conj(self._values) * y
         else:
             return self._values * y
 
-    def iscomplex(self) -> bool:
-        """bool whether the operator is complex"""
-        return self.xp.isdtype(
-            self._values.dtype, self.xp.complex64
-        ) or self.xp.isdtype(self._values.dtype, self.xp.complex128)
-
-
-class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
-    """Element-wise multiplication operator between a non-TOF and TOF sinogram
-
-    Examples
-    --------
-    .. minigallery:: parallelproj.TOFNonTOFElementwiseMultiplicationOperator
-    """
-
-    def __init__(self, in_shape: tuple[int, ...], values: Array):
-        """init method
-
-        Parameters
-        ----------
-        in_shape: tuple[int, ...]
-            shape of the TOF sinogram
-        values : Array
-            a non-TOF sinogram
-        """
-        super().__init__()
-        self._in_shape = in_shape
-        self._values = values
-
     @property
-    def in_shape(self) -> tuple[int, ...]:
-        return self._in_shape
-
-    @property
-    def out_shape(self) -> tuple[int, ...]:
-        return self._in_shape
-
-    @property
-    def xp(self) -> ModuleType:
-        """array module of the operator"""
-        return array_api_compat.get_namespace(self._values)
-
-    @property
-    def values(self) -> Array:
-        """values that get multiplied"""
-        return self._values
-
-    def _apply(self, x: Array) -> Array:
-        y = 1 * x  # suboptimal to copy array, but bug in torch asarray with copy = True
-        for i in range(x.shape[-1]):
-            y[..., i] *= self._values
-        return y
-
-    def _adjoint(self, y: Array) -> Array:
-        x = 1 * y  # suboptimal to copy array
-        if self.iscomplex():
-            tmp = self.xp.conj(self._values)
-        else:
-            tmp = self._values
-
-        for i in range(x.shape[-1]):
-            x[..., i] *= tmp
-
-        return x
-
     def iscomplex(self) -> bool:
         """bool whether the operator is complex"""
         return self.xp.isdtype(
@@ -435,28 +426,20 @@ class TOFNonTOFElementwiseMultiplicationOperator(LinearOperator):
 
 
 class GaussianFilterOperator(LinearOperator):
-    """Gaussian filter operator
+    """Gaussian filter operator"""
 
-    Examples
-    --------
-    .. minigallery:: parallelproj.GaussianFilterOperator
-    """
-
-    def __init__(self, in_shape: tuple[int, ...], sigma: float | Array, **kwargs):
+    def __init__(self, in_shape: tuple[int, ...], **kwargs):
         """init method
 
         Parameters
         ----------
         in_shape : tuple[int, ...]
             shape of the input array
-        sigma: float | array
-            standard deviation of the gaussian filter
-        **kwargs : sometype
-            passed to the ndimage gaussian_filter function
+        **kwargs : dict
+            passed to scipy.ndimage.gaussian_filter (e.g. ``mode``, ``truncate``)
         """
         super().__init__()
         self._in_shape = in_shape
-        self._sigma = sigma
         self._kwargs = kwargs
 
     @property
@@ -469,38 +452,28 @@ class GaussianFilterOperator(LinearOperator):
 
     def _apply(self, x: Array) -> Array:
         xp = array_api_compat.get_namespace(x)
+        dev = array_api_compat.device(x)
 
-        if parallelproj.is_cuda_array(x):
-            import array_api_compat.cupy as cp
-            import cupyx.scipy.ndimage as ndimagex
-
-            if array_api_compat.is_array_api_obj(self._sigma):
-                sigma = cp.asarray(self._sigma)
-            else:
-                sigma = self._sigma
-
-            return array_api_compat.to_device(
-                xp.from_dlpack(
-                    ndimagex.gaussian_filter(cp.asarray(x), sigma=sigma, **self._kwargs)
-                ),
-                device(x),
-            )
+        # PyTorch CUDA: scipy array API dispatch does not support CUDA tensors
+        # yet, so round-trip via CuPy using DLPack.
+        if array_api_compat.is_torch_array(x) and x.device.type != "cpu":
+            assert (
+                cp is not None
+            ), "cupy must be installed to use GaussianFilterOperator with PyTorch CUDA tensors"
+            x_cp = cp.from_dlpack(x.detach())
+            y_cp = ndimage.gaussian_filter(x_cp, **self._kwargs)
+            return xp.asarray(xp.from_dlpack(y_cp))
         else:
-            import scipy.ndimage as ndimage
-
-            if array_api_compat.is_array_api_obj(self._sigma):
-                sigma = np.asarray(self._sigma)
-            else:
-                sigma = self._sigma
-
-            return array_api_compat.to_device(
-                xp.from_dlpack(
-                    ndimage.gaussian_filter(np.asarray(x), sigma=sigma, **self._kwargs)
-                ),
-                device(x),
-            )
+            # All other cases (NumPy, CuPy, PyTorch CPU, array-api-strict) are
+            # handled uniformly via scipy's array API dispatch (SCIPY_ARRAY_API=1).
+            # scipy may return a plain numpy array even for non-numpy inputs, so
+            # convert the result back to the input's array namespace/device.
+            result = ndimage.gaussian_filter(x, **self._kwargs)
+            return xp.asarray(result, device=dev, dtype=x.dtype)
 
     def _adjoint(self, y: Array) -> Array:
+        # A Gaussian filter with a symmetric kernel is self-adjoint, so the
+        # adjoint equals the forward application.
         return self._apply(y)
 
 
@@ -518,8 +491,12 @@ class VstackOperator(LinearOperator):
         super().__init__()
         self._operators = operators
         self._in_shape = self._operators[0].in_shape
+        if any(op.in_shape != self._in_shape for op in self._operators[1:]):
+            raise ValueError(
+                "all operators in VstackOperator must have the same in_shape"
+            )
         self._out_shapes = tuple([x.out_shape for x in operators])
-        self._raveled_out_shapes = tuple([np.prod(x) for x in self._out_shapes])
+        self._raveled_out_shapes = tuple([int(np.prod(x)) for x in self._out_shapes])
         self._out_shape = (sum(self._raveled_out_shapes),)
 
         # setup the slices for slicing the raveled output array
@@ -565,11 +542,6 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
        A^0, A^1 \\ldots, A^{n-1}
 
     that can be evaluated independently.
-
-    Examples
-    --------
-
-    .. minigallery:: parallelproj.LinearOperatorSequence
     """
 
     def __init__(self, operators: Sequence[LinearOperator]) -> None:
@@ -577,7 +549,7 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
 
         Parameters
         ----------
-        operators : Sequence[LinearOperator, ...]
+        operators : Sequence[LinearOperator]
             Sequence of linear operators
         """
         self._operators = operators
@@ -621,10 +593,26 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
     def adjoint(self, y: list[Array]) -> Array:
         """:math:`\\sum_i (A^i)^H y^i` for all :math:`i`"""
 
-        return sum([op.adjoint(y[i]) for (i, op) in enumerate(self)])
+        result = self._operators[0].adjoint(y[0])
+        for i, op in enumerate(self._operators[1:], start=1):
+            result = result + op.adjoint(y[i])
+        return result
 
     def norms(self, xp: ModuleType, dev: str) -> list[float]:
-        """:math:`\\text{norm}(A^i)` for all :math:`i`"""
+        """:math:`\\text{norm}(A^i)` for all :math:`i`
+
+        Parameters
+        ----------
+        xp : ModuleType
+            array module to use
+        dev : str
+            device (cpu or cuda)
+
+        Returns
+        -------
+        list[float]
+            norm of each operator in the sequence
+        """
         return [op.norm(xp, dev) for op in self]
 
 
@@ -755,6 +743,8 @@ class FiniteForwardDifference(LinearOperator):
             div3[:, :, :, 0] = -tmp3[:, :, :, 0]
 
             res = div0 + div1 + div2 + div3
+        else:
+            raise ValueError("only up to 4 dimensions supported")
 
         return res
 
@@ -791,10 +781,7 @@ class GradientFieldProjectionOperator(LinearOperator):
         self._xp = get_namespace(gradient_field)
         self._dev = device(gradient_field)
 
-        if (
-            gradient_field.dtype == self._xp.complex64
-            or gradient_field.dtype == self._xp.complex128
-        ):
+        if self._xp.isdtype(gradient_field.dtype, "complex floating"):
             raise ValueError("complex gradient fields not supported")
 
         self._eta = eta
@@ -805,7 +792,7 @@ class GradientFieldProjectionOperator(LinearOperator):
         gradient_field_float = self._xp.astype(gradient_field, self._xp.float64)
 
         norm = self._xp.sqrt(
-            self._xp.sum(gradient_field_float**2 + self._eta**2, axis=0)
+            self._xp.sum(gradient_field_float**2, axis=0) + self._eta**2
         )
         inds = norm > 0
         self._normalized_gradient_field = self._xp.zeros(
@@ -822,20 +809,20 @@ class GradientFieldProjectionOperator(LinearOperator):
         super().__init__()
 
     @property
-    def in_shape(self) -> tuple[int]:
+    def in_shape(self) -> tuple[int, ...]:
         return self._in_shape
 
     @property
-    def out_shape(self) -> tuple[int]:
+    def out_shape(self) -> tuple[int, ...]:
         return self._out_shape
 
     @property
-    def xp(self):
+    def xp(self) -> ModuleType:
         """array module of the operator"""
         return self._xp
 
     @property
-    def dev(self):
+    def dev(self) -> str:
         """device of the operator"""
         return self._dev
 
@@ -845,7 +832,7 @@ class GradientFieldProjectionOperator(LinearOperator):
         return self._eta
 
     @property
-    def normalized_gradient_field(self):
+    def normalized_gradient_field(self) -> Array:
         """normalized gradient field"""
         return self._normalized_gradient_field
 

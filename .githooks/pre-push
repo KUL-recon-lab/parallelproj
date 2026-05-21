@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# .githooks/pre-push -- distributable pre-push hook for parallelproj.
+#
+# When a tag matching ``v*`` is being pushed, this hook verifies that
+# ``[project].version`` in pyproject.toml (at the tagged commit) matches
+# the tag.  If they disagree, the push is aborted -- saving you from
+# publishing a mismatched release.
+#
+# Activation (one-time per clone, see also ``pixi run setup-hooks``):
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass (use sparingly, e.g. for an experimental tag):
+#
+#     git push --no-verify ...
+#
+# Mechanism: git invokes this script for ``git push`` with the list of
+# refs being pushed on stdin, one per line, in the format
+#
+#     <local ref> <local sha> <remote ref> <remote sha>
+#
+# For tag pushes, ``<local ref>`` is e.g. ``refs/tags/v2.1.0``.  We read
+# each line, filter for ``refs/tags/v*``, and validate.
+
+set -euo pipefail
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$local_ref" in
+        refs/tags/v*)
+            TAG="${local_ref#refs/tags/}"
+            TAG_VERSION="${TAG#v}"
+
+            # ``local_sha`` is the tag *object* SHA for annotated tags
+            # (``git tag -a``) and the commit SHA for lightweight tags.
+            # Dereference to the underlying commit explicitly so the
+            # ``git show <sha>:<path>`` lookup below always works.
+            COMMIT_SHA=$(git rev-parse "${local_sha}^{commit}")
+
+            # Read [project].version from pyproject.toml *at the tagged
+            # commit* (not the working tree), so we validate what's
+            # actually being shipped.
+            PROJ_VERSION=$(git show "${COMMIT_SHA}:pyproject.toml" \
+                | python3 -c "import sys, tomllib; print(tomllib.loads(sys.stdin.read())['project']['version'])")
+
+            echo "pre-push: checking tag ${TAG}" >&2
+            echo "  tag version:       ${TAG_VERSION}" >&2
+            echo "  [project].version: ${PROJ_VERSION}" >&2
+
+            if [ "${TAG_VERSION}" != "${PROJ_VERSION}" ]; then
+                cat >&2 <<EOF
+
+ERROR: tag '${TAG_VERSION}' does not match [project].version
+       '${PROJ_VERSION}' in pyproject.toml at the tagged commit.
+
+  Either bump [project].version to '${TAG_VERSION}' and retag, or
+  retag at a commit where the versions agree.
+
+  Bypass once with: git push --no-verify
+
+EOF
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+exit 0

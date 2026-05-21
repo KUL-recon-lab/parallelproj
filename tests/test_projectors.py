@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import pytest
-import parallelproj
 import array_api_compat
 import matplotlib.pyplot as plt
+
+import parallelproj.projectors as ppp
+import parallelproj.tof as ppt
+import parallelproj.pet_lors as ppl
+import parallelproj.pet_scanners as pps
 
 from .config import pytestmark
 
@@ -25,7 +29,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     view_angles = xp.asarray([0, xp.pi / 2], dtype=xp.float32, device=dev)
     radius = 3.0
 
-    proj2d = parallelproj.ParallelViewProjector2D(
+    proj2d = ppp.ParallelViewProjector2D(
         image_shape, radial_positions, view_angles, radius, image_origin, voxel_size
     )
 
@@ -40,7 +44,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     assert allclose(proj2d.voxel_size[1:], xp.asarray(voxel_size, device=dev))
     assert proj2d.dev == array_api_compat.device(xstart)
 
-    assert proj2d.adjointness_test(xp, dev, verbose=verbose)
+    assert proj2d.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
 
     # test a simple 2D projection
     x2d = xp.reshape(xp.arange(4, dtype=xp.float32, device=dev), (2, 2))
@@ -51,9 +55,6 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     )
 
     if verbose:
-        print(
-            f"module = {xp.__name__}  -  cuda_enabled {parallelproj.num_visible_cuda_devices > 0}"
-        )
         print("calculated 2d projection = ", x_fwd)
         print("expected   2d projection = ", exp_result)
         print("abs diff                 = ", xp.abs(x_fwd - exp_result))
@@ -73,7 +74,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     voxel_size3d = (2.0, 2.0, 2.0)
     ring_positions = xp.asarray([-1, 0, 1.0], dtype=xp.float32, device=dev)
 
-    proj3d = parallelproj.ParallelViewProjector3D(
+    proj3d = ppp.ParallelViewProjector3D(
         image_shape3d,
         radial_positions,
         view_angles,
@@ -87,7 +88,9 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     xstart = proj3d.xstart
     xend = proj3d.xend
 
-    assert proj3d.adjointness_test(xp, dev, verbose=verbose)
+    assert proj3d.image_shape == image_shape3d
+
+    assert proj3d.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
 
     # test a simple 3D projection
     x3d = xp.reshape(xp.arange(8, dtype=xp.float32, device=dev), (2, 2, 2))
@@ -109,7 +112,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     assert allclose(x3d_fwd[..., 2], exp_result_dp2)
 
     # test is max_ring_diff = None works
-    proj3d_2 = parallelproj.ParallelViewProjector3D(
+    proj3d_2 = ppp.ParallelViewProjector3D(
         image_shape3d,
         radial_positions,
         view_angles,
@@ -124,7 +127,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
 
     # test whether span > 1 raises execption
     with pytest.raises(Exception) as e_info:
-        proj3d_2 = parallelproj.ParallelViewProjector3D(
+        proj3d_2 = ppp.ParallelViewProjector3D(
             image_shape3d,
             radial_positions,
             view_angles,
@@ -184,19 +187,17 @@ def test_lmprojector(
         device=dev,
     )
 
-    xstart = vstart * voxel_size + img_origin
-    xend = vend * voxel_size + img_origin
+    xstart = xp.astype(vstart * voxel_size + img_origin, xp.float32)
+    xend = xp.astype(vend * voxel_size + img_origin, xp.float32)
 
-    lm_proj = parallelproj.ListmodePETProjector(
-        xstart, xend, img_dim, voxel_size, img_origin
-    )
+    lm_proj = ppp.ListmodePETProjector(xstart, xend, img_dim, voxel_size, img_origin)
 
     assert xp.all(lm_proj.event_start_coordinates == xstart)
     assert xp.all(lm_proj.event_end_coordinates == xend)
 
     assert lm_proj.num_events == xstart.shape[0]
 
-    assert lm_proj.adjointness_test(xp, dev)
+    assert lm_proj.adjointness_test(xp, dev, dtype=xp.float32)
 
     assert xp.all(lm_proj.voxel_size == xp.asarray(voxel_size, device=dev))
 
@@ -227,7 +228,7 @@ def test_lmprojector(
     assert isclose
 
     # TOF LM tests
-    tof_params = parallelproj.TOFParameters()
+    tof_params = ppt.TOFParameters()
     with pytest.raises(Exception) as e_info:
         # raises an exception because TOFParameters and event_tofbins are not
         # set
@@ -260,7 +261,7 @@ def test_lmprojector(
 
     assert lm_proj.tof
 
-    assert lm_proj.adjointness_test(xp, dev)
+    assert lm_proj.adjointness_test(xp, dev, dtype=xp.float32)
 
     # unset the tof parameters and check if tof gets set to False
     lm_proj.tof_parameters = None
@@ -274,7 +275,7 @@ def test_lmprojector(
     assert lm_proj.tof == False
 
     # test a projector with img_origin = None
-    lm_proj2 = parallelproj.ListmodePETProjector(xstart, xend, img_dim, voxel_size)
+    lm_proj2 = ppp.ListmodePETProjector(xstart, xend, img_dim, voxel_size)
 
 
 def test_equalblock_projector(xp, dev, verbose=True):
@@ -286,13 +287,13 @@ def test_equalblock_projector(xp, dev, verbose=True):
     # radius of the scanner
     scanner_radius = 10
 
-    aff1 = xp.eye(4, device=dev)
+    aff1 = xp.eye(4, device=dev, dtype=xp.float32)
     aff1[1, -1] = scanner_radius
 
-    aff2 = xp.eye(4, device=dev)
+    aff2 = xp.eye(4, device=dev, dtype=xp.float32)
     aff2[1, -1] = -scanner_radius
 
-    block1 = parallelproj.BlockPETScannerModule(
+    block1 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -300,7 +301,7 @@ def test_equalblock_projector(xp, dev, verbose=True):
         affine_transformation_matrix=aff1,
     )
 
-    block2 = parallelproj.BlockPETScannerModule(
+    block2 = pps.BlockPETScannerModule(
         xp,
         dev,
         block_shape,
@@ -308,9 +309,9 @@ def test_equalblock_projector(xp, dev, verbose=True):
         affine_transformation_matrix=aff2,
     )
 
-    scanner = parallelproj.ModularizedPETScannerGeometry([block1, block2])
+    scanner = pps.ModularizedPETScannerGeometry([block1, block2])
 
-    lor_desc = parallelproj.EqualBlockPETLORDescriptor(
+    lor_desc = ppl.EqualBlockPETLORDescriptor(
         scanner,
         xp.asarray(
             [
@@ -324,8 +325,8 @@ def test_equalblock_projector(xp, dev, verbose=True):
     img = xp.ones(img_shape, dtype=xp.float32, device=dev)
     img_origin = xp.asarray([-6.5, -4.5, -1.0], dtype=xp.float32, device=dev)
 
-    proj = parallelproj.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
-    assert proj.adjointness_test(xp, dev)
+    proj = ppp.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
+    assert proj.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
     assert proj.xp == xp
     assert proj.dev == dev
     assert proj.in_shape == img_shape
@@ -339,6 +340,10 @@ def test_equalblock_projector(xp, dev, verbose=True):
     assert allclose(
         proj.voxel_size, xp.asarray(voxel_size, dtype=xp.float32, device=dev)
     )
+    assert proj.num_chunks == 1
+    proj.num_chunks = 2
+    assert proj.num_chunks == 2
+    proj.num_chunks = 1
 
     img_fwd = proj(img)
     ones_back = proj.adjoint(xp.ones_like(img_fwd))
@@ -348,16 +353,16 @@ def test_equalblock_projector(xp, dev, verbose=True):
 
     # test TOF projector
 
-    proj_tof = parallelproj.EqualBlockPETProjector(
+    proj_tof = ppp.EqualBlockPETProjector(
         lor_desc, img_shape, voxel_size, img_origin=img_origin
     )
-    tof_params = parallelproj.TOFParameters(
+    tof_params = ppt.TOFParameters(
         num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0, num_sigmas=3.0
     )
 
     proj_tof.tof_parameters = tof_params
 
-    assert proj_tof.adjointness_test(xp, dev)
+    assert proj_tof.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
     assert proj_tof.tof == True
     assert proj_tof.tof_parameters == tof_params
 

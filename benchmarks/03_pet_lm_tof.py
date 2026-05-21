@@ -1,4 +1,5 @@
 """get LM data from https://zenodo.org/records/8404015"""
+
 import time
 import argparse
 import h5py
@@ -7,7 +8,10 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import parallelproj
+
+import parallelproj.pet_scanners as pps
+import parallelproj.tof as ppt
+import parallelproj_core
 
 from pathlib import Path
 
@@ -30,7 +34,7 @@ if args.mode == "GPU":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     import array_api_compat.cupy as xp
 
-    dev = "cuda"
+    dev = xp.cuda.Device(0)
 elif args.mode == "GPU-torch":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     import array_api_compat.torch as xp
@@ -85,7 +89,7 @@ ring_positions -= 0.5 * xp.max(ring_positions)
 
 
 # GE DMI TOF parameters
-tof_parameters = parallelproj.TOFParameters(
+tof_parameters = ppt.TOFParameters(
     num_tofbins=29,
     tofbin_width=13
     * 0.01302
@@ -146,7 +150,7 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
         f"{symmetry_axis, image_shape} {threadsperblock} tpb  {num_events//1000000}e6 events"
     )
 
-    scanner = parallelproj.RegularPolygonPETScannerGeometry(
+    scanner = pps.RegularPolygonPETScannerGeometry(
         xp,
         dev,
         radius=0.5 * (744.1 + 2 * 8.51),
@@ -163,36 +167,41 @@ for ia, symmetry_axis in enumerate(symmetry_axes):
 
     for ir in range(num_runs + 1):
         t0 = time.time()
-        image_fwd = parallelproj.joseph3d_fwd_tof_lm(
+        img_fwd = xp.zeros(xstart.shape[:-1], dtype=xp.float32, device=dev)
+        parallelproj_core.joseph3d_tof_lm_fwd(
             xstart,
             xend,
             image,
             image_origin,
             voxel_size,
+            img_fwd,
             tof_parameters.tofbin_width,
             xp.asarray([tof_parameters.sigma_tof], dtype=xp.float32, device=dev),
             xp.asarray([tof_parameters.tofcenter_offset], dtype=xp.float32, device=dev),
-            tof_parameters.num_sigmas,
             tofbin,
-            threadsperblock=threadsperblock,
+            tof_parameters.num_tofbins,
+            tof_parameters.num_sigmas,
+            threads_per_block=threadsperblock,
         )
         t1 = time.time()
 
         # peform a back projection
         t2 = time.time()
-        back_image = parallelproj.joseph3d_back_tof_lm(
+        back_img = xp.zeros(image.shape, dtype=xp.float32, device=dev)
+        parallelproj_core.joseph3d_tof_lm_back(
             xstart,
             xend,
-            image_shape,
+            back_img,
             image_origin,
             voxel_size,
             y,
             tof_parameters.tofbin_width,
             xp.asarray([tof_parameters.sigma_tof], dtype=xp.float32, device=dev),
             xp.asarray([tof_parameters.tofcenter_offset], dtype=xp.float32, device=dev),
-            tof_parameters.num_sigmas,
             tofbin,
-            threadsperblock=threadsperblock,
+            tof_parameters.num_tofbins,
+            tof_parameters.num_sigmas,
+            threads_per_block=threadsperblock,
         )
         t3 = time.time()
         if ir > 0:
@@ -224,8 +233,9 @@ sns.set_context("paper")
 
 df["t forward+back (s)"] = df["t forward (s)"] + df["t back (s)"]
 
+bplot_kwargs = dict(capsize=0.15, err_kws={"linewidth": 1.5}, errorbar="sd")
+
 fig, ax = plt.subplots(1, 3, figsize=(7, 7 / 3), sharex=False, sharey="row")
-bplot_kwargs = dict(capsize=0.15, errwidth=1.5, errorbar="sd")
 sns.barplot(data=df, x="symmetry axis", y="t forward (s)", ax=ax[0], **bplot_kwargs)
 sns.barplot(data=df, x="symmetry axis", y="t back (s)", ax=ax[1], **bplot_kwargs)
 sns.barplot(
