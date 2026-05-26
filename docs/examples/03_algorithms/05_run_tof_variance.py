@@ -25,26 +25,26 @@ where :math:`\\ell` is the distance from the LOR midpoint and
 resolution (CTR).  A CTR of 200 ps corresponds to a spatial FWHM of
 ≈ 30 mm.
 
-It is know that TOF reduces the variance in the center of a 2D cylinder with
-diameter :math:`D`, where the SNR gain is given by
+It is known that TOF reduces the variance in the center of a 2D cylinder
+with diameter :math:`D`, where the SNR gain is approximately
 
 .. math::
 
     G_\\text{TOF} \\approx \\sqrt{0.66 \\frac{D}{\\text{FWHM}_\\text{TOF}}}.
 
 For :math:`D = 240` mm and :math:`\\text{FWHM} = 30` mm this gives
-:math:`G \\approx 2.0`, i.e. a roughly three-fold noise reduction at the
+:math:`G \\approx 2.0`, i.e. a roughly two-fold noise reduction at the
 centre.
 
 The convergence-speed trap
 ---------------------------
 
-TOF reconstruction also **converges faster** than non-TOF MLEM.
+TOF reconstruction also **converges faster** than non-TOF reconstruction.
 This creates a common pitfall: if both reconstructions are stopped at the
-*same* (small) number of iterations, the TOF image may appear *noisier*
+*same* (small) number of epochs, the TOF image may appear *noisier*
 than the non-TOF image — not because TOF is worse, but because TOF has
 already converged past its low-noise plateau while non-TOF is still
-climbing.  Conversely, at very early iterations non-TOF may look
+climbing.  Conversely, at very early epochs non-TOF may look
 smoother simply because it has not yet amplified the noise.
 
 To observe the *true* asymptotic advantage of TOF one must run **both**
@@ -54,28 +54,40 @@ What this example shows
 ------------------------
 
 * A single-ring 2-D scanner with a uniform circular phantom.
-* **Full MLEM** run for 700 iterations, with a mild post-filter applied
-  after each iteration so that the smoothed image is stored.
+* **SVRG** (:func:`00_run_mlem_osem_svrg`) with ``num_subsets=28``
+  subsets run for ``num_epochs=10`` epochs (warm-started by a single
+  OSEM epoch), applied independently to the non-TOF and TOF forward
+  models.  10 SVRG epochs are sufficient for both to reach their
+  respective noise plateaux.
 * The standard deviation inside a small (25 mm-radius) central ROI is
-  tracked vs. iteration number — this is a fast single-realisation proxy
+  tracked after every epoch — this is a fast single-realisation proxy
   for the true noise level that avoids the need for Monte Carlo repeats.
-* Four-panel figure:
+* Eight-panel figure:
 
-  - **Top-left**: raw std.dev curves vs. iteration — shows faster TOF
-    convergence *and* the lower asymptotic noise level.
+  - **Top-left**: std.dev curves vs. SVRG epoch (epoch 0 = OSEM warm
+    start) — shows faster TOF convergence *and* the lower asymptotic
+    noise level.
   - **Bottom-left**: ratio non-TOF / TOF std.dev — values > 1 confirm
-    that non-TOF is noisier; the ratio rises as iterations increase and
-    both methods converge.
-  - **Top/bottom-right**: final smoothed images for visual comparison.
+    that non-TOF is noisier; the ratio stabilises above 1 once both
+    algorithms have converged.
+  - **2nd column**: smoothed images after the OSEM warm start (epoch 0).
+  - **3rd column**: smoothed images after 1 SVRG epoch, illustrating
+    that at very early iterations TOF may appear noisier (it has already
+    amplified noise while non-TOF is still initialisation-smooth).
+  - **Right column**: final smoothed images after ``num_epochs`` SVRG
+    epochs for visual comparison of the asymptotic noise levels.
 
 .. note::
 
     The standard deviation in a single noise realisation is used here as
-    a proxy for the true noise standard deviation.
+    a proxy for the true noise standard deviation.  For a uniform phantom
+    spatial variability inside the ROI equals the noise variability, so
+    the single realisation is sufficient.
 """
 
 # %%
 from __future__ import annotations
+from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -119,12 +131,14 @@ xp, dev = suggest_array_backend_and_device(None, None)
 #
 # ``cylinder_radius`` (in voxels) defines the uniform phantom disk.
 
-num_epochs = 300
+num_subsets = 14
+num_epochs = 10
 fwhm_tof_mm = 30.0
 fwhm_res_model_mm = 4.0
 sm_fwhm_mm = 9.0
 cylinder_radius_mm = 120
 count_factor = 0.3
+step_size = 2.0
 
 # %%
 # Scanner and image geometry
@@ -283,93 +297,239 @@ y_non_tof = xp.sum(y_tof, axis=-1)
 contamination_non_tof = xp.sum(contamination_tof, axis=-1)
 
 # %%
-# EM update rule
-# --------------
+# Post-filter and subset splitting
+# ---------------------------------
 #
-# The standard MLEM update :cite:p:`Shepp1982` :cite:p:`Lange1984` can be
-# written as a preconditioned gradient-descent step:
+# A mild Gaussian post-filter is applied after each SVRG epoch so that the
+# stored image matches the typical clinical workflow.
 #
-# .. math::
-#     x^+ = x - D\,\nabla_x f(x),
-#     \qquad
-#     D = \operatorname{diag}\!\left(\frac{x}{A^H \mathbf{1}}\right)
-#
-# where :math:`f(x) = \sum_i [\bar{y}_i - y_i \log \bar{y}_i]` is the
-# negative Poisson log-likelihood and :math:`A^H \mathbf{1}` is the
-# sensitivity image.  The same update is used for both non-TOF and TOF;
-# the only difference is the forward operator :math:`A`.
-
-
-def em_update(
-    x_cur: Array,
-    negpoissonlogl: C1Function,
-    adj_ones: Array,
-) -> Array:
-    """EM update re-written as preconditioned GD step"""
-    em_diag_precond = x_cur / adj_ones
-    return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
-
-
-# %%
-# Non-TOF MLEM
-# ------------
-#
-# We run ``num_epochs`` full-data MLEM iterations and store the
-# **post-filtered** image after every iteration.  Applying the same
-# post-filter (:class:`.GaussianFilterOperator`, FWHM = ``sm_fwhm_mm``)
-# at each iteration mirrors the typical clinical workflow where a
-# reconstruction is post-smoothed before evaluation.  Storing all
-# intermediate images lets us plot noise vs. iteration and observe both
-# the convergence speed and the asymptotic noise level.
+# The sinogram views are split into ``num_subsets`` disjoint groups.
+# Non-TOF data and the attenuation sinogram are 3-D (R × V × P); TOF data
+# adds a fourth TOF-bin axis.  We therefore request 3-D slices for
+# attenuation / non-TOF data indexing and 4-D slices for TOF data indexing.
 
 sm_op = parallelproj.operators.GaussianFilterOperator(
     in_shape=img_shape, sigma=sm_fwhm_mm / (2.35 * voxel_size[0])
 )
 
-full_data_fidelity_non_tof = C2AffineObjective(
-    NegPoissonLogL(y_non_tof), pet_lin_op_non_tof, contamination_non_tof
+# 3-D slices: used for non-TOF data *and* to index att_sino
+subset_views, subset_slices_nt = lor_desc.get_distributed_views_and_slices(
+    num_subsets, 3
 )
+# 4-D slices: used to index TOF data and contamination
+_, subset_slices_tof = lor_desc.get_distributed_views_and_slices(num_subsets, 4)
 
-adjoint_ones_non_tof = pet_lin_op_non_tof.adjoint(
-    xp.ones(pet_lin_op_non_tof.out_shape, dtype=xp.float32, device=dev)
-)
+# %%
+# SVRG helper functions
+# ---------------------
+#
+# These two functions implement SVRG exactly as in
+# :ref:`sphx_glr_examples_03_algorithms_00_run_mlem_osem_svrg.py`.
+# ``svrg_calc_snapshot_gradients`` computes and stores all per-subset
+# gradients at the current anchor point; ``svrg_update`` performs a single
+# variance-reduced subset step.
 
-x_mlem_non_tof = count_factor * xp.ones(img_shape, device=dev, dtype=xp.float32)
-recons_non_tof = xp.ones((num_epochs,) + img_shape, device=dev, dtype=xp.float32)
 
-for i in range(num_epochs):
-    print(f"NON-TOF MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
-    x_mlem_non_tof = em_update(
-        x_mlem_non_tof, full_data_fidelity_non_tof, adjoint_ones_non_tof
-    )
-    recons_non_tof[i, ...] = sm_op(x_mlem_non_tof)
-print()
+def em_update(
+    x_cur: Array,
+    data_fidelity: C1Function,
+    adj_ones: Array,
+) -> Array:
+    """EM update (preconditioned gradient step) used for the warm start."""
+    return x_cur - (x_cur / adj_ones) * data_fidelity.gradient(x_cur)
+
+
+def svrg_calc_snapshot_gradients(
+    x_cur: Array,
+    subset_obj_functions: Sequence[C1Function],
+) -> tuple[Array, Array]:
+    """Compute and store per-subset gradients at the anchor point."""
+    m = len(subset_obj_functions)
+    stored = xp.zeros((m,) + x_cur.shape, dtype=x_cur.dtype, device=dev)
+    for k, df in enumerate(subset_obj_functions):
+        stored[k] = df.gradient(x_cur)
+    return stored, xp.sum(stored, axis=0)
+
+
+def svrg_update(
+    x_cur: Array,
+    subset_idx: int,
+    subset_obj_functions: Sequence[C1Function],
+    stored_grads: Array,
+    full_grad: Array,
+    precond: Array,
+    step_size: float = 1.0,
+) -> Array:
+    """Single variance-reduced subset update."""
+    m = len(subset_obj_functions)
+    grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
+    approx_grad = m * (grad_k - stored_grads[subset_idx]) + full_grad
+    return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
 # %%
-# TOF MLEM
-# --------
+# Non-TOF: subset operators, warm start, and SVRG
+# ------------------------------------------------
 #
-# Identical loop but using the TOF forward operator and TOF sinogram.
-# Because the TOF update is more informative (each LOR contributes noise
-# over the kernel width ≈ 30 mm rather than the full chord ≈ 600 mm), the
-# image converges to its maximum-likelihood solution in fewer iterations.
+# One :class:`.CompositeLinearOperator` is built per subset, combining
+# the subset projector, the attenuation diagonal, and the resolution model.
+# Sensitivity images :math:`(A^k)^H \mathbf{1}` are pre-computed once and
+# summed to obtain the full :math:`A^H \mathbf{1}`.
+#
+# The warm start runs a single OSEM epoch, which moves the initial flat
+# image close enough to the solution for the SVRG preconditioner to be
+# meaningful from the very first epoch.
 
-full_data_fidelity_tof = C2AffineObjective(
-    NegPoissonLogL(y_tof), pet_lin_op_tof, contamination_tof
-)
+proj_non_tof.clear_cached_lor_endpoints()
+subset_linops_nt = []
+for i in range(num_subsets):
+    sp = copy(proj_non_tof)
+    sp.views = subset_views[i]
+    att_op_k = parallelproj.operators.ElementwiseMultiplicationOperator(
+        att_sino[subset_slices_nt[i]]
+    )
+    subset_linops_nt.append(
+        parallelproj.operators.CompositeLinearOperator([att_op_k, sp, res_model])
+    )
 
-adjoint_ones_tof = pet_lin_op_tof.adjoint(
-    xp.ones(pet_lin_op_tof.out_shape, dtype=xp.float32, device=dev)
-)
+subset_adj_ones_nt = xp.zeros((num_subsets,) + img_shape, dtype=xp.float32, device=dev)
+for k, op in enumerate(subset_linops_nt):
+    subset_adj_ones_nt[k] = op.adjoint(
+        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
+    )
+adjoint_ones_nt = xp.sum(subset_adj_ones_nt, axis=0)
 
-x_mlem_tof = count_factor * xp.ones(img_shape, device=dev, dtype=xp.float32)
+subset_fidelities_nt = [
+    C2AffineObjective(
+        NegPoissonLogL(y_non_tof[subset_slices_nt[k]]),
+        subset_linops_nt[k],
+        contamination_non_tof[subset_slices_nt[k]],
+    )
+    for k in range(num_subsets)
+]
+
+# --- warm start: 1 OSEM epoch ---
+x_nt = count_factor * xp.ones(img_shape, device=dev, dtype=xp.float32)
+for k in range(num_subsets):
+    print(f"  non-TOF warm-start subset {k + 1:03}/{num_subsets:03}", end="\r")
+    x_nt = em_update(x_nt, subset_fidelities_nt[k], subset_adj_ones_nt[k])
+print()
+x_nt_warmstart_sm = sm_op(x_nt)
+
+# --- SVRG loop ---
+recons_non_tof = xp.ones((num_epochs,) + img_shape, device=dev, dtype=xp.float32)
+svrg_precond_nt = x_nt / adjoint_ones_nt
+stored_grads_nt, full_grad_nt = None, None
+
+for epoch in range(num_epochs):
+    if epoch % 2 == 0:
+        if epoch <= 4:
+            svrg_precond_nt = x_nt / adjoint_ones_nt
+        stored_grads_nt, full_grad_nt = svrg_calc_snapshot_gradients(
+            x_nt, subset_fidelities_nt
+        )
+        x_nt = xp.clip(x_nt - svrg_precond_nt * full_grad_nt, 0, None)
+
+    for k in range(num_subsets):
+        print(
+            f"  non-TOF SVRG epoch {epoch + 1:02}/{num_epochs:02},"
+            f" subset {k + 1:03}/{num_subsets:03}",
+            end="\r",
+        )
+        x_nt = svrg_update(
+            x_nt,
+            k,
+            subset_fidelities_nt,
+            stored_grads_nt,
+            full_grad_nt,
+            svrg_precond_nt,
+            step_size=step_size,
+        )
+    recons_non_tof[epoch, ...] = sm_op(x_nt)
+print()
+
+# %%
+# TOF: subset operators, warm start, and SVRG
+# --------------------------------------------
+#
+# Identical structure to the non-TOF case.  The only differences are:
+#
+# * Each subset attenuation operator must broadcast ``att_sino`` over the
+#   TOF-bin axis (zero-copy via :func:`xp.broadcast_to`).
+# * Data and contamination are sliced with 4-D ``subset_slices_tof``.
+#
+# Because the TOF forward model localises each event to ≈ 30 mm along the
+# LOR rather than the full ≈ 600 mm chord, every gradient step is more
+# informative and the algorithm reaches its noise floor in fewer epochs.
+
+proj_tof.clear_cached_lor_endpoints()
+subset_linops_tof = []
+for i in range(num_subsets):
+    sp = copy(proj_tof)
+    sp.views = subset_views[i]
+    att_values_k = xp.broadcast_to(
+        xp.expand_dims(att_sino[subset_slices_nt[i]], axis=-1), sp.out_shape
+    )
+    att_op_k = parallelproj.operators.ElementwiseMultiplicationOperator(att_values_k)
+    subset_linops_tof.append(
+        parallelproj.operators.CompositeLinearOperator([att_op_k, sp, res_model])
+    )
+
+subset_adj_ones_tof = xp.zeros((num_subsets,) + img_shape, dtype=xp.float32, device=dev)
+for k, op in enumerate(subset_linops_tof):
+    subset_adj_ones_tof[k] = op.adjoint(
+        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
+    )
+adjoint_ones_tof = xp.sum(subset_adj_ones_tof, axis=0)
+
+subset_fidelities_tof = [
+    C2AffineObjective(
+        NegPoissonLogL(y_tof[subset_slices_tof[k]]),
+        subset_linops_tof[k],
+        contamination_tof[subset_slices_tof[k]],
+    )
+    for k in range(num_subsets)
+]
+
+# --- warm start: 1 OSEM epoch ---
+x_tof = count_factor * xp.ones(img_shape, device=dev, dtype=xp.float32)
+for k in range(num_subsets):
+    print(f"  TOF warm-start subset {k + 1:03}/{num_subsets:03}", end="\r")
+    x_tof = em_update(x_tof, subset_fidelities_tof[k], subset_adj_ones_tof[k])
+print()
+x_tof_warmstart_sm = sm_op(x_tof)
+
+# --- SVRG loop ---
 recons_tof = xp.ones((num_epochs,) + img_shape, device=dev, dtype=xp.float32)
+svrg_precond_tof = x_tof / adjoint_ones_tof
+stored_grads_tof, full_grad_tof = None, None
 
-for i in range(num_epochs):
-    print(f"TOF MLEM epoch {(i + 1):04} / {num_epochs:04}", end="\r")
-    x_mlem_tof = em_update(x_mlem_tof, full_data_fidelity_tof, adjoint_ones_tof)
-    recons_tof[i, ...] = sm_op(x_mlem_tof)
+for epoch in range(num_epochs):
+    if epoch % 2 == 0:
+        if epoch <= 4:
+            svrg_precond_tof = x_tof / adjoint_ones_tof
+        stored_grads_tof, full_grad_tof = svrg_calc_snapshot_gradients(
+            x_tof, subset_fidelities_tof
+        )
+        x_tof = xp.clip(x_tof - svrg_precond_tof * full_grad_tof, 0, None)
+
+    for k in range(num_subsets):
+        print(
+            f"  TOF SVRG epoch {epoch + 1:02}/{num_epochs:02},"
+            f" subset {k + 1:03}/{num_subsets:03}",
+            end="\r",
+        )
+        x_tof = svrg_update(
+            x_tof,
+            k,
+            subset_fidelities_tof,
+            stored_grads_tof,
+            full_grad_tof,
+            svrg_precond_tof,
+            step_size=step_size,
+        )
+    recons_tof[epoch, ...] = sm_op(x_tof)
+print()
 
 
 # %%
@@ -397,26 +557,37 @@ for i in range(num_epochs):
 
 roi_std_non_tof = np.array([float(x[:, :, 0][RHO < 25].std()) for x in recons_non_tof])
 roi_std_tof = np.array([float(x[:, :, 0][RHO < 25].std()) for x in recons_tof])
-epochs = np.arange(1, 1 + num_epochs)
+# prepend warm-start (epoch 0) so the x-axis starts at 0
+roi_std_non_tof = np.concatenate(
+    [[float(x_nt_warmstart_sm[:, :, 0][RHO < 25].std())], roi_std_non_tof]
+)
+roi_std_tof = np.concatenate(
+    [[float(x_tof_warmstart_sm[:, :, 0][RHO < 25].std())], roi_std_tof]
+)
+epochs = np.arange(0, num_epochs + 1)  # 0 = OSEM warm start
 
 # %%
 # Visualisation
 # -------------
 #
-# The four-panel figure summarises the comparison:
+# The eight-panel figure summarises the comparison:
 #
-# * **Top-left**: std.dev in the central 25 mm ROI vs. MLEM iteration for
-#   non-TOF (orange) and TOF (blue).  Note how TOF rises *and falls* faster;
-#   comparing at a fixed early iteration can give the wrong conclusion.
+# * **Top-left**: std.dev in the central 25 mm ROI vs. SVRG epoch (epoch 0
+#   is the OSEM warm start) for non-TOF (orange) and TOF (blue).  Note how
+#   TOF rises *and falls* faster; comparing at a fixed early epoch can give
+#   the wrong conclusion.
 # * **Bottom-left**: ratio of std.devs (non-TOF / TOF).  The ratio
-#   increases with iteration count and stabilises above 1, quantifying the
+#   increases with epoch count and stabilises above 1, quantifying the
 #   asymptotic noise advantage of TOF.
-# * **Top-right / bottom-right**: final smoothed images after ``num_epochs``
-#   iterations.  Visual noise in the uniform disk is lower for TOF.
+# * **2nd column**: smoothed warm-start images (epoch 0).
+# * **3rd column**: smoothed images after 1 SVRG epoch.  At this early
+#   stage TOF may look noisier than non-TOF because it has converged further.
+# * **Right column**: final smoothed images after ``num_epochs`` SVRG
+#   epochs.  Visual noise in the uniform disk is lower for TOF.
 
 ims = dict(vmin=0, vmax=xp.max(recons_non_tof), cmap="Greys")
 
-fig, ax = plt.subplots(2, 2, figsize=(6, 6), layout="constrained", sharex="col")
+fig, ax = plt.subplots(2, 4, figsize=(12, 6), layout="constrained", sharex="col")
 ax[0, 0].plot(epochs, roi_std_non_tof, label="non-TOF", color="tab:orange")
 ax[0, 0].plot(
     epochs, roi_std_tof, label=f"TOF ({fwhm_tof_mm:.0f} mm FWHM)", color="tab:blue"
@@ -424,7 +595,7 @@ ax[0, 0].plot(
 ax[0, 0].legend(fontsize=8)
 ax[1, 0].plot(epochs, roi_std_non_tof / roi_std_tof, color="tab:green")
 ax[1, 0].axhline(1.0, color="gray", ls=":", lw=0.8)
-ax[1, 0].set_xlabel("MLEM iteration")
+ax[1, 0].set_xlabel(f"SVRG epoch ({num_subsets} subsets)")
 ax[0, 0].set_ylabel("std.dev in central ROI")
 ax[1, 0].set_ylabel("std.dev ratio  (non-TOF / TOF)")
 ax[0, 0].set_title(
@@ -434,21 +605,47 @@ ax[0, 0].set_title(
 ax[0, 0].grid(ls=":")
 ax[1, 0].grid(ls=":")
 
-ax[0, 1].imshow(to_numpy_array(recons_non_tof[-1, :, :, 0]), **ims)
-ax[1, 1].imshow(to_numpy_array(recons_tof[-1, :, :, 0]), **ims)
+# warm-start images (epoch 0)
+ax[0, 1].imshow(to_numpy_array(x_nt_warmstart_sm[:, :, 0]), **ims)
+ax[1, 1].imshow(to_numpy_array(x_tof_warmstart_sm[:, :, 0]), **ims)
 ax[0, 1].set_title(
-    f"non-TOF  ({num_epochs} iter)\nstd.dev = {roi_std_non_tof[-1]:.4f}",
+    f"non-TOF  (epoch 0)\nstd.dev = {roi_std_non_tof[0]:.4f}",
     fontsize=8,
 )
 ax[1, 1].set_title(
-    f"TOF {fwhm_tof_mm:.0f} mm  ({num_epochs} iter)\nstd.dev = {roi_std_tof[-1]:.4f}",
+    f"TOF {fwhm_tof_mm:.0f} mm  (epoch 0)\nstd.dev = {roi_std_tof[0]:.4f}",
     fontsize=8,
 )
-for a in ax[:, 1]:
+
+# epoch 1 images (index 0 in recons arrays)
+ax[0, 2].imshow(to_numpy_array(recons_non_tof[0, :, :, 0]), **ims)
+ax[1, 2].imshow(to_numpy_array(recons_tof[0, :, :, 0]), **ims)
+ax[0, 2].set_title(
+    f"non-TOF  (epoch 1)\nstd.dev = {roi_std_non_tof[1]:.4f}",
+    fontsize=8,
+)
+ax[1, 2].set_title(
+    f"TOF {fwhm_tof_mm:.0f} mm  (epoch 1)\nstd.dev = {roi_std_tof[1]:.4f}",
+    fontsize=8,
+)
+
+# final-epoch images
+ax[0, 3].imshow(to_numpy_array(recons_non_tof[-1, :, :, 0]), **ims)
+ax[1, 3].imshow(to_numpy_array(recons_tof[-1, :, :, 0]), **ims)
+ax[0, 3].set_title(
+    f"non-TOF  (epoch {num_epochs})\nstd.dev = {roi_std_non_tof[-1]:.4f}",
+    fontsize=8,
+)
+ax[1, 3].set_title(
+    f"TOF {fwhm_tof_mm:.0f} mm  (epoch {num_epochs})\nstd.dev = {roi_std_tof[-1]:.4f}",
+    fontsize=8,
+)
+
+for a in ax[:, 1:].flat:
     a.set_axis_off()
 
 fig.suptitle(
-    f"TOF variance reduction — uniform cylinder Ø {2*cylinder_radius_mm:.0f} mm",
+    f"TOF variance reduction - uniform cylinder Ø {2*cylinder_radius_mm:.0f} mm - 9mm post filter",
     fontsize=9,
 )
 fig.show()
