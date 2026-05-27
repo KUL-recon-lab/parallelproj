@@ -330,6 +330,7 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         affine_transformation_matrix: Array | None = None,
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
+        phi0: float = 0.0,
     ) -> None:
         """
 
@@ -360,6 +361,10 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         ring_endpoint_ordering : RingEndpointOrdering, optional
             direction in which endpoint indices increase around the ring, by
             default ``RingEndpointOrdering.CLOCKWISE``.
+        phi0 : float, optional
+            azimuthal offset of side 0 in radians, by default 0.
+            Only applied when ``phis`` is ``None``; ignored when ``phis`` is
+            provided explicitly.
         """
 
         self._radius = radius
@@ -369,6 +374,7 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         self._ax1 = ax1
         self._lor_spacing = lor_spacing
         self._ring_endpoint_ordering = ring_endpoint_ordering
+        self._phi0 = phi0
         super().__init__(
             xp,
             dev,
@@ -379,7 +385,8 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         # angle of each "side"
         if phis is None:
             self._phis = (
-                2
+                phi0
+                + 2
                 * self.xp.pi
                 * self.xp.arange(self._num_sides, dtype=xp.float32, device=dev)
                 / self.num_sides
@@ -461,6 +468,11 @@ class RegularPolygonPETScannerModule(PETScannerModule):
     def ring_endpoint_ordering(self) -> RingEndpointOrdering:
         """direction in which endpoint indices increase around the ring"""
         return self._ring_endpoint_ordering
+
+    @property
+    def phi0(self) -> float:
+        """azimuthal offset of side 0 in radians (only applied when phis=None)"""
+        return self._phi0
 
     # abstract method from base class to be implemented
     def get_raw_lor_endpoints(self, inds: Array | None = None) -> Array:
@@ -695,6 +707,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         symmetry_axis: int,
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
+        phi0: float = 0.0,
     ) -> None:
         """
         Parameters
@@ -721,6 +734,10 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         ring_endpoint_ordering : RingEndpointOrdering, optional
             direction in which endpoint indices increase around the ring, by
             default ``RingEndpointOrdering.CLOCKWISE``.
+        phi0 : float, optional
+            azimuthal offset of side 0 in radians, by default 0.
+            Only applied when ``phis`` is ``None``; ignored when ``phis`` is
+            provided explicitly.
         """
 
         self._radius = radius
@@ -730,6 +747,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         self._symmetry_axis = symmetry_axis
         self._ring_positions = ring_positions
         self._ring_endpoint_ordering = ring_endpoint_ordering
+        self._phi0 = phi0
 
         if symmetry_axis == 0:
             self._ax0 = 2
@@ -762,6 +780,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
                     ax1=self._ax1,
                     phis=phis,
                     ring_endpoint_ordering=ring_endpoint_ordering,
+                    phi0=phi0,
                 )
             )
 
@@ -806,6 +825,11 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
     def ring_endpoint_ordering(self) -> RingEndpointOrdering:
         """direction in which endpoint indices increase around the ring"""
         return self._ring_endpoint_ordering
+
+    @property
+    def phi0(self) -> float:
+        """azimuthal offset of side 0 in radians (only applied when phis=None)"""
+        return self._phi0
 
     @property
     def all_lor_endpoints_ring_number(self) -> Array:
