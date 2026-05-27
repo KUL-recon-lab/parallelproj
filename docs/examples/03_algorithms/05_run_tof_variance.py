@@ -324,7 +324,7 @@ _, subset_slices_tof = lor_desc.get_distributed_views_and_slices(num_subsets, 4)
 # ---------------------
 #
 # These two functions implement SVRG exactly as in
-# :ref:`sphx_glr_03_algorithms_00_run_mlem_osem_svrg.py`.
+# :ref:`sphx_glr_auto_examples_03_algorithms_00_run_mlem_osem_svrg.py`.
 # ``svrg_calc_snapshot_gradients`` computes and stores all per-subset
 # gradients at the current anchor point; ``svrg_update`` performs a single
 # variance-reduced subset step.
