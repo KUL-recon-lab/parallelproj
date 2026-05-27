@@ -202,10 +202,19 @@ def test_ring_endpoint_ordering(xp: ModuleType, dev: str) -> None:
         assert s_cw.modules[0].ring_endpoint_ordering is pps.RingEndpointOrdering.CLOCKWISE
         assert s_ccw.modules[0].ring_endpoint_ordering is pps.RingEndpointOrdering.COUNTERCLOCKWISE
 
-        # CCW is the mirror image: endpoint k in CCW == endpoint (N-1-k) in CW
+        # CCW[i] maps to CW[j] where side order is reversed (keeping side 0
+        # fixed) and within-side order is also reversed:
+        #   j = ((n_sides - i//n_per_side) % n_sides) * n_per_side
+        #       + (n_per_side - 1 - i % n_per_side)
         cw_pts  = to_numpy_array(s_cw.all_lor_endpoints)
         ccw_pts = to_numpy_array(s_ccw.all_lor_endpoints)
-        assert np.allclose(cw_pts, ccw_pts[::-1], atol=1e-5)
+        n_total = n_sides * n_per_side
+        expected_indices = [
+            ((n_sides - i // n_per_side) % n_sides) * n_per_side
+            + (n_per_side - 1 - i % n_per_side)
+            for i in range(n_total)
+        ]
+        assert np.allclose(ccw_pts, cw_pts[expected_indices], atol=1e-5)
 
 
 def test_regular_polygon_pet_scanner_invalid_symmetry_axis(
