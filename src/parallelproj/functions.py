@@ -756,69 +756,89 @@ class HalfSquaredL2Deviation(C2FunctionWithConjProx):
 
 
 class LogCosh(C2Function):
-    """Sum of log-cosh values, a smooth approximation to the L1 norm.
+    """Sum of scaled log-cosh values, a smooth approximation to the L1 norm.
 
     Implements
 
     .. math::
 
-        f(x) = \\sum_i \\log(\\cosh(x_i))
+        f(x) = \\sum_i \\log\\!\\left(\\cosh\\!\\left(\\frac{x_i}{\\delta}\\right)\\right)
 
-    which satisfies :math:`f(0) = 0` and behaves like
-    :math:`\\sum_i |x_i| - n \\log 2` for large :math:`|x_i|`.
+    where :math:`\\delta > 0` is a transition scale parameter (default 1).
+    The function satisfies :math:`f(0) = 0` and has two limiting regimes:
+
+    * **Quadratic** for :math:`|x_i| \\ll \\delta`:
+      :math:`\\log(\\cosh(u)) \\approx u^2/2`, so
+      :math:`f(x) \\approx \\tfrac{1}{2\\delta^2}\\sum_i x_i^2`.
+    * **Linear** for :math:`|x_i| \\gg \\delta`:
+      :math:`f(x) \\approx \\tfrac{1}{\\delta}\\sum_i |x_i| - n\\log 2`.
 
     Gradient:
 
     .. math::
 
-        \\nabla f(x)_i = \\tanh(x_i)
+        \\nabla f(x)_i = \\frac{1}{\\delta}\\,\\tanh\\!\\left(\\frac{x_i}{\\delta}\\right)
 
     Diagonal Hessian-vector product:
 
     .. math::
 
         \\operatorname{diag}(H_f(x))_i \\cdot v_i
-        = \\operatorname{sech}^2(x_i)\\, v_i
-        = (1 - \\tanh^2(x_i))\\, v_i
+        = \\frac{1}{\\delta^2}\\,\\operatorname{sech}^2\\!\\left(\\frac{x_i}{\\delta}\\right) v_i
+        = \\frac{1 - \\tanh^2(x_i/\\delta)}{\\delta^2}\\, v_i
 
     The function value is computed via the numerically stable identity
 
     .. math::
 
-        \\log(\\cosh(x)) = |x| + \\log(1 + e^{-2|x|}) - \\log 2
+        \\log(\\cosh(z)) = |z| + \\log(1 + e^{-2|z|}) - \\log 2, \\quad z = x/\\delta
 
-    which avoids the overflow that :math:`\\cosh(x) = (e^x + e^{-x})/2`
-    would cause for large :math:`|x|`.
+    which avoids the overflow that :math:`\\cosh(z) = (e^z + e^{-z})/2`
+    would cause for large :math:`|z|`.
 
     Parameters
     ----------
+    delta : float or None, optional
+        Transition scale :math:`\\delta > 0`.  ``None`` (default) is
+        equivalent to :math:`\\delta = 1` but skips the division entirely.
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     """
 
-    def __init__(self, beta: float = 1.0):
+    def __init__(self, delta: float | None = None, beta: float = 1.0):
+        self._delta = delta
         self._log2 = math.log(2)
         super().__init__(beta)
 
+    @property
+    def delta(self) -> float | None:
+        """Transition scale :math:`\\delta`."""
+        return self._delta
+
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
-        ax = xp.abs(x)
+        z = x if self._delta is None else x / self._delta
+        az = xp.abs(z)
         return (
-            float(xp.sum(ax + xp.log(1 + xp.exp(-2 * ax))))
+            float(xp.sum(az + xp.log(1 + xp.exp(-2 * az))))
             - math.prod(x.shape) * self._log2
         )
 
     def _gradient(self, x: Array) -> Array:
         xp = get_namespace(x)
-        return xp.tanh(x)
+        z = x if self._delta is None else x / self._delta
+        t = xp.tanh(z)
+        return t if self._delta is None else t / self._delta
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         return self._call(x), self._gradient(x)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         xp = get_namespace(x)
-        t = xp.tanh(x)
-        return (1 - t**2) * v
+        z = x if self._delta is None else x / self._delta
+        t = xp.tanh(z)
+        h = 1 - t**2
+        return h * v if self._delta is None else h * v / self._delta**2
 
 
 class SumC1Function(C1Function):
