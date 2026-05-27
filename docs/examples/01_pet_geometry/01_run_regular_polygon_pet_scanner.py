@@ -137,3 +137,54 @@ fig2 = plt.figure(figsize=(8, 8), tight_layout=True)
 ax2a = fig2.add_subplot(111, projection="3d")
 open_scanner.show_lor_endpoints(ax2a)
 fig2.show()
+
+# %%
+# Endpoint ordering: clockwise vs counterclockwise
+# ------------------------------------------------
+#
+# By default, endpoint indices increase **clockwise** when the ring is viewed
+# from the positive symmetry-axis direction.
+# :class:`.RingEndpointOrdering` lets you switch to **counterclockwise** ordering.
+# The two conventions produce the same physical detector positions, but with
+# reversed index assignment — endpoint ``k`` in the CCW scanner occupies the
+# same position as endpoint ``N-1-k`` in the CW scanner.
+
+cw_scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=65.0,
+    num_sides=8,
+    num_lor_endpoints_per_side=2,
+    lor_spacing=20.0,
+    ring_positions=xp.asarray([0.0], device=dev),
+    symmetry_axis=2,
+    ring_endpoint_ordering=parallelproj.pet_scanners.RingEndpointOrdering.CLOCKWISE,
+)
+
+ccw_scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=65.0,
+    num_sides=8,
+    num_lor_endpoints_per_side=2,
+    lor_spacing=20.0,
+    ring_positions=xp.asarray([0.0], device=dev),
+    symmetry_axis=2,
+    ring_endpoint_ordering=parallelproj.pet_scanners.RingEndpointOrdering.COUNTERCLOCKWISE,
+)
+
+fig3, axes = plt.subplots(
+    1, 2, figsize=(10, 5), subplot_kw={"projection": "3d"}, layout="constrained"
+)
+
+for ax, scanner, title in zip(
+    axes,
+    [cw_scanner, ccw_scanner],
+    ["CLOCKWISE (default)", "COUNTERCLOCKWISE"],
+):
+    scanner.show_lor_endpoints(ax, show_linear_index=True, annotation_fontsize=10)
+    ax.view_init(elev=90, azim=-90)
+    ax.set_title(f"ring_endpoint_ordering = {title}\n(symmetry_axis=2, viewed from +z)")
+
+fig3.suptitle("Endpoint index ordering conventions", fontsize=12)
+fig3.show()

@@ -164,6 +164,50 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     assert xp.all(scanner2.modules[0].phis == phis)
 
 
+def test_ring_endpoint_ordering(xp: ModuleType, dev: str) -> None:
+    """RingEndpointOrdering property, CCW branch, and reversal invariant."""
+    import numpy as np
+    from parallelproj import to_numpy_array
+
+    n_sides = 8
+    n_per_side = 2
+
+    for symmetry_axis in [0, 1, 2]:
+        s_cw = pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=1.0,
+            num_sides=n_sides,
+            num_lor_endpoints_per_side=n_per_side,
+            lor_spacing=0.1,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=symmetry_axis,
+            ring_endpoint_ordering=pps.RingEndpointOrdering.CLOCKWISE,
+        )
+        s_ccw = pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=1.0,
+            num_sides=n_sides,
+            num_lor_endpoints_per_side=n_per_side,
+            lor_spacing=0.1,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=symmetry_axis,
+            ring_endpoint_ordering=pps.RingEndpointOrdering.COUNTERCLOCKWISE,
+        )
+
+        # properties are readable and propagate to the module level
+        assert s_cw.ring_endpoint_ordering is pps.RingEndpointOrdering.CLOCKWISE
+        assert s_ccw.ring_endpoint_ordering is pps.RingEndpointOrdering.COUNTERCLOCKWISE
+        assert s_cw.modules[0].ring_endpoint_ordering is pps.RingEndpointOrdering.CLOCKWISE
+        assert s_ccw.modules[0].ring_endpoint_ordering is pps.RingEndpointOrdering.COUNTERCLOCKWISE
+
+        # CCW is the mirror image: endpoint k in CCW == endpoint (N-1-k) in CW
+        cw_pts  = to_numpy_array(s_cw.all_lor_endpoints)
+        ccw_pts = to_numpy_array(s_ccw.all_lor_endpoints)
+        assert np.allclose(cw_pts, ccw_pts[::-1], atol=1e-5)
+
+
 def test_regular_polygon_pet_scanner_invalid_symmetry_axis(
     xp: ModuleType, dev: str
 ) -> None:
