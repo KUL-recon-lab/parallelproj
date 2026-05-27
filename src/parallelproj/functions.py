@@ -762,36 +762,41 @@ class LogCosh(C2Function):
 
     .. math::
 
-        f(x) = \\sum_i \\log\\!\\left(\\cosh\\!\\left(\\frac{x_i}{\\delta}\\right)\\right)
+        f(x) = \\delta \\sum_i \\log\\!\\left(\\cosh\\!\\left(\\frac{x_i}{\\delta}\\right)\\right)
 
     where :math:`\\delta > 0` is a transition scale parameter (default 1).
     The function satisfies :math:`f(0) = 0` and has two limiting regimes:
 
     * **Quadratic** for :math:`|x_i| \\ll \\delta`:
-      :math:`\\log(\\cosh(u)) \\approx u^2/2`, so
-      :math:`f(x) \\approx \\tfrac{1}{2\\delta^2}\\sum_i x_i^2`.
+      :math:`\\delta\\log(\\cosh(u)) \\approx u^2/2`, so
+      :math:`f(x) \\approx \\tfrac{1}{2\\delta}\\sum_i x_i^2`.
     * **Linear** for :math:`|x_i| \\gg \\delta`:
-      :math:`f(x) \\approx \\tfrac{1}{\\delta}\\sum_i |x_i| - n\\log 2`.
+      :math:`f(x) \\approx \\sum_i |x_i| - n\\,\\delta\\log 2 \\approx \\sum_i |x_i|`.
+
+    The :math:`\\delta` prefactor ensures the asymptotic slope equals 1
+    regardless of :math:`\\delta`, so the transition scale and the gradient
+    magnitude at saturation are decoupled.
 
     Gradient:
 
     .. math::
 
-        \\nabla f(x)_i = \\frac{1}{\\delta}\\,\\tanh\\!\\left(\\frac{x_i}{\\delta}\\right)
+        \\nabla f(x)_i = \\tanh\\!\\left(\\frac{x_i}{\\delta}\\right)
 
     Diagonal Hessian-vector product:
 
     .. math::
 
         \\operatorname{diag}(H_f(x))_i \\cdot v_i
-        = \\frac{1}{\\delta^2}\\,\\operatorname{sech}^2\\!\\left(\\frac{x_i}{\\delta}\\right) v_i
-        = \\frac{1 - \\tanh^2(x_i/\\delta)}{\\delta^2}\\, v_i
+        = \\frac{1}{\\delta}\\,\\operatorname{sech}^2\\!\\left(\\frac{x_i}{\\delta}\\right) v_i
+        = \\frac{1 - \\tanh^2(x_i/\\delta)}{\\delta}\\, v_i
 
     The function value is computed via the numerically stable identity
 
     .. math::
 
-        \\log(\\cosh(z)) = |z| + \\log(1 + e^{-2|z|}) - \\log 2, \\quad z = x/\\delta
+        \\delta\\log(\\cosh(z)) = \\delta\\bigl(|z| + \\log(1 + e^{-2|z|}) - \\log 2\\bigr),
+        \\quad z = x/\\delta
 
     which avoids the overflow that :math:`\\cosh(z) = (e^z + e^{-z})/2`
     would cause for large :math:`|z|`.
@@ -819,26 +824,27 @@ class LogCosh(C2Function):
         xp = get_namespace(x)
         z = x if self._delta is None else x / self._delta
         az = xp.abs(z)
-        return (
-            float(xp.sum(az + xp.log(1 + xp.exp(-2 * az))))
-            - math.prod(x.shape) * self._log2
-        )
+        raw = float(xp.sum(az + xp.log(1 + xp.exp(-2 * az)))) - math.prod(x.shape) * self._log2
+        return raw if self._delta is None else self._delta * raw
 
     def _gradient(self, x: Array) -> Array:
         xp = get_namespace(x)
         z = x if self._delta is None else x / self._delta
-        t = xp.tanh(z)
-        return t if self._delta is None else t / self._delta
+        return xp.tanh(z)
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
-        return self._call(x), self._gradient(x)
+        xp = get_namespace(x)
+        z = x if self._delta is None else x / self._delta
+        az = xp.abs(z)
+        raw = float(xp.sum(az + xp.log(1 + xp.exp(-2 * az)))) - math.prod(x.shape) * self._log2
+        return (raw if self._delta is None else self._delta * raw), xp.tanh(z)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         xp = get_namespace(x)
         z = x if self._delta is None else x / self._delta
         t = xp.tanh(z)
         h = 1 - t**2
-        return h * v if self._delta is None else h * v / self._delta**2
+        return h * v if self._delta is None else h * v / self._delta
 
 
 class SumC1Function(C1Function):

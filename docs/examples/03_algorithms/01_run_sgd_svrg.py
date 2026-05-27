@@ -13,14 +13,22 @@ for minimising the regularised negative Poisson log-likelihood
 where the edge-preserving logcosh penalty is
 
 .. math::
-    R(x) = \\sum_i \\log\\!\\cosh\\!\\left(\\frac{(Gx)_i}{\\delta}\\right)
+    R(x) = \\delta \\sum_i \\log\\!\\cosh\\!\\left(\\frac{(Gx)_i}{\\delta}\\right)
 
-and :math:`G` is the finite forward-difference operator.  The scale
-:math:`\\delta` sets the transition between the quadratic regime
-(:math:`|(Gx)_i| \\ll \\delta`) and the linear (L1-like) regime
-(:math:`|(Gx)_i| \\gg \\delta`).  Gradients at true edges are placed
-in the linear regime by choosing :math:`\\delta` well below the typical
-edge gradient in the ground truth image.
+and :math:`G` is the finite forward-difference operator.  The :math:`\\delta`
+prefactor ensures the asymptotic gradient magnitude equals 1 regardless of
+:math:`\\delta`, so the regularisation strength :math:`\\beta` retains the
+same meaning across different choices of :math:`\\delta`.  The scale
+:math:`\\delta` itself controls the transition between two regimes:
+
+* **Quadratic** for :math:`|(Gx)_i| \\ll \\delta`:
+  :math:`R(x) \\approx \\tfrac{1}{2\\delta}\\|Gx\\|_2^2`.
+* **Linear** for :math:`|(Gx)_i| \\gg \\delta`:
+  :math:`R(x) \\approx \\|Gx\\|_1 - n\\,\\delta\\log 2 \\approx \\|Gx\\|_1`.
+
+Setting :math:`\\delta` well below the typical edge gradient places true
+edges in the linear regime (edge-preserving) while penalising smooth-region
+deviations quadratically.
 The objective is decomposed into :math:`m` subset functions
 
 .. math::
@@ -85,7 +93,7 @@ num_subsets = 12
 num_epochs = (120 if dev == "cpu" else 240) // num_subsets
 
 # regularisation weight beta
-beta = 0.3
+beta = 1.0
 # delta value relative to max of ground truth image for logcosh prior
 delta_rel = 0.1
 
@@ -250,7 +258,8 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # Regularisation and subset objective functions
 # ---------------------------------------------
 #
-# The logcosh penalty :math:`R(x) = \sum_i \log\cosh((Gx)_i/\delta)` is
+# The logcosh penalty
+# :math:`R(x) = \delta \sum_i \log\cosh\!\left((Gx)_i/\delta\right)` is
 # built from the :class:`.FiniteForwardDifference` operator :math:`G` and
 # :class:`.LogCosh`.
 # The full regulariser ``reg`` (weight :math:`\beta`) is used only for
@@ -262,10 +271,11 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # is formed by adding a :class:`.LogCosh` scaled by :math:`\beta / m` to
 # the subset data fidelity, so that :math:`\sum_k f_k(x) = F(x)`.
 #
-# ``delta`` is set to one third of the median nonzero finite-difference
-# magnitude in the ground truth image.  This places typical edge gradients
-# (~3× delta) firmly in the linear regime of logcosh while smooth-region
-# gradients (~0) remain quadratic.
+# ``delta`` is set to ``delta_rel`` times the maximum of the ground truth
+# image.  With ``delta_rel = 0.1`` edges with gradient equal to the image
+# maximum have :math:`|(Gx)|/\delta = 10`, placing them firmly in the
+# linear regime (:math:`\tanh(10) \approx 1`), while smooth-region
+# gradients near zero remain quadratic.
 
 G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
 

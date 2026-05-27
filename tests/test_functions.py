@@ -335,6 +335,11 @@ _V_LC_NP = _np.asarray([1.0, -1.0, 2.0])
 _DELTA = 2.0
 
 
+def test_log_cosh_delta_property(xp: ModuleType, dev: str):
+    assert ppf.LogCosh().delta is None
+    assert ppf.LogCosh(delta=_DELTA).delta == _DELTA
+
+
 def test_log_cosh_call_at_zero(xp: ModuleType, dev: str):
     """f(0) must be exactly (up to float rounding) zero for any delta."""
     x = xp.asarray(_np.zeros(3), device=dev)
@@ -350,7 +355,7 @@ def test_log_cosh_call(xp: ModuleType, dev: str):
     assert abs(f(x) - expected) < 1e-5
 
     f_d = ppf.LogCosh(delta=_DELTA)
-    expected_d = float(_np.sum(_np.log(_np.cosh(_X_LC_NP / _DELTA))))
+    expected_d = float(_DELTA * _np.sum(_np.log(_np.cosh(_X_LC_NP / _DELTA))))
     assert abs(f_d(x) - expected_d) < 1e-5
 
 
@@ -384,7 +389,7 @@ def test_log_cosh_hessian_diag_vec_prod(xp: ModuleType, dev: str):
 
     f_d = ppf.LogCosh(delta=_DELTA)
     expected_d = xp.asarray(
-        (1 - _np.tanh(_X_LC_NP / _DELTA) ** 2) / _DELTA**2 * _V_LC_NP, device=dev
+        (1 - _np.tanh(_X_LC_NP / _DELTA) ** 2) / _DELTA * _V_LC_NP, device=dev
     )
     assert allclose(f_d.hessian_diag_vec_prod(x, v), expected_d, atol=1e-5)
 
@@ -409,7 +414,7 @@ def test_log_cosh_overflow_safe(xp: ModuleType, dev: str):
     assert all(xp.isfinite(f.gradient(x)))
 
     f_d = ppf.LogCosh(delta=0.5)
-    expected_d = 2 * (100.0 / 0.5 - math.log(2.0))
+    expected_d = 2 * (100.0 - 0.5 * math.log(2.0))
     assert abs(f_d(x) - expected_d) < 1e-1
     assert all(xp.isfinite(f_d.gradient(x)))
 
