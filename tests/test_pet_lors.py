@@ -347,6 +347,63 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     _check_plane(46, 9.5, 1.5, 4, -1)
 
 
+def test_zig_zag_order(xp: ModuleType, dev: str) -> None:
+    """zig_zag_order property and START_FIRST branch are exercised."""
+    import numpy as np
+
+    num_rings = 1
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=100.0,
+        num_sides=8,
+        num_lor_endpoints_per_side=1,
+        lor_spacing=1.0,
+        ring_positions=xp.asarray([0.0], device=dev),
+        symmetry_axis=2,
+    )
+
+    lor_ef = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        radial_trim=0,
+        zig_zag_order=ppl.SinogramZigZagOrder.END_FIRST,
+    )
+    lor_sf = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        radial_trim=0,
+        zig_zag_order=ppl.SinogramZigZagOrder.START_FIRST,
+    )
+
+    # property is readable and returns the correct enum value
+    assert lor_ef.zig_zag_order is ppl.SinogramZigZagOrder.END_FIRST
+    assert lor_sf.zig_zag_order is ppl.SinogramZigZagOrder.START_FIRST
+
+    # both share the same sinogram shape
+    assert lor_ef.spatial_sinogram_shape == lor_sf.spatial_sinogram_shape
+
+    # view 0: END_FIRST has end step first, START_FIRST has start step first
+    # n=8: END_FIRST pairs: (0,7),(0,6),(1,6),...  START_FIRST: (0,7),(1,7),(1,6),...
+    ef_start = to_numpy_array(lor_ef.start_in_ring_index[0, :])
+    ef_end = to_numpy_array(lor_ef.end_in_ring_index[0, :])
+    sf_start = to_numpy_array(lor_sf.start_in_ring_index[0, :])
+    sf_end = to_numpy_array(lor_sf.end_in_ring_index[0, :])
+
+    # first radial bin is the same for both (central LOR)
+    assert int(ef_start[0]) == int(sf_start[0])
+    assert int(ef_end[0]) == int(sf_end[0])
+
+    # second radial bin differs: END_FIRST keeps start, advances end;
+    # START_FIRST advances start, keeps end
+    assert int(ef_start[1]) == int(ef_start[0])  # start unchanged
+    assert int(sf_end[1]) == int(sf_end[0])       # end unchanged
+    assert int(ef_end[1]) != int(ef_end[0])        # end stepped
+    assert int(sf_start[1]) != int(sf_start[0])   # start stepped
+
+    # the two conventions produce different index arrays
+    assert not np.array_equal(ef_start, sf_start)
+    assert not np.array_equal(ef_end, sf_end)
+
+
 def test_show_michelogram(xp: ModuleType, dev: str) -> None:
     num_rings = 3
     scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings, symmetry_axis=2)

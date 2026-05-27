@@ -41,6 +41,28 @@ class SinogramSpatialAxisOrder(enum.Enum):
     """[plane,view,radial]"""
 
 
+class SinogramZigZagOrder(enum.Enum):
+    """Zig-zag ordering of in-ring detector pairs for each sinogram view.
+
+    For a scanner with :math:`n` detector endpoints per ring and view index 0,
+    the two variants differ in which detector (start or end) steps first as the
+    radial bin index increases from the central LOR outward.
+
+    ``END_FIRST``
+        The *end* detector steps first for each new radial pair.
+        Pairs (start, end) at view 0: (0,n-1), (0,n-2), (1,n-2), (1,n-3), …
+
+    ``START_FIRST``
+        The *start* detector steps first for each new radial pair.
+        Pairs (start, end) at view 0: (0,n-1), (1,n-1), (1,n-2), (2,n-2), …
+    """
+
+    END_FIRST = enum.auto()
+    """End crystal steps first (default, historically used convention)."""
+    START_FIRST = enum.auto()
+    """Start crystal steps first."""
+
+
 class Michelogram:
     """Axial plane layout for a cylindrical PET scanner under odd span.
 
@@ -1012,6 +1034,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         michelogram: Michelogram | None = None,
         radial_trim: int = 3,
         sinogram_order: SinogramSpatialAxisOrder = SinogramSpatialAxisOrder.RVP,
+        zig_zag_order: SinogramZigZagOrder = SinogramZigZagOrder.END_FIRST,
     ) -> None:
         """
 
@@ -1032,6 +1055,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         sinogram_order : SinogramSpatialAxisOrder, optional
             the order of the sinogram axes.  Defaults to
             ``SinogramSpatialAxisOrder.RVP``.
+        zig_zag_order : SinogramZigZagOrder, optional
+            the zig-zag ordering convention for in-ring detector pairs.
+            Defaults to ``SinogramZigZagOrder.END_FIRST``.
         """
 
         super().__init__(scanner)
@@ -1058,6 +1084,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
         self._sinogram_order = sinogram_order
+        self._zig_zag_order = zig_zag_order
 
         # declare all attributes set by the setup methods so they are
         # visible in __init__
@@ -1179,6 +1206,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self._sinogram_order
 
     @property
+    def zig_zag_order(self) -> SinogramZigZagOrder:
+        """the zig-zag ordering convention for in-ring detector pairs"""
+        return self._zig_zag_order
+
+    @property
     def plane_axis_num(self) -> int:
         """the axis number of the plane axis"""
         return self.sinogram_order.name.find("P")
@@ -1273,21 +1305,34 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             (self._num_views, self._num_rad), dtype=self.xp.int32, device=self.dev
         )
 
+        # slice for radial trimming; -0 == 0 in Python so guard explicitly
+        trim = self._radial_trim
+        rad_slc = slice(trim, -trim if trim > 0 else None)
+
         for view in np.arange(self._num_views):
+            if self._zig_zag_order is SinogramZigZagOrder.END_FIRST:
+                # end crystal steps first: (0,n-1),(0,n-2),(1,n-2),(1,n-3),...
+                start_seq = self.xp.concat(
+                    (self.xp.arange(m) // 2, self.xp.asarray([n // 2]))
+                )
+                end_seq = self.xp.concat(
+                    (self.xp.asarray([-1]), -((self.xp.arange(m) + 4) // 2))
+                )
+            else:
+                # start crystal steps first: (0,n-1),(1,n-1),(1,n-2),(2,n-2),...
+                start_seq = self.xp.concat(
+                    ((self.xp.arange(m) + 1) // 2, self.xp.asarray([n // 2]))
+                )
+                end_seq = self.xp.concat(
+                    (self.xp.asarray([-1]), -((self.xp.arange(m) + 3) // 2))
+                )
+
             self._start_in_ring_index[view, :] = self.xp.astype(
-                (
-                    self.xp.concat((self.xp.arange(m) // 2, self.xp.asarray([n // 2])))
-                    - int(view)
-                )[self._radial_trim : -self._radial_trim],
+                (start_seq - int(view))[rad_slc],
                 self.xp.int32,
             )
             self._end_in_ring_index[view, :] = self.xp.astype(
-                (
-                    self.xp.concat(
-                        (self.xp.asarray([-1]), -((self.xp.arange(m) + 4) // 2))
-                    )
-                    - int(view)
-                )[self._radial_trim : -self._radial_trim],
+                (end_seq - int(view))[rad_slc],
                 self.xp.int32,
             )
 
