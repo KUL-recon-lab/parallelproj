@@ -1,3 +1,4 @@
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
@@ -592,10 +593,7 @@ class NegPoissonLogLSafe(C2FunctionWithConjProx):
         safe_x = xp.where(self._mask, x, xp.ones_like(x))
         return float(
             xp.sum(
-                x
-                - xp.where(
-                    self._mask, self._data * xp.log(safe_x), xp.zeros_like(x)
-                )
+                x - xp.where(self._mask, self._data * xp.log(safe_x), xp.zeros_like(x))
             )
         )
 
@@ -607,9 +605,7 @@ class NegPoissonLogLSafe(C2FunctionWithConjProx):
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         xp = get_namespace(x)
         safe_x = xp.where(self._mask, x, xp.ones_like(x))
-        return (
-            xp.where(self._mask, self._data / (safe_x**2), xp.zeros_like(x)) * v
-        )
+        return xp.where(self._mask, self._data / (safe_x**2), xp.zeros_like(x)) * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate, safe for virtual bins.
@@ -757,6 +753,72 @@ class HalfSquaredL2Deviation(C2FunctionWithConjProx):
         if self._weights is None:
             return numerator / (1 + sigma)
         return self._weights * numerator / (self._weights + sigma)
+
+
+class LogCosh(C2Function):
+    """Sum of log-cosh values, a smooth approximation to the L1 norm.
+
+    Implements
+
+    .. math::
+
+        f(x) = \\sum_i \\log(\\cosh(x_i))
+
+    which satisfies :math:`f(0) = 0` and behaves like
+    :math:`\\sum_i |x_i| - n \\log 2` for large :math:`|x_i|`.
+
+    Gradient:
+
+    .. math::
+
+        \\nabla f(x)_i = \\tanh(x_i)
+
+    Diagonal Hessian-vector product:
+
+    .. math::
+
+        \\operatorname{diag}(H_f(x))_i \\cdot v_i
+        = \\operatorname{sech}^2(x_i)\\, v_i
+        = (1 - \\tanh^2(x_i))\\, v_i
+
+    The function value is computed via the numerically stable identity
+
+    .. math::
+
+        \\log(\\cosh(x)) = |x| + \\log(1 + e^{-2|x|}) - \\log 2
+
+    which avoids the overflow that :math:`\\cosh(x) = (e^x + e^{-x})/2`
+    would cause for large :math:`|x|`.
+
+    Parameters
+    ----------
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    """
+
+    def __init__(self, beta: float = 1.0):
+        self._log2 = math.log(2)
+        super().__init__(beta)
+
+    def _call(self, x: Array) -> float:
+        xp = get_namespace(x)
+        ax = xp.abs(x)
+        return (
+            float(xp.sum(ax + xp.log(1 + xp.exp(-2 * ax))))
+            - math.prod(x.shape) * self._log2
+        )
+
+    def _gradient(self, x: Array) -> Array:
+        xp = get_namespace(x)
+        return xp.tanh(x)
+
+    def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
+        return self._call(x), self._gradient(x)
+
+    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        xp = get_namespace(x)
+        t = xp.tanh(x)
+        return (1 - t**2) * v
 
 
 class SumC1Function(C1Function):
