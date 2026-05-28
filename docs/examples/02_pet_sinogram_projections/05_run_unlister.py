@@ -78,8 +78,12 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-print(f"Scanner  : {scanner.num_lor_endpoints_per_ring} crystals/ring × {scanner.num_rings} rings")
-print(f"Sinogram : {lor_desc.spatial_sinogram_shape}  (num_rad × num_views × num_planes)")
+print(
+    f"Scanner  : {scanner.num_lor_endpoints_per_ring} crystals/ring × {scanner.num_rings} rings"
+)
+print(
+    f"Sinogram : {lor_desc.spatial_sinogram_shape}  (num_rad × num_views × num_planes)"
+)
 
 # %%
 # Simulate non-TOF PET data
@@ -98,23 +102,30 @@ y_span1 = xp.asarray(
 )
 
 total_counts = int(xp.sum(y_span1))
-print(f"\nNon-TOF span-1 sinogram : shape={tuple(y_span1.shape)}, total counts={total_counts}")
+print(
+    f"\nNon-TOF span-1 sinogram : shape={tuple(y_span1.shape)}, total counts={total_counts}"
+)
 
 # %%
 # Non-TOF round-trip (span-1)
 # ---------------------------
 #
-# Convert the integer sinogram to crystal-index events and unlist back into
-# span-1.  With ``radial_trim=10`` the scanner has no self-pair bins, so
-# every count is round-tripped exactly.
+# Convert the integer sinogram to crystal-index events, move them to the
+# active device, then unlist.  The returned sinogram lives on the same
+# device as the events — no device transfer needed for the comparison.
+#
+# With ``radial_trim=10`` the scanner has no self-pair bins, so every count
+# is round-tripped exactly.
 
-events = proj.convert_sinogram_to_crystal_index_events(y_span1, shuffle=True)
-print(f"\nNumber of events : {len(events)}")
+events = xp.asarray(
+    proj.convert_sinogram_to_crystal_index_events(y_span1, shuffle=True),
+    device=dev,
+)
+print(f"\nNumber of events : {events.shape[0]}")
 
 sino_unlisted = regular_polygon_events_to_sinogram(lor_desc, events)
-y_span1_np = to_numpy_array(y_span1)
 
-assert np.array_equal(sino_unlisted, y_span1_np), "Span-1 round-trip failed"
+assert bool(xp.all(sino_unlisted == y_span1)), "Span-1 round-trip failed"
 print("Span-1 round-trip: OK")
 
 # %%
@@ -130,10 +141,10 @@ print("Span-1 round-trip: OK")
 op_compress = ppl.SinogramAxialCompressionOperator(lor_desc, target_span=3)
 span3_desc = op_compress.out_lor_descriptor
 
-y_span3_np = to_numpy_array(op_compress(xp.astype(y_span1, xp.float32))).astype(np.int32)
+y_span3 = xp.astype(op_compress(xp.astype(y_span1, xp.float32)), xp.int32)
 sino_span3_unlisted = regular_polygon_events_to_sinogram(span3_desc, events)
 
-assert np.array_equal(sino_span3_unlisted, y_span3_np), "Span-3 round-trip failed"
+assert bool(xp.all(sino_span3_unlisted == y_span3)), "Span-3 round-trip failed"
 print("Span-3 round-trip: OK")
 
 # %%
@@ -156,7 +167,9 @@ y_tof = xp.asarray(
     dtype=xp.int32,
 )
 
-print(f"\nTOF sinogram shape : {tuple(y_tof.shape)},  total counts={int(xp.sum(y_tof))}")
+print(
+    f"\nTOF sinogram shape : {tuple(y_tof.shape)},  total counts={int(xp.sum(y_tof))}"
+)
 
 # %%
 # TOF round-trip (span-1)
@@ -166,15 +179,17 @@ print(f"\nTOF sinogram shape : {tuple(y_tof.shape)},  total counts={int(xp.sum(y
 # dimension automatically (4-D input) and returns ``(d1, r1, d2, r2, tof_bin)``
 # rows, where bin 0 is the bin closest to d1 (the xstart crystal).
 
-events_tof = proj.convert_sinogram_to_crystal_index_events(y_tof, shuffle=True)
-print(f"\nNumber of TOF events : {len(events_tof)}")
+events_tof = xp.asarray(
+    proj.convert_sinogram_to_crystal_index_events(y_tof, shuffle=True),
+    device=dev,
+)
+print(f"\nNumber of TOF events : {events_tof.shape[0]}")
 
 sino_tof_unlisted = regular_polygon_events_to_sinogram(
     lor_desc, events_tof, num_tof_bins=num_tof_bins
 )
-y_tof_np = to_numpy_array(y_tof)
 
-assert np.array_equal(sino_tof_unlisted, y_tof_np), "TOF round-trip failed"
+assert bool(xp.all(sino_tof_unlisted == y_tof)), "TOF round-trip failed"
 print("TOF round-trip: OK")
 
 # %%
@@ -187,14 +202,14 @@ print("TOF round-trip: OK")
 
 # %%
 _, _, _w1 = show_vol_cuts(
-    y_span1_np,
+    to_numpy_array(y_span1),
     axis_labels=("rad", "view", "plane"),
     fig_title="y_span1  (non-TOF span-1)",
 )
 
 # %%
 _, _, _w2 = show_vol_cuts(
-    y_span3_np,
+    to_numpy_array(y_span3),
     axis_labels=("rad", "view", "plane"),
     fig_title="y_span3  (span-3 via SinogramAxialCompressionOperator)",
 )
@@ -203,7 +218,7 @@ _, _, _w2 = show_vol_cuts(
 # Transpose from (rad, view, plane, tof) → (tof, rad, view, plane) so the
 # full-width slider browses TOF bins.
 _, _, _w3 = show_vol_cuts(
-    y_tof_np.transpose(3, 0, 1, 2),
+    to_numpy_array(y_tof).transpose(3, 0, 1, 2),
     axis_labels=("tof", "rad", "view", "plane"),
     fig_title="y_tof  (TOF span-1)",
 )

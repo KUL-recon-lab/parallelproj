@@ -8,9 +8,25 @@ from types import ModuleType
 import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
 from parallelproj import to_numpy_array
-from parallelproj.unlist import _build_inring_luts, regular_polygon_events_to_sinogram
+from parallelproj.unlist import _build_inring_luts, regular_polygon_events_to_sinogram as _sinogram_native
 
-from .config import pytestmark  # noqa: F401  (pytest picks this up as a module marker)
+def regular_polygon_events_to_sinogram(*args, **kwargs):
+    """Thin wrapper that always returns a numpy array for test assertions."""
+    return to_numpy_array(_sinogram_native(*args, **kwargs))
+
+from .config import xp_dev_list
+
+# Only run against backends that provide bincount (numpy, torch, cupy).
+# array_api_strict is intentionally excluded; a dedicated test below checks
+# that NotImplementedError is raised for backends without bincount.
+pytestmark = pytest.mark.parametrize(
+    "xp,dev", [(xp, dev) for xp, dev in xp_dev_list if hasattr(xp, "bincount")]
+)
+
+# Backends that do NOT have bincount — used by the NotImplementedError test.
+_no_bincount_xp_dev = [
+    (xp, dev) for xp, dev in xp_dev_list if not hasattr(xp, "bincount")
+]
 
 
 # ---------------------------------------------------------------------------
@@ -520,4 +536,21 @@ def test_error_1d_events(xp: ModuleType, dev: str) -> None:
     desc = _lor_desc(scanner)
     events = xp.asarray([0, 0, 1, 0], dtype=xp.int32, device=dev)
     with pytest.raises(ValueError, match="2D"):
+        regular_polygon_events_to_sinogram(desc, events)
+
+
+@pytest.mark.skipif(not _no_bincount_xp_dev, reason="no non-bincount backends available")
+def test_error_no_bincount_backend(xp: ModuleType, dev: str) -> None:  # noqa: ARG001
+    """Backends without bincount must raise NotImplementedError.
+
+    The module-level (xp, dev) are from a bincount backend and are ignored;
+    the test unconditionally exercises array_api_strict.
+    """
+    import array_api_strict as xp_strict
+
+    import numpy as np_plain
+    scanner = _small_scanner(np_plain, "cpu")
+    desc = _lor_desc(scanner)
+    events = xp_strict.asarray([[0, 0, 1, 0]])
+    with pytest.raises(NotImplementedError, match="bincount"):
         regular_polygon_events_to_sinogram(desc, events)

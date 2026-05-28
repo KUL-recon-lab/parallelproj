@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import array_api_compat
 
-from ._backend import to_numpy_array
+from ._backend import Array, to_numpy_array
 from .pet_lors import RegularPolygonPETLORDescriptor
 
 if TYPE_CHECKING:
@@ -66,7 +67,7 @@ def regular_polygon_events_to_sinogram(
     events: Any,
     num_tof_bins: int | None = None,
     tof_bin_sign: int = 1,
-) -> np.ndarray:
+) -> Array:
     """Histogram listmode events into a sinogram.
 
     Parameters
@@ -102,20 +103,38 @@ def regular_polygon_events_to_sinogram(
 
     Returns
     -------
-    sinogram : np.ndarray
-        Histogram sinogram.  Shape is ``spatial_sinogram_shape`` for non-TOF
-        or ``(*spatial_sinogram_shape, num_tof_bins)`` for TOF.
+    sinogram : Array
+        Histogram sinogram on the same device as ``events``.
+        Shape is ``spatial_sinogram_shape`` for non-TOF or
+        ``(*spatial_sinogram_shape, num_tof_bins)`` for TOF.
         Dtype is ``int32``.
+
+    Raises
+    ------
+    NotImplementedError
+        If the array backend of ``events`` does not provide ``bincount``
+        (e.g. ``array_api_strict``).  Supported backends are
+        **numpy**, **cupy**, and **torch**.
     """
+    xp = array_api_compat.get_namespace(events)
+    dev = array_api_compat.device(events)
+
+    if not hasattr(xp, "bincount"):
+        raise NotImplementedError(
+            "regular_polygon_events_to_sinogram requires a backend with "
+            "bincount support (numpy, cupy, torch); "
+            f"got {xp.__name__!r}"
+        )
+
     if tof_bin_sign not in (1, -1):
         raise ValueError("tof_bin_sign must be +1 or -1")
 
-    events_np = np.asarray(to_numpy_array(events), dtype=np.int32)
+    events_xp = xp.asarray(events, dtype=xp.int32, device=dev)
 
-    if events_np.ndim != 2:
+    if events_xp.ndim != 2:
         raise ValueError("events must be a 2D array")
 
-    n_events, n_cols = events_np.shape
+    n_events, n_cols = events_xp.shape
 
     if n_cols == 4:
         if num_tof_bins is not None:
@@ -138,18 +157,22 @@ def regular_polygon_events_to_sinogram(
 
     if n_events == 0:
         if tof_mode:
-            return np.zeros((*shape_spatial, num_tof_bins), dtype=np.int32)
-        return np.zeros(shape_spatial, dtype=np.int32)
+            return xp.zeros((*shape_spatial, num_tof_bins), dtype=xp.int32, device=dev)
+        return xp.zeros(shape_spatial, dtype=xp.int32, device=dev)
 
-    d1 = events_np[:, 0]
-    r1 = events_np[:, 1]
-    d2 = events_np[:, 2]
-    r2 = events_np[:, 3]
+    d1 = events_xp[:, 0]
+    r1 = events_xp[:, 1]
+    d2 = events_xp[:, 2]
+    r2 = events_xp[:, 3]
     if tof_mode:
-        tof_raw = events_np[:, 4]
+        tof_raw = events_xp[:, 4]
 
-    inring_lut, inring_tof_sign_lut = _build_inring_luts(lor_descriptor)
-    ring_pair_table = lor_descriptor.michelogram.plane_for_ring_pair_table
+    inring_lut_np, inring_tof_sign_lut_np = _build_inring_luts(lor_descriptor)
+    inring_lut = xp.asarray(inring_lut_np, device=dev)
+    inring_tof_sign_lut = xp.asarray(inring_tof_sign_lut_np, device=dev)
+    ring_pair_table = xp.asarray(
+        lor_descriptor.michelogram.plane_for_ring_pair_table, device=dev
+    )
 
     n_crystals = lor_descriptor.scanner.num_lor_endpoints_per_ring
     num_rings = lor_descriptor.scanner.num_rings
@@ -168,37 +191,41 @@ def regular_polygon_events_to_sinogram(
     )
 
     # safe fallback indices for out-of-bounds events (they will be masked out)
-    d1s = np.where(valid, d1, 0)
-    d2s = np.where(valid, d2, 0)
+    d1s = xp.where(valid, d1, xp.zeros(1, dtype=xp.int32, device=dev))
+    d2s = xp.where(valid, d2, xp.zeros(1, dtype=xp.int32, device=dev))
 
     inring_flat = inring_lut[d1s, d2s]
     tof_sign_vals = inring_tof_sign_lut[d1s, d2s]
 
     # the crystal pair must form a valid LOR
-    valid &= inring_flat >= 0
+    valid = valid & (inring_flat >= 0)
 
     # canonical ring ordering: +1 means d1 is xstart, so r1 is the start ring.
     # Use safe fallback (0) for out-of-range ring indices so the table lookup
     # never receives negative or OOB values (numpy wraps negative indices).
-    r1_safe = np.where(valid, r1, 0)
-    r2_safe = np.where(valid, r2, 0)
+    r1_safe = xp.where(valid, r1, xp.zeros(1, dtype=xp.int32, device=dev))
+    r2_safe = xp.where(valid, r2, xp.zeros(1, dtype=xp.int32, device=dev))
     is_d1_start = tof_sign_vals == 1
-    r_start = np.where(is_d1_start, r1_safe, r2_safe)
-    r_end = np.where(is_d1_start, r2_safe, r1_safe)
+    r_start = xp.where(is_d1_start, r1_safe, r2_safe)
+    r_end = xp.where(is_d1_start, r2_safe, r1_safe)
 
     # plane lookup
     plane_idx = ring_pair_table[r_start, r_end]
-    valid &= plane_idx >= 0
+    valid = valid & (plane_idx >= 0)
 
     if tof_mode:
-        valid &= (tof_raw >= 0) & (tof_raw < num_tof_bins)
-        tof_raw_safe = np.where(valid, tof_raw, 0)
+        valid = valid & (tof_raw >= 0) & (tof_raw < num_tof_bins)
+        tof_raw_safe = xp.where(valid, tof_raw, xp.zeros(1, dtype=xp.int32, device=dev))
         # flip the bin when the canonical direction does not match tof_bin_sign
         flip = (tof_bin_sign * tof_sign_vals) == -1
-        sinogram_tof = np.where(flip, num_tof_bins - 1 - tof_raw_safe, tof_raw_safe)
+        sinogram_tof = xp.where(
+            flip,
+            xp.asarray(num_tof_bins - 1, dtype=xp.int32, device=dev) - tof_raw_safe,
+            tof_raw_safe,
+        )
 
     # decompose the in-ring flat index into view and radial indices
-    safe_flat = np.where(valid, inring_flat, 0)
+    safe_flat = xp.where(valid, inring_flat, xp.zeros(1, dtype=xp.int32, device=dev))
     view_idx = safe_flat // num_rad
     rad_idx = safe_flat % num_rad
 
@@ -208,15 +235,15 @@ def regular_polygon_events_to_sinogram(
     r_ax = lor_descriptor.radial_axis_num
     strides = [int(np.prod(shape_spatial[i + 1 :])) for i in range(3)]
 
-    safe_plane = np.where(valid, plane_idx, 0)
+    safe_plane = xp.where(valid, plane_idx, xp.zeros(1, dtype=xp.int32, device=dev))
     flat_sino = (
-        rad_idx.astype(np.int64) * strides[r_ax]
-        + view_idx.astype(np.int64) * strides[v_ax]
-        + safe_plane.astype(np.int64) * strides[p_ax]
+        xp.astype(rad_idx, xp.int64) * strides[r_ax]
+        + xp.astype(view_idx, xp.int64) * strides[v_ax]
+        + xp.astype(safe_plane, xp.int64) * strides[p_ax]
     )
 
     if tof_mode:
-        flat_sino = flat_sino * num_tof_bins + sinogram_tof.astype(np.int64)
+        flat_sino = flat_sino * num_tof_bins + xp.astype(sinogram_tof, xp.int64)
         total_bins = int(np.prod(shape_spatial)) * num_tof_bins
         output_shape = (*shape_spatial, num_tof_bins)
     else:
@@ -224,5 +251,9 @@ def regular_polygon_events_to_sinogram(
         output_shape = shape_spatial
 
     flat_sino_valid = flat_sino[valid]
-    sino_flat = np.bincount(flat_sino_valid, minlength=total_bins).astype(np.int32)
-    return sino_flat.reshape(output_shape)
+    if flat_sino_valid.shape[0] == 0:
+        return xp.zeros(output_shape, dtype=xp.int32, device=dev)
+    sino_flat = xp.astype(
+        xp.bincount(flat_sino_valid, minlength=total_bins), xp.int32
+    )
+    return xp.reshape(sino_flat, output_shape)
