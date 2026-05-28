@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from mpl_toolkits.mplot3d import Axes3D
-from array_api_compat import device, get_namespace, size
+from array_api_compat import device, get_namespace
 
 import parallelproj_core
 
@@ -842,6 +842,110 @@ class RegularPolygonPETProjector(LinearOperator):
 
         self.lor_descriptor.scanner.show_lor_endpoints(ax)
 
+    def convert_sinogram_to_crystal_index_events(
+        self, sinogram: Array, shuffle: bool = False
+    ) -> np.ndarray:
+        """Convert a non-TOF or TOF span-1 sinogram to crystal-index events.
+
+        Each count in the sinogram becomes one row in the output array.
+        Non-TOF rows are ``(d1, r1, d2, r2)``; TOF rows add a trailing
+        ``tof_bin`` column, where bin 0 is the bin closest to ``d1``
+        (the xstart crystal).  The output is ready for direct use with
+        :func:`.regular_polygon_events_to_sinogram`.
+
+        Parameters
+        ----------
+        sinogram : Array
+            Integer span-1 sinogram.
+            Non-TOF shape: ``lor_descriptor.spatial_sinogram_shape``.
+            TOF shape: ``(*lor_descriptor.spatial_sinogram_shape, num_tof_bins)``.
+        shuffle : bool, optional
+            Randomly shuffle the output rows (default ``False``).
+            Uses numpy's global random state; call ``numpy.random.seed``
+            before this method for reproducible results.
+
+        Returns
+        -------
+        events : np.ndarray, shape (N, 4) or (N, 5), dtype int32
+            Crystal-index events.  Columns are
+            ``(d1, r1, d2, r2)`` or ``(d1, r1, d2, r2, tof_bin)``.
+
+        Raises
+        ------
+        TypeError
+            If ``sinogram`` does not have an integer dtype.
+        ValueError
+            If the LOR descriptor has ``span > 1``; :attr:`start_plane_index`
+            is only defined for span-1 descriptors.
+        """
+        lor_desc = self.lor_descriptor
+        if lor_desc.michelogram.span != 1:
+            raise ValueError(
+                "convert_sinogram_to_crystal_index_events requires a span-1 LOR descriptor"
+            )
+
+        integer_dtypes = (
+            self.xp.int8,
+            self.xp.int16,
+            self.xp.int32,
+            self.xp.int64,
+            self.xp.uint8,
+            self.xp.uint16,
+            self.xp.uint32,
+            self.xp.uint64,
+        )
+        if sinogram.dtype not in integer_dtypes:
+            raise TypeError(
+                f"sinogram must have an integer dtype, got {sinogram.dtype}"
+            )
+
+        sc = to_numpy_array(lor_desc.start_in_ring_index)  # (num_views, num_rad)
+        ec = to_numpy_array(lor_desc.end_in_ring_index)
+        sr = to_numpy_array(lor_desc.start_plane_index)    # (num_planes,)
+        er = to_numpy_array(lor_desc.end_plane_index)
+
+        p_ax = lor_desc.plane_axis_num
+        v_ax = lor_desc.view_axis_num
+        r_ax = lor_desc.radial_axis_num
+
+        sino_np = to_numpy_array(sinogram).astype(np.int32)
+        tof_mode = sino_np.ndim == 4
+
+        valid_vr = sc != ec  # self-pair bins are unphysical; skip them
+
+        # Reorder axes to (view, radial, plane[, tof]) so that np.where
+        # yields events in the same view-first, radial-second, plane-third
+        # order as the original view-by-view loop in convert_sinogram_to_listmode.
+        if tof_mode:
+            sino_vrpt = np.transpose(sino_np, (v_ax, r_ax, p_ax, 3))
+            counts = sino_vrpt * valid_vr[:, :, None, None]
+            v_idx, r_idx, p_idx, t_idx = np.where(counts > 0)
+            cnt = counts[v_idx, r_idx, p_idx, t_idx]
+            rv = np.repeat(v_idx, cnt)
+            rr = np.repeat(r_idx, cnt)
+            rp = np.repeat(p_idx, cnt)
+            rt = np.repeat(t_idx, cnt)
+            events = np.column_stack(
+                [sc[rv, rr], sr[rp], ec[rv, rr], er[rp], rt]
+            ).astype(np.int32)
+        else:
+            sino_vrp = np.transpose(sino_np, (v_ax, r_ax, p_ax))
+            counts = sino_vrp * valid_vr[:, :, None]
+            v_idx, r_idx, p_idx = np.where(counts > 0)
+            cnt = counts[v_idx, r_idx, p_idx]
+            rv = np.repeat(v_idx, cnt)
+            rr = np.repeat(r_idx, cnt)
+            rp = np.repeat(p_idx, cnt)
+            events = np.column_stack(
+                [sc[rv, rr], sr[rp], ec[rv, rr], er[rp]]
+            ).astype(np.int32)
+
+        if shuffle:
+            perm = np.random.permutation(len(events))
+            events = events[perm]
+
+        return events
+
     def convert_sinogram_to_listmode(
         self, sinogram: Array, shuffle: bool = False
     ) -> tuple[Array, Array, Array | None]:
@@ -864,97 +968,23 @@ class RegularPolygonPETProjector(LinearOperator):
             event_start_coordinates, event_end_coordinates, event_tofbin
             in case of non-TOF, event_tofbin is None
         """
+        events = self.convert_sinogram_to_crystal_index_events(sinogram, shuffle=shuffle)
 
-        integer_dtypes = (
-            self.xp.int8,
-            self.xp.int16,
-            self.xp.int32,
-            self.xp.int64,
-            self.xp.uint8,
-            self.xp.uint16,
-            self.xp.uint32,
-            self.xp.uint64,
-        )
-        if sinogram.dtype not in integer_dtypes:
-            raise TypeError(
-                f"sinogram must have an integer dtype, got {sinogram.dtype}"
-            )
+        scanner = self.lor_descriptor.scanner
+        d1 = self.xp.asarray(events[:, 0].astype(np.int64), device=self._dev)
+        r1 = self.xp.asarray(events[:, 1].astype(np.int64), device=self._dev)
+        d2 = self.xp.asarray(events[:, 2].astype(np.int64), device=self._dev)
+        r2 = self.xp.asarray(events[:, 3].astype(np.int64), device=self._dev)
 
-        num_events = int(self.xp.sum(sinogram))
+        event_start_coords = scanner.get_lor_endpoints(r1, d1)
+        event_end_coords = scanner.get_lor_endpoints(r2, d2)
 
-        event_start_coords = self.xp.empty(
-            (num_events, 3), device=self._dev, dtype=self.xp.float32
-        )
-        event_end_coords = self.xp.empty(
-            (num_events, 3), device=self._dev, dtype=self.xp.float32
-        )
-
-        if self.tof and self._tof_parameters is not None:
-            num_tofbins = self._tof_parameters.num_tofbins
-            event_tofbins = self.xp.empty(
-                (num_events,), device=self._dev, dtype=self.xp.int16
+        if events.shape[1] == 5:
+            event_tofbins = self.xp.asarray(
+                events[:, 4].astype(np.int16), device=self._dev
             )
         else:
-            num_tofbins = 1
             event_tofbins = None
-
-        event_offset = 0
-
-        # we convert view by view to save memory
-        for view in range(self.lor_descriptor.num_views):
-            xstart, xend = self.lor_descriptor.get_lor_coordinates(
-                views=self.xp.asarray([view], device=self._dev)
-            )
-            xstart = self.xp.reshape(xstart, (-1, 3))
-            xend = self.xp.reshape(xend, (-1, 3))
-
-            sino_view = self.xp.take(
-                sinogram,
-                self.xp.asarray([view], device=self._dev),
-                axis=self.lor_descriptor.view_axis_num,
-            )
-            sino_view = self.xp.squeeze(
-                sino_view, axis=self.lor_descriptor.view_axis_num
-            )
-
-            # flatten all dims (lor dims + optional tofbin last dim) to 1D
-            # for TOF: flat_idx = lor_idx * num_tofbins + tofbin_idx
-            # for non-TOF: num_tofbins == 1, flat_idx == lor_idx
-            ss = self.xp.reshape(sino_view, (size(sino_view),))
-
-            # array_api_strict does not support repeat with array-valued counts;
-            # we convert back and forth to numpy cpu array as a workaround
-            flat_counts = to_numpy_array(ss).astype(int)
-            event_flat_inds = np.repeat(np.arange(ss.shape[0]), flat_counts)
-            num_events_view = int(event_flat_inds.shape[0])
-
-            event_lor_inds = self.xp.asarray(
-                event_flat_inds // num_tofbins, device=self._dev
-            )
-
-            event_start_coords[event_offset : (event_offset + num_events_view), :] = (
-                self.xp.take(xstart, event_lor_inds, axis=0)
-            )
-            event_end_coords[event_offset : (event_offset + num_events_view), :] = (
-                self.xp.take(xend, event_lor_inds, axis=0)
-            )
-
-            if event_tofbins is not None:
-                event_tofbins[event_offset : (event_offset + num_events_view)] = (
-                    self.xp.asarray(
-                        (event_flat_inds % num_tofbins).astype(np.int16),
-                        device=self._dev,
-                    )
-                )
-
-            event_offset += num_events_view
-
-        if shuffle:
-            perm = self.xp.asarray(np.random.permutation(num_events), device=self._dev)
-            event_start_coords = self.xp.take(event_start_coords, perm, axis=0)
-            event_end_coords = self.xp.take(event_end_coords, perm, axis=0)
-            if event_tofbins is not None:
-                event_tofbins = self.xp.take(event_tofbins, perm, axis=0)
 
         return event_start_coords, event_end_coords, event_tofbins
 
