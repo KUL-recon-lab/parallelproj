@@ -38,6 +38,7 @@ import parallelproj.tof
 from parallelproj import to_numpy_array
 from parallelproj.unlist import regular_polygon_events_to_sinogram
 from img import elliptic_cylinder_phantom
+from vis import show_vol_cuts
 
 # %%
 from array_utils import suggest_array_backend_and_device
@@ -111,10 +112,10 @@ events = proj.convert_sinogram_to_crystal_index_events(y_span1, shuffle=True)
 print(f"\nNumber of events : {len(events)}")
 
 sino_unlisted = regular_polygon_events_to_sinogram(lor_desc, events)
-y_span1_np = to_numpy_array(y_span1).astype(np.float32)
+y_span1_np = to_numpy_array(y_span1)
 
-print(f"Span-1 round-trip exact match : {np.array_equal(sino_unlisted, y_span1_np)}")
-print(f"Max absolute difference       : {float(np.max(np.abs(sino_unlisted - y_span1_np))):.0f}")
+assert np.array_equal(sino_unlisted, y_span1_np), "Span-1 round-trip failed"
+print("Span-1 round-trip: OK")
 
 # %%
 # Span-3 comparison
@@ -129,13 +130,11 @@ print(f"Max absolute difference       : {float(np.max(np.abs(sino_unlisted - y_s
 op_compress = ppl.SinogramAxialCompressionOperator(lor_desc, target_span=3)
 span3_desc = op_compress.out_lor_descriptor
 
-y_span3_np = to_numpy_array(op_compress(xp.astype(y_span1, xp.float32)))
+y_span3_np = to_numpy_array(op_compress(xp.astype(y_span1, xp.float32))).astype(np.int32)
 sino_span3_unlisted = regular_polygon_events_to_sinogram(span3_desc, events)
 
-print(f"\nSpan-3 sinogram shape (operator) : {y_span3_np.shape}")
-print(f"Span-3 sinogram shape (unlisted) : {sino_span3_unlisted.shape}")
-print(f"Span-3 exact match               : {np.array_equal(sino_span3_unlisted, y_span3_np)}")
-print(f"Max absolute difference          : {float(np.max(np.abs(sino_span3_unlisted - y_span3_np))):.0f}")
+assert np.array_equal(sino_span3_unlisted, y_span3_np), "Span-3 round-trip failed"
+print("Span-3 round-trip: OK")
 
 # %%
 # TOF simulation
@@ -173,100 +172,40 @@ print(f"\nNumber of TOF events : {len(events_tof)}")
 sino_tof_unlisted = regular_polygon_events_to_sinogram(
     lor_desc, events_tof, num_tof_bins=num_tof_bins
 )
-y_tof_np = to_numpy_array(y_tof).astype(np.float32)
+y_tof_np = to_numpy_array(y_tof)
 
-print(f"TOF round-trip exact match : {np.array_equal(sino_tof_unlisted, y_tof_np)}")
-print(f"Max absolute difference    : {float(np.max(np.abs(sino_tof_unlisted - y_tof_np))):.0f}")
+assert np.array_equal(sino_tof_unlisted, y_tof_np), "TOF round-trip failed"
+print("TOF round-trip: OK")
 
 # %%
 # Visualisation
 # -------------
 #
-# Non-TOF: ground-truth span-1 sinogram, unlisted span-1 sinogram, difference
-# and the span-3 comparison.
-
-v_ax = lor_desc.view_axis_num
-
-fig, axes = plt.subplots(2, 3, figsize=(13, 8))
-
-# --- row 0: span-1 round-trip ---
-vmax1 = float(np.max(y_span1_np))
-
-ax = axes[0, 0]
-ax.imshow(y_span1_np.sum(axis=v_ax), aspect="auto", vmin=0, vmax=vmax1)
-ax.set_title("y_span1 (ground truth,\nsummed over views)")
-ax.set_xlabel("planes")
-ax.set_ylabel("radial")
-
-ax = axes[0, 1]
-ax.imshow(sino_unlisted.sum(axis=v_ax), aspect="auto", vmin=0, vmax=vmax1)
-ax.set_title("Unlisted span-1\n(summed over views)")
-ax.set_xlabel("planes")
-
-ax = axes[0, 2]
-diff1 = sino_unlisted - y_span1_np
-im = ax.imshow(diff1.sum(axis=v_ax), aspect="auto", cmap="bwr", vmin=-1, vmax=1)
-ax.set_title("Difference\n(must be all zeros)")
-ax.set_xlabel("planes")
-fig.colorbar(im, ax=ax)
-
-# --- row 1: span-3 comparison ---
-v_ax3 = span3_desc.view_axis_num
-vmax3 = float(np.max(y_span3_np))
-
-ax = axes[1, 0]
-ax.imshow(y_span3_np.sum(axis=v_ax3), aspect="auto", vmin=0, vmax=vmax3)
-ax.set_title("y_span3 via\nSinogramAxialCompressionOperator")
-ax.set_xlabel("planes")
-ax.set_ylabel("radial")
-
-ax = axes[1, 1]
-ax.imshow(sino_span3_unlisted.sum(axis=v_ax3), aspect="auto", vmin=0, vmax=vmax3)
-ax.set_title("Unlisted directly\ninto span-3")
-ax.set_xlabel("planes")
-
-ax = axes[1, 2]
-diff3 = sino_span3_unlisted - y_span3_np
-im3 = ax.imshow(diff3.sum(axis=v_ax3), aspect="auto", cmap="bwr", vmin=-1, vmax=1)
-ax.set_title("Span-3 difference\n(must be all zeros)")
-ax.set_xlabel("planes")
-fig.colorbar(im3, ax=ax)
-
-fig.suptitle("Non-TOF sinogram round-trips  (radial × planes, summed over views)")
-fig.tight_layout()
-fig.show()
+# :func:`.show_vol_cuts` handles both 3-D (non-TOF) and 4-D (TOF) sinograms
+# with the same call.  For the 4-D case the TOF axis is moved to the front so
+# the full-width leading-axis slider browses individual TOF bins.
 
 # %%
-# TOF comparison: sinogram summed over TOF bins.
-
-fig2, axes2 = plt.subplots(1, 3, figsize=(13, 4))
-
-y_tof_spatial = y_tof_np.sum(axis=-1)
-sino_tof_spatial = sino_tof_unlisted.sum(axis=-1)
-vmax_tof = float(np.max(y_tof_spatial))
-
-ax = axes2[0]
-ax.imshow(y_tof_spatial.sum(axis=v_ax), aspect="auto", vmin=0, vmax=vmax_tof)
-ax.set_title("y_tof (ground truth,\nTOF-summed, view-summed)")
-ax.set_xlabel("planes")
-ax.set_ylabel("radial")
-
-ax = axes2[1]
-ax.imshow(sino_tof_spatial.sum(axis=v_ax), aspect="auto", vmin=0, vmax=vmax_tof)
-ax.set_title("Unlisted TOF span-1\n(TOF-summed, view-summed)")
-ax.set_xlabel("planes")
-
-ax = axes2[2]
-diff_tof = sino_tof_unlisted - y_tof_np
-im_tof = ax.imshow(
-    diff_tof.sum(axis=(-1, v_ax)), aspect="auto", cmap="bwr", vmin=-1, vmax=1
+_, _, _w1 = show_vol_cuts(
+    y_span1_np,
+    axis_labels=("rad", "view", "plane"),
+    fig_title="y_span1  (non-TOF span-1)",
 )
-ax.set_title("TOF difference\n(must be all zeros)")
-ax.set_xlabel("planes")
-fig2.colorbar(im_tof, ax=ax)
 
-fig2.suptitle(
-    "TOF sinogram round-trip  (radial × planes, summed over views and TOF bins)"
+# %%
+_, _, _w2 = show_vol_cuts(
+    y_span3_np,
+    axis_labels=("rad", "view", "plane"),
+    fig_title="y_span3  (span-3 via SinogramAxialCompressionOperator)",
 )
-fig2.tight_layout()
-fig2.show()
+
+# %%
+# Transpose from (rad, view, plane, tof) → (tof, rad, view, plane) so the
+# full-width slider browses TOF bins.
+_, _, _w3 = show_vol_cuts(
+    y_tof_np.transpose(3, 0, 1, 2),
+    axis_labels=("tof", "rad", "view", "plane"),
+    fig_title="y_tof  (TOF span-1)",
+)
+
+plt.show()

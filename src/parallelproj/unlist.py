@@ -105,7 +105,7 @@ def regular_polygon_events_to_sinogram(
     sinogram : np.ndarray
         Histogram sinogram.  Shape is ``spatial_sinogram_shape`` for non-TOF
         or ``(*spatial_sinogram_shape, num_tof_bins)`` for TOF.
-        Dtype is ``float32``.
+        Dtype is ``int32``.
     """
     if tof_bin_sign not in (1, -1):
         raise ValueError("tof_bin_sign must be +1 or -1")
@@ -138,8 +138,8 @@ def regular_polygon_events_to_sinogram(
 
     if n_events == 0:
         if tof_mode:
-            return np.zeros((*shape_spatial, num_tof_bins), dtype=np.float32)
-        return np.zeros(shape_spatial, dtype=np.float32)
+            return np.zeros((*shape_spatial, num_tof_bins), dtype=np.int32)
+        return np.zeros(shape_spatial, dtype=np.int32)
 
     d1 = events_np[:, 0]
     r1 = events_np[:, 1]
@@ -224,5 +224,5 @@ def regular_polygon_events_to_sinogram(
         output_shape = shape_spatial
 
     flat_sino_valid = flat_sino[valid]
-    sino_flat = np.bincount(flat_sino_valid, minlength=total_bins).astype(np.float32)
+    sino_flat = np.bincount(flat_sino_valid, minlength=total_bins).astype(np.int32)
     return sino_flat.reshape(output_shape)
