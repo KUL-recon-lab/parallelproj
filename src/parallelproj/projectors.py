@@ -848,10 +848,15 @@ class RegularPolygonPETProjector(LinearOperator):
         """Convert a non-TOF or TOF span-1 sinogram to crystal-index events.
 
         Each count in the sinogram becomes one row in the output array.
-        Non-TOF rows are ``(d1, r1, d2, r2)``; TOF rows add a trailing
-        ``tof_bin`` column, where bin 0 is the bin closest to ``d1``
-        (the xstart crystal).  The output is ready for direct use with
+        Non-TOF rows are ``(d_red, r_red, d_blue, r_blue)``; TOF rows add a
+        trailing ``tof_bin`` column in the projector convention
+        (bin 0 = closest to the canonical xstart crystal).
+        The output is ready for direct use with
         :func:`.regular_polygon_events_to_sinogram`.
+
+        The *red* crystal is the canonical xstart of each LOR as defined by
+        the LOR descriptor; *blue* is the xend crystal.  Unpack the returned
+        array with ``events[:, 0]`` (d_red), ``events[:, 1]`` (r_red), etc.
 
         Parameters
         ----------
@@ -868,7 +873,8 @@ class RegularPolygonPETProjector(LinearOperator):
         -------
         events : np.ndarray, shape (N, 4) or (N, 5), dtype int32
             Crystal-index events.  Columns are
-            ``(d1, r1, d2, r2)`` or ``(d1, r1, d2, r2, tof_bin)``.
+            ``(d_red, r_red, d_blue, r_blue)`` or
+            ``(d_red, r_red, d_blue, r_blue, tof_bin)``.
 
         Raises
         ------

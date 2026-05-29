@@ -7,12 +7,17 @@ from types import ModuleType
 
 import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
+import parallelproj.projectors as pp_proj
+import parallelproj.tof as ppt
 from parallelproj import to_numpy_array
-from parallelproj.unlist import _build_inring_luts, regular_polygon_events_to_sinogram as _sinogram_native
-
-def regular_polygon_events_to_sinogram(*args, **kwargs):
-    """Thin wrapper that always returns a numpy array for test assertions."""
-    return to_numpy_array(_sinogram_native(*args, **kwargs))
+from parallelproj.unlist import (
+    _build_inring_luts,
+    regular_polygon_events_to_sinogram as _sinogram_native,
+)
+try:
+    from parallelproj.unlist import detection_times_to_tof_bin
+except ImportError:
+    detection_times_to_tof_bin = None  # type: ignore[assignment]
 
 from .config import xp_dev_list
 
@@ -74,6 +79,37 @@ def _first_valid_vr(sc: np.ndarray, ec: np.ndarray) -> tuple[int, int]:
     return int(idxs[0, 0]), int(idxs[0, 1])
 
 
+def _small_proj(scanner, span=1, max_ring_difference=None,
+                sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+                tof_params=None):
+    """Build a minimal RegularPolygonPETProjector for use in tests."""
+    lor_desc = _lor_desc(scanner, span=span, max_ring_difference=max_ring_difference,
+                         sinogram_order=sinogram_order)
+    proj = pp_proj.RegularPolygonPETProjector(
+        lor_desc, img_shape=(4, 4, 4), voxel_size=(4.0, 4.0, 4.0)
+    )
+    if tof_params is not None:
+        proj.tof_parameters = tof_params
+    return proj
+
+
+def _unlist(proj, events_np):
+    """Unpack a stacked numpy events array and call regular_polygon_events_to_sinogram.
+
+    events_np shape: (N, 4) for non-TOF or (N, 5) for TOF.
+    All column arrays are passed on the same xp/dev as the scanner.
+    """
+    xp = proj.xp
+    dev = proj.lor_descriptor.dev
+    cols = [xp.asarray(events_np[:, i], dtype=xp.int32, device=dev)
+            for i in range(events_np.shape[1])]
+    if events_np.shape[1] == 4:
+        return to_numpy_array(_sinogram_native(proj, *cols))
+    return to_numpy_array(
+        _sinogram_native(proj, *cols[:4], unsigned_sinogram_tof_bin=cols[4])
+    )
+
+
 # ---------------------------------------------------------------------------
 # LUT structure tests
 # ---------------------------------------------------------------------------
@@ -115,7 +151,8 @@ def test_inring_lut_valid_pairs_covered(xp: ModuleType, dev: str) -> None:
 def test_non_tof_round_trip(xp: ModuleType, dev: str) -> None:
     """Non-self-pair sinogram bins each hit exactly once; self-pair bins stay 0."""
     scanner = _small_scanner(xp, dev, num_rings=3)
-    desc = _lor_desc(scanner, span=1)
+    proj = _small_proj(scanner, span=1)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)   # (num_views, num_rad)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -131,8 +168,8 @@ def test_non_tof_round_trip(xp: ModuleType, dev: str) -> None:
         for r in range(desc.num_rad)
         if valid_vr[v, r]
     ]
-    events = xp.asarray(rows, dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events)
+    events_np = np.array(rows, dtype=np.int32)
+    sino = _unlist(proj, events_np)
 
     assert sino.shape == desc.spatial_sinogram_shape
     assert np.max(sino) == 1.0, "no bin should accumulate more than one count"
@@ -142,7 +179,8 @@ def test_non_tof_round_trip(xp: ModuleType, dev: str) -> None:
 def test_non_tof_accumulation(xp: ModuleType, dev: str) -> None:
     """Duplicate events accumulate correctly."""
     scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner)
+    proj = _small_proj(scanner)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -151,8 +189,8 @@ def test_non_tof_accumulation(xp: ModuleType, dev: str) -> None:
 
     v0, r0 = _first_valid_vr(sc, ec)
     row = [int(sc[v0, r0]), int(sr[0]), int(ec[v0, r0]), int(er[0])]
-    events = xp.asarray([row, row, row], dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events)
+    events_np = np.array([row, row, row], dtype=np.int32)
+    sino = _unlist(proj, events_np)
     assert sino.sum() == 3.0
 
 
@@ -163,7 +201,8 @@ def test_non_tof_accumulation(xp: ModuleType, dev: str) -> None:
 def test_crystal_swap_non_tof(xp: ModuleType, dev: str) -> None:
     """(d1,r1,d2,r2) and (d2,r2,d1,r1) must produce the same sinogram."""
     scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner)
+    proj = _small_proj(scanner)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -174,12 +213,12 @@ def test_crystal_swap_non_tof(xp: ModuleType, dev: str) -> None:
     d1, d2 = int(sc[v0, r0]), int(ec[v0, r0])
     r1, r2 = int(sr[0]), int(er[0])
 
-    ev_fwd = xp.asarray([[d1, r1, d2, r2]], dtype=xp.int32, device=dev)
-    ev_bwd = xp.asarray([[d2, r2, d1, r1]], dtype=xp.int32, device=dev)
+    ev_fwd = np.array([[d1, r1, d2, r2]], dtype=np.int32)
+    ev_bwd = np.array([[d2, r2, d1, r1]], dtype=np.int32)
 
     assert np.allclose(
-        regular_polygon_events_to_sinogram(desc, ev_fwd),
-        regular_polygon_events_to_sinogram(desc, ev_bwd),
+        _unlist(proj, ev_fwd),
+        _unlist(proj, ev_bwd),
     ), "Crystal swap must not change the sinogram bin"
 
 
@@ -188,10 +227,13 @@ def test_crystal_swap_non_tof(xp: ModuleType, dev: str) -> None:
 # ---------------------------------------------------------------------------
 
 def test_tof_single_event_lands_in_correct_bin(xp: ModuleType, dev: str) -> None:
-    """A single TOF event with d1=xstart lands in the expected TOF bin."""
+    """A single TOF event with d_red=xstart lands in the expected TOF bin."""
     num_tof_bins = 7
     scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner)
+    tof_params = ppt.TOFParameters(num_tofbins=num_tof_bins, tofbin_width=40.0,
+                                   sigma_tof=5.0, tofcenter_offset=0.0)
+    proj = _small_proj(scanner, tof_params=tof_params)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -203,23 +245,26 @@ def test_tof_single_event_lands_in_correct_bin(xp: ModuleType, dev: str) -> None
     r1, r2 = int(sr[0]), int(er[0])
     tof_bin = 2
 
-    events = xp.asarray([[d1, r1, d2, r2, tof_bin]], dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events, num_tof_bins=num_tof_bins)
+    events_np = np.array([[d1, r1, d2, r2, tof_bin]], dtype=np.int32)
+    sino = _unlist(proj, events_np)
 
     assert sino.shape == (*desc.spatial_sinogram_shape, num_tof_bins)
     assert sino.sum() == 1.0
 
     nz = np.argwhere(sino > 0)
     assert len(nz) == 1
-    # TOF bin axis is trailing — no flip because d1 is xstart and tof_bin_sign=+1
-    assert nz[0, -1] == tof_bin, "TOF bin must be stored unflipped when d1 is xstart"
+    # TOF bin axis is trailing — no flip because d1 is xstart
+    assert nz[0, -1] == tof_bin, "TOF bin must be stored unflipped when d_red is xstart"
 
 
 def test_tof_round_trip(xp: ModuleType, dev: str) -> None:
     """Non-self-pair TOF sinogram bins each hit exactly once."""
     num_tof_bins = 5
     scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner, span=1)
+    tof_params = ppt.TOFParameters(num_tofbins=num_tof_bins, tofbin_width=40.0,
+                                   sigma_tof=5.0, tofcenter_offset=0.0)
+    proj = _small_proj(scanner, span=1, tof_params=tof_params)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -235,8 +280,8 @@ def test_tof_round_trip(xp: ModuleType, dev: str) -> None:
         if valid_vr[v, r]
         for t in range(num_tof_bins)
     ]
-    events = xp.asarray(rows, dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events, num_tof_bins=num_tof_bins)
+    events_np = np.array(rows, dtype=np.int32)
+    sino = _unlist(proj, events_np)
 
     assert sino.shape == (*desc.spatial_sinogram_shape, num_tof_bins)
     assert np.max(sino) == 1.0
@@ -247,18 +292,25 @@ def test_tof_round_trip(xp: ModuleType, dev: str) -> None:
 # TOF direction: crystal-swap with mirrored TOF bin
 # ---------------------------------------------------------------------------
 
-def test_tof_crystal_swap_mirrored_bin(xp: ModuleType, dev: str) -> None:
-    """Swapping (d1,r1,d2,r2) and mirroring the TOF bin gives the same sinogram.
+def test_tof_crystal_swap_same_bin(xp: ModuleType, dev: str) -> None:
+    """Swapping d_red / d_blue with the *same* projector-convention TOF bin
+    must produce the identical sinogram.
 
-    Convention: bin 0 = closest to d1 (tof_bin_sign=+1, default).
+    In the projector convention, bin 0 is always closest to xstart regardless
+    of which crystal is labeled red or blue.  The function determines xstart
+    from the LOR descriptor, so the ring ordering is correct in both cases
+    and no TOF-bin flip is needed at the call site.
 
-    Event (d1_start, r1, d2_end, r2, bin=k) and
-    Event (d2_end, r2, d1_start, r1, bin=(n-1-k))
+    Event (d_xstart, r1, d_xend, r2, bin=k)  and
+    Event (d_xend,   r2, d_xstart, r1, bin=k)
     must both land in the same sinogram bin at TOF index k.
     """
     num_tof_bins = 7
     scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner)
+    tof_params = ppt.TOFParameters(num_tofbins=num_tof_bins, tofbin_width=40.0,
+                                   sigma_tof=5.0, tofcenter_offset=0.0)
+    proj = _small_proj(scanner, tof_params=tof_params)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -266,67 +318,25 @@ def test_tof_crystal_swap_mirrored_bin(xp: ModuleType, dev: str) -> None:
     er = to_numpy_array(desc.end_plane_index)
 
     v0, r0 = _first_valid_vr(sc, ec)
-    d1, d2 = int(sc[v0, r0]), int(ec[v0, r0])   # d1 = xstart
-    r1, r2 = int(sr[0]), int(er[0])
-    tof_bin = 2
-    tof_bin_mirror = num_tof_bins - 1 - tof_bin   # = 4
+    d_xstart, d_xend = int(sc[v0, r0]), int(ec[v0, r0])
+    r_start, r_end = int(sr[0]), int(er[0])
+    tof_bin = 2   # projector-convention bin (bin 0 = closest to xstart)
 
-    ev_fwd = xp.asarray([[d1, r1, d2, r2, tof_bin]], dtype=xp.int32, device=dev)
-    ev_bwd = xp.asarray([[d2, r2, d1, r1, tof_bin_mirror]], dtype=xp.int32, device=dev)
+    # same bin in both events — no mirror needed
+    ev_fwd = np.array([[d_xstart, r_start, d_xend,   r_end,   tof_bin]], dtype=np.int32)
+    ev_bwd = np.array([[d_xend,   r_end,   d_xstart, r_start, tof_bin]], dtype=np.int32)
 
-    sino_fwd = regular_polygon_events_to_sinogram(desc, ev_fwd, num_tof_bins=num_tof_bins)
-    sino_bwd = regular_polygon_events_to_sinogram(desc, ev_bwd, num_tof_bins=num_tof_bins)
+    sino_fwd = _unlist(proj, ev_fwd)
+    sino_bwd = _unlist(proj, ev_bwd)
 
     assert np.allclose(sino_fwd, sino_bwd), (
-        "Crystal swap with mirrored TOF bin must produce the same sinogram"
+        "Crystal swap with the same projector-convention TOF bin must produce "
+        "the same sinogram"
     )
-    # Both should land at TOF index tof_bin (not tof_bin_mirror)
     nz_fwd = np.argwhere(sino_fwd > 0)
     nz_bwd = np.argwhere(sino_bwd > 0)
     assert nz_fwd[0, -1] == tof_bin
     assert nz_bwd[0, -1] == tof_bin
-
-
-# ---------------------------------------------------------------------------
-# tof_bin_sign=-1
-# ---------------------------------------------------------------------------
-
-def test_tof_bin_sign_minus1(xp: ModuleType, dev: str) -> None:
-    """tof_bin_sign=-1 (bin 0 closest to d2): mirrored raw bin gives same sinogram.
-
-    With sign=-1, physical offset k from d1 corresponds to raw bin (n-1-k)
-    because bin 0 counts from d2 instead of d1.
-    """
-    num_tof_bins = 7
-    scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner)
-
-    sc = to_numpy_array(desc.start_in_ring_index)
-    ec = to_numpy_array(desc.end_in_ring_index)
-    sr = to_numpy_array(desc.start_plane_index)
-    er = to_numpy_array(desc.end_plane_index)
-
-    v0, r0 = _first_valid_vr(sc, ec)
-    d1, d2 = int(sc[v0, r0]), int(ec[v0, r0])
-    r1, r2 = int(sr[0]), int(er[0])
-    phys_bin = 2   # physical sinogram bin index
-
-    # sign=+1: raw bin = phys_bin (bin 0 from d1)
-    ev_p1 = xp.asarray([[d1, r1, d2, r2, phys_bin]], dtype=xp.int32, device=dev)
-    # sign=-1: bin 0 is from d2, so phys_bin from d1 = (n-1-phys_bin) from d2
-    raw_m1 = num_tof_bins - 1 - phys_bin
-    ev_m1 = xp.asarray([[d1, r1, d2, r2, raw_m1]], dtype=xp.int32, device=dev)
-
-    sino_p1 = regular_polygon_events_to_sinogram(
-        desc, ev_p1, num_tof_bins=num_tof_bins, tof_bin_sign=1
-    )
-    sino_m1 = regular_polygon_events_to_sinogram(
-        desc, ev_m1, num_tof_bins=num_tof_bins, tof_bin_sign=-1
-    )
-
-    assert np.allclose(sino_p1, sino_m1), (
-        "tof_bin_sign=-1 with mirrored raw bin must give the same sinogram"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -336,21 +346,21 @@ def test_tof_bin_sign_minus1(xp: ModuleType, dev: str) -> None:
 def test_out_of_fov_events_dropped(xp: ModuleType, dev: str) -> None:
     """Events outside the FOV are silently discarded — sinogram stays zero."""
     scanner = _small_scanner(xp, dev, num_rings=3)
-    desc = _lor_desc(scanner, max_ring_difference=1)
+    proj = _small_proj(scanner, max_ring_difference=1)
 
     n_crystals = scanner.num_lor_endpoints_per_ring
     num_rings = scanner.num_rings
 
     invalid_rows = [
-        [n_crystals, 0, 0, 0],           # d1 out of range
-        [-1, 0, 0, 0],                    # d1 negative
-        [0, 0, 1, num_rings],             # r2 out of range
-        [0, 0, 1, -1],                    # r2 negative
+        [n_crystals, 0, 0, 0],           # d_red out of range
+        [-1, 0, 0, 0],                    # d_red negative
+        [0, 0, 1, num_rings],             # r_blue out of range
+        [0, 0, 1, -1],                    # r_blue negative
         [0, 0, 1, 2],                     # ring difference (=2) > max_ring_difference (=1)
         [0, 0, 0, 0],                     # same crystal → invalidated by fill_diagonal
     ]
-    events = xp.asarray(invalid_rows, dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events)
+    events_np = np.array(invalid_rows, dtype=np.int32)
+    sino = _unlist(proj, events_np)
     assert np.all(sino == 0), "All out-of-FOV events must be silently dropped"
 
 
@@ -358,7 +368,10 @@ def test_out_of_range_tof_bin_dropped(xp: ModuleType, dev: str) -> None:
     """TOF events with out-of-range bins are dropped."""
     num_tof_bins = 5
     scanner = _small_scanner(xp, dev, num_rings=2)
-    desc = _lor_desc(scanner)
+    tof_params = ppt.TOFParameters(num_tofbins=num_tof_bins, tofbin_width=40.0,
+                                   sigma_tof=5.0, tofcenter_offset=0.0)
+    proj = _small_proj(scanner, tof_params=tof_params)
+    desc = proj.lor_descriptor
 
     sc = to_numpy_array(desc.start_in_ring_index)
     ec = to_numpy_array(desc.end_in_ring_index)
@@ -369,15 +382,14 @@ def test_out_of_range_tof_bin_dropped(xp: ModuleType, dev: str) -> None:
     d1, d2 = int(sc[v0, r0]), int(ec[v0, r0])
     r1, r2 = int(sr[0]), int(er[0])
 
-    events = xp.asarray(
+    invalid_tof_rows = np.array(
         [
             [d1, r1, d2, r2, num_tof_bins],      # bin == num_tof_bins → out of range
             [d1, r1, d2, r2, -1],                # negative bin
         ],
-        dtype=xp.int32,
-        device=dev,
+        dtype=np.int32,
     )
-    sino = regular_polygon_events_to_sinogram(desc, events, num_tof_bins=num_tof_bins)
+    sino = _unlist(proj, invalid_tof_rows)
     assert np.all(sino == 0)
 
 
@@ -388,7 +400,8 @@ def test_out_of_range_tof_bin_dropped(xp: ModuleType, dev: str) -> None:
 def test_span3_round_trip(xp: ModuleType, dev: str) -> None:
     """Span-3: total count equals number of contributing (ring-pair, view, rad) triples."""
     scanner = _small_scanner(xp, dev, num_rings=5)
-    desc = _lor_desc(scanner, span=3, max_ring_difference=3)
+    proj = _small_proj(scanner, span=3, max_ring_difference=3)
+    desc = proj.lor_descriptor
 
     m = desc.michelogram
     sc = to_numpy_array(desc.start_in_ring_index)
@@ -403,8 +416,8 @@ def test_span3_round_trip(xp: ModuleType, dev: str) -> None:
         for r in range(desc.num_rad)
         if valid_vr[v, r]
     ]
-    events = xp.asarray(rows, dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events)
+    events_np = np.array(rows, dtype=np.int32)
+    sino = _unlist(proj, events_np)
 
     assert sino.shape == desc.spatial_sinogram_shape
     assert float(sino.sum()) == float(len(rows))
@@ -413,7 +426,8 @@ def test_span3_round_trip(xp: ModuleType, dev: str) -> None:
 def test_span3_single_event_plane(xp: ModuleType, dev: str) -> None:
     """A single span-3 event lands in the correct sinogram plane."""
     scanner = _small_scanner(xp, dev, num_rings=5)
-    desc = _lor_desc(scanner, span=3, max_ring_difference=3)
+    proj = _small_proj(scanner, span=3, max_ring_difference=3)
+    desc = proj.lor_descriptor
 
     m = desc.michelogram
     sc = to_numpy_array(desc.start_in_ring_index)
@@ -426,8 +440,8 @@ def test_span3_single_event_plane(xp: ModuleType, dev: str) -> None:
     d1 = int(sc[v0, r0])
     d2 = int(ec[v0, r0])
 
-    events = xp.asarray([[d1, r1, d2, r2]], dtype=xp.int32, device=dev)
-    sino = regular_polygon_events_to_sinogram(desc, events)
+    events_np = np.array([[d1, r1, d2, r2]], dtype=np.int32)
+    sino = _unlist(proj, events_np)
 
     assert sino.sum() == 1.0
     nz = np.argwhere(sino > 0)
@@ -448,7 +462,8 @@ def test_sinogram_order_variants(xp: ModuleType, dev: str) -> None:
         ppl.SinogramSpatialAxisOrder.PVR,
         ppl.SinogramSpatialAxisOrder.VRP,
     ]:
-        desc = _lor_desc(scanner, sinogram_order=order)
+        proj = _small_proj(scanner, sinogram_order=order)
+        desc = proj.lor_descriptor
         sc = to_numpy_array(desc.start_in_ring_index)
         ec = to_numpy_array(desc.end_in_ring_index)
         sr = to_numpy_array(desc.start_plane_index)
@@ -458,8 +473,8 @@ def test_sinogram_order_variants(xp: ModuleType, dev: str) -> None:
         d1, d2 = int(sc[v0, r0]), int(ec[v0, r0])
         r1, r2 = int(sr[0]), int(er[0])
 
-        events = xp.asarray([[d1, r1, d2, r2]], dtype=xp.int32, device=dev)
-        sino = regular_polygon_events_to_sinogram(desc, events)
+        events_np = np.array([[d1, r1, d2, r2]], dtype=np.int32)
+        sino = _unlist(proj, events_np)
 
         assert sino.shape == desc.spatial_sinogram_shape, f"Wrong shape for {order}"
         assert sino.sum() == 1.0, f"Wrong total count for {order}"
@@ -470,74 +485,105 @@ def test_sinogram_order_variants(xp: ModuleType, dev: str) -> None:
 # ---------------------------------------------------------------------------
 
 def test_empty_events_non_tof(xp: ModuleType, dev: str) -> None:
-    """Empty non-TOF event array returns a zero sinogram of the right shape."""
+    """Empty non-TOF event arrays return a zero sinogram of the right shape."""
     scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events_np = np.zeros((0, 4), dtype=np.int32)
-    sino = regular_polygon_events_to_sinogram(desc, events_np)
+    proj = _small_proj(scanner)
+    desc = proj.lor_descriptor
+    dev_ = desc.dev
+    d_red = xp.zeros(0, dtype=xp.int32, device=dev_)
+    r_red = xp.zeros(0, dtype=xp.int32, device=dev_)
+    d_blue = xp.zeros(0, dtype=xp.int32, device=dev_)
+    r_blue = xp.zeros(0, dtype=xp.int32, device=dev_)
+    sino = to_numpy_array(_sinogram_native(proj, d_red, r_red, d_blue, r_blue))
     assert sino.shape == desc.spatial_sinogram_shape
     assert np.all(sino == 0)
 
 
 def test_empty_events_tof(xp: ModuleType, dev: str) -> None:
-    """Empty TOF event array returns a zero sinogram of the right shape."""
+    """Empty TOF event arrays return a zero sinogram of the right shape."""
     num_tof_bins = 5
     scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events_np = np.zeros((0, 5), dtype=np.int32)
-    sino = regular_polygon_events_to_sinogram(desc, events_np, num_tof_bins=num_tof_bins)
+    tof_params = ppt.TOFParameters(num_tofbins=num_tof_bins, tofbin_width=40.0,
+                                   sigma_tof=5.0, tofcenter_offset=0.0)
+    proj = _small_proj(scanner, tof_params=tof_params)
+    desc = proj.lor_descriptor
+    dev_ = desc.dev
+    d_red = xp.zeros(0, dtype=xp.int32, device=dev_)
+    r_red = xp.zeros(0, dtype=xp.int32, device=dev_)
+    d_blue = xp.zeros(0, dtype=xp.int32, device=dev_)
+    r_blue = xp.zeros(0, dtype=xp.int32, device=dev_)
+    unsigned_sinogram_tof_bin = xp.zeros(0, dtype=xp.int32, device=dev_)
+    sino = to_numpy_array(
+        _sinogram_native(
+            proj, d_red, r_red, d_blue, r_blue,
+            unsigned_sinogram_tof_bin=unsigned_sinogram_tof_bin,
+        )
+    )
     assert sino.shape == (*desc.spatial_sinogram_shape, num_tof_bins)
     assert np.all(sino == 0)
 
 
 # ---------------------------------------------------------------------------
-# Error cases
+# detection_times_to_tof_bin
 # ---------------------------------------------------------------------------
 
-def test_error_bad_tof_bin_sign(xp: ModuleType, dev: str) -> None:
-    """tof_bin_sign values other than ±1 must raise ValueError."""
-    scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events = xp.asarray([[0, 0, 1, 0, 0]], dtype=xp.int32, device=dev)
-    with pytest.raises(ValueError, match="tof_bin_sign"):
-        regular_polygon_events_to_sinogram(desc, events, num_tof_bins=5, tof_bin_sign=0)
+@pytest.mark.skipif(
+    detection_times_to_tof_bin is None,
+    reason="detection_times_to_tof_bin not yet implemented in parallelproj.unlist",
+)
+def test_detection_times_to_tof_bin(xp: ModuleType, dev: str) -> None:
+    """detection_times_to_tof_bin maps physical detection time differences to bins."""
+    num_tof_bins = 5
+    tof_bin_width = 40.0  # mm
+    scanner = _small_scanner(xp, dev, num_rings=1)
+    tof_params = ppt.TOFParameters(num_tofbins=num_tof_bins, tofbin_width=tof_bin_width,
+                                   sigma_tof=5.0, tofcenter_offset=0.0)
+    proj = _small_proj(scanner, tof_params=tof_params)
+    desc = proj.lor_descriptor
+
+    sc = to_numpy_array(desc.start_in_ring_index)
+    ec = to_numpy_array(desc.end_in_ring_index)
+    sr = to_numpy_array(desc.start_plane_index)
+    er = to_numpy_array(desc.end_plane_index)
+
+    v0, r0 = _first_valid_vr(sc, ec)
+    d_red_val  = int(sc[v0, r0])   # xstart crystal
+    d_blue_val = int(ec[v0, r0])
+
+    # Scenario 1: dt=0 → emission at LOR midpoint → center bin = (N-1)//2
+    center_bin = (num_tof_bins - 1) // 2
+    dt_center = np.array([0.0], dtype=np.float32)
+
+    d_red_arr = xp.asarray([d_red_val], dtype=xp.int32, device=dev)
+    d_blue_arr = xp.asarray([d_blue_val], dtype=xp.int32, device=dev)
+    dt_arr = xp.asarray(dt_center, device=dev)
+
+    bin_center = to_numpy_array(
+        detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj)
+    )
+    assert int(bin_center[0]) == center_bin, (
+        f"dt=0 should give center bin {center_bin}, got {bin_center[0]}"
+    )
+
+    # Scenario 2: emission fully toward xstart (bin 0).
+    # With d_red=xstart (sign=+1):
+    #   k = round((N-1)/2 - dx_blue_red / W)  →  k=0  ⟺  dx_blue_red = (N-1)/2 * W
+    # dx_blue_red = (c/2) * dt  →  dt = (N-1)/2 * W / (c/2)   [nanoseconds]
+    from parallelproj.unlist import C_MM_PER_NS
+    dt_bin0_ns = float((num_tof_bins - 1) / 2.0 * tof_bin_width / (C_MM_PER_NS / 2.0))
+    dt_bin0_arr = xp.asarray(np.array([dt_bin0_ns], dtype=np.float32), device=dev)
+
+    bin0 = to_numpy_array(
+        detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_bin0_arr, proj)
+    )
+    assert int(bin0[0]) == 0, (
+        f"dt corresponding to bin 0 should give bin 0, got {bin0[0]}"
+    )
 
 
-def test_error_missing_num_tof_bins(xp: ModuleType, dev: str) -> None:
-    """5-column events without num_tof_bins must raise ValueError."""
-    scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events = xp.asarray([[0, 0, 1, 0, 0]], dtype=xp.int32, device=dev)
-    with pytest.raises(ValueError, match="num_tof_bins"):
-        regular_polygon_events_to_sinogram(desc, events)
-
-
-def test_error_spurious_num_tof_bins(xp: ModuleType, dev: str) -> None:
-    """4-column events with num_tof_bins specified must raise ValueError."""
-    scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events = xp.asarray([[0, 0, 1, 0]], dtype=xp.int32, device=dev)
-    with pytest.raises(ValueError, match="num_tof_bins"):
-        regular_polygon_events_to_sinogram(desc, events, num_tof_bins=5)
-
-
-def test_error_wrong_col_count(xp: ModuleType, dev: str) -> None:
-    """Event arrays with column count other than 4 or 5 must raise ValueError."""
-    scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events = xp.asarray([[0, 0, 1]], dtype=xp.int32, device=dev)
-    with pytest.raises(ValueError, match="columns"):
-        regular_polygon_events_to_sinogram(desc, events)
-
-
-def test_error_1d_events(xp: ModuleType, dev: str) -> None:
-    """1-D event array must raise ValueError."""
-    scanner = _small_scanner(xp, dev)
-    desc = _lor_desc(scanner)
-    events = xp.asarray([0, 0, 1, 0], dtype=xp.int32, device=dev)
-    with pytest.raises(ValueError, match="2D"):
-        regular_polygon_events_to_sinogram(desc, events)
-
+# ---------------------------------------------------------------------------
+# Error cases
+# ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not _no_bincount_xp_dev, reason="no non-bincount backends available")
 def test_error_no_bincount_backend(xp: ModuleType, dev: str) -> None:  # noqa: ARG001
@@ -547,10 +593,15 @@ def test_error_no_bincount_backend(xp: ModuleType, dev: str) -> None:  # noqa: A
     the test unconditionally exercises array_api_strict.
     """
     import array_api_strict as xp_strict
-
     import numpy as np_plain
+
     scanner = _small_scanner(np_plain, "cpu")
-    desc = _lor_desc(scanner)
-    events = xp_strict.asarray([[0, 0, 1, 0]])
+    proj = _small_proj(scanner)
+
+    d_red = xp_strict.asarray([0], dtype=xp_strict.int32)
+    r_red = xp_strict.asarray([0], dtype=xp_strict.int32)
+    d_blue = xp_strict.asarray([1], dtype=xp_strict.int32)
+    r_blue = xp_strict.asarray([0], dtype=xp_strict.int32)
+
     with pytest.raises(NotImplementedError, match="bincount"):
-        regular_polygon_events_to_sinogram(desc, events)
+        _sinogram_native(proj, d_red, r_red, d_blue, r_blue)
