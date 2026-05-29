@@ -40,12 +40,10 @@ import parallelproj.tof
 from parallelproj import to_numpy_array
 from parallelproj.unlist import (
     C_MM_PER_NS,
-    _build_inring_luts,
     detection_times_to_tof_bin,
     regular_polygon_events_to_sinogram,
 )
 from img import elliptic_cylinder_phantom
-from vis import show_vol_cuts
 
 # %%
 from array_utils import suggest_array_backend_and_device
@@ -196,7 +194,8 @@ print("TOF  round-trip: OK")
 #   ``t_blue − t_red = −1 ns`` (blue photon arrives first).
 #
 # :func:`.detection_times_to_tof_bin` looks up whether d_red is xstart or xend
-# and applies the correct sign so that both events land in the expected bin.
+# and applies the correct sign so that both events land in the expected TOF bin for the
+# sinogram projector
 #
 radius_sign = 300.0  # mm  →  diameter = 600 mm
 num_tof_bins_s = 6
@@ -231,25 +230,42 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 )
 
 # %%
-# Which crystal is xstart for the LOR d1–d5?
+# Identify xstart / xend for the d_red=1 / d_blue=5 LOR.
+#
+# ``start_in_ring_index`` and ``end_in_ring_index`` record which crystal is
+# the canonical xstart / xend for every sinogram bin.  We find the bin that
+# covers our crystal pair, then read off the world coordinates directly from
+# ``get_lor_coordinates()``.
 
-lut_sign, sign_lut_sign = _build_inring_luts(lor_desc_sign)
 d_red_ev, d_blue_ev = 1, 5
-assert lut_sign[d_red_ev, d_blue_ev] >= 0, "LOR (1,5) not in sinogram FOV"
 
-sign_val = int(sign_lut_sign[d_red_ev, d_blue_ev])
-idx_xstart = d_red_ev if sign_val == 1 else d_blue_ev
-idx_xend = d_blue_ev if sign_val == 1 else d_red_ev
+sc = to_numpy_array(lor_desc_sign.start_in_ring_index)  # (num_views, num_rad)
+ec = to_numpy_array(lor_desc_sign.end_in_ring_index)
+
+# Find which (view, rad) entry covers the d_red–d_blue LOR.
+lor_mask = ((sc == d_red_ev) & (ec == d_blue_ev)) | (
+    (sc == d_blue_ev) & (ec == d_red_ev)
+)
+v_lor, r_lor = np.argwhere(lor_mask)[0]
+
+# get_lor_coordinates returns (xstart, xend) in the sinogram axis order (RVP).
+# Shape: (num_rad, num_views, num_planes, 3)  →  index [r, v, plane, xyz].
+xstart_all, xend_all = lor_desc_sign.get_lor_coordinates()
+xstart_xy = to_numpy_array(xstart_all)[r_lor, v_lor, 0, :2]
+xend_xy = to_numpy_array(xend_all)[r_lor, v_lor, 0, :2]
+
+idx_xstart = int(sc[v_lor, r_lor])
+idx_xend = int(ec[v_lor, r_lor])
+sign_val = 1 if idx_xstart == d_red_ev else -1
 
 print(
     f"\nLOR d{d_red_ev}–d{d_blue_ev}: xstart=d{idx_xstart}, xend=d{idx_xend}"
-    f"  (sign[{d_red_ev},{d_blue_ev}]={sign_val:+d})"
+    f"  (sign={sign_val:+d})"
 )
 
-# World (x, y) coordinates
+# World (x, y) coordinates of all 8 detectors (needed for the scatter plot).
 all_coords_s = to_numpy_array(scanner_sign.all_lor_endpoints)[:, :2]
-xstart_xy = all_coords_s[idx_xstart]
-xend_xy = all_coords_s[idx_xend]
+
 midpoint_xy = (xstart_xy + xend_xy) / 2
 lor_dir = (xend_xy - xstart_xy) / np.linalg.norm(xend_xy - xstart_xy)
 
@@ -264,7 +280,6 @@ tof_centers_s = np.array(
 # %%
 # Two events on the same LOR, 150 mm off-centre in opposite directions.
 
-dt_evs = [+1.0, -1.0, +0.5, -0.5]
 
 d_red_arr = xp.asarray(
     [d_red_ev, d_red_ev, d_blue_ev, d_blue_ev], dtype=xp.int32, device=dev
@@ -272,12 +287,13 @@ d_red_arr = xp.asarray(
 d_blue_arr = xp.asarray(
     [d_blue_ev, d_blue_ev, d_red_ev, d_red_ev], dtype=xp.int32, device=dev
 )
+
+dt_evs = [+1.0, -1.0, +0.5, -0.5]
 dt_arr = xp.asarray(np.array(dt_evs, dtype=np.float32), device=dev)
 
-sino_bins = to_numpy_array(
-    detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
-)
+sino_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
 
+# %%
 # Step-by-step calculation
 print(
     f"\nN={num_tof_bins_s} bins, W={tofbin_width_s:.0f} mm,  "
@@ -405,7 +421,8 @@ for k in range(num_tof_bins_s):
 # Two events (stars) with dashed line to their assigned bin
 ev_colors = ["C0", "C1", "C2", "C3"]
 ev_labels = [
-    f"Event {i+1} d_red={int(d_red_arr[i])} d_blue={int(d_blue_arr[i])} (t_blue - t_red)={dt_evs[i]}ns"
+    f"Event {i+1}: d_red={int(d_red_arr[i])}, d_blue={int(d_blue_arr[i])},"
+    f" dt={dt_evs[i]:+.1f} ns → bin {sino_bins[i]}"
     for i in range(4)
 ]
 
@@ -430,30 +447,5 @@ ax_sign.set_xlabel("x (mm)")
 ax_sign.set_ylabel("y (mm)")
 fig_sign.tight_layout()
 fig_sign.show()
-
-## %%
-## Main sinograms
-## --------------
-#
-## %%
-# _, _, _w1 = show_vol_cuts(
-#    to_numpy_array(y_span1),
-#    axis_labels=("rad", "view", "plane"),
-#    fig_title="y_span1  (non-TOF span-1, sum over TOF bins)",
-# )
-#
-## %%
-# _, _, _w2 = show_vol_cuts(
-#    to_numpy_array(y_span3),
-#    axis_labels=("rad", "view", "plane"),
-#    fig_title="y_span3  (span-3, max_ring_difference=2)",
-# )
-#
-## %%
-# _, _, _w3 = show_vol_cuts(
-#    to_numpy_array(y_tof).transpose(3, 0, 1, 2),
-#    axis_labels=("tof", "rad", "view", "plane"),
-#    fig_title="y_tof  (TOF span-1)",
-# )
 
 plt.show()
