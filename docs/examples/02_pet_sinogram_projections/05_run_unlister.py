@@ -295,31 +295,26 @@ v_lor, r_lor = np.argwhere(lor_mask)[0]
 # get_lor_coordinates returns (xstart, xend) in the sinogram axis order (RVP).
 # Shape: (num_rad, num_views, num_planes, 3)  →  index [r, v, plane, xyz].
 xstart_all, xend_all = lor_desc_sign.get_lor_coordinates()
-xstart_xy = to_numpy_array(xstart_all)[r_lor, v_lor, 0, :2]
-xend_xy = to_numpy_array(xend_all)[r_lor, v_lor, 0, :2]
+xstart_xyz = to_numpy_array(xstart_all)[r_lor, v_lor, 0, :]   # full (x, y, z)
+xend_xyz   = to_numpy_array(xend_all)[r_lor, v_lor, 0, :]
 
 idx_xstart = int(sc[v_lor, r_lor])
-idx_xend = int(ec[v_lor, r_lor])
-sign_val = 1 if idx_xstart == d_red_ev else -1
+idx_xend   = int(ec[v_lor, r_lor])
+sign_val   = 1 if idx_xstart == d_red_ev else -1
 
 print(
     f"\nLOR d{d_red_ev}–d{d_blue_ev}: xstart=d{idx_xstart}, xend=d{idx_xend}"
     f"  (sign={sign_val:+d})"
 )
 
-# World (x, y) coordinates of all 8 detectors (needed for the scatter plot).
-all_coords_s = to_numpy_array(scanner_sign.all_lor_endpoints)[:, :2]
+midpoint_xyz = (xstart_xyz + xend_xyz) / 2
+lor_dir      = (xend_xyz - xstart_xyz) / np.linalg.norm(xend_xyz - xstart_xyz)
 
-midpoint_xy = (xstart_xy + xend_xy) / 2
-lor_dir = (xend_xy - xstart_xy) / np.linalg.norm(xend_xy - xstart_xy)
-
-# TOF bin-centre positions (bin 0 = closest to xstart)
-tof_centers_s = np.array(
-    [
-        midpoint_xy + (k - (num_tof_bins_s - 1) / 2) * tofbin_width_s * lor_dir
-        for k in range(num_tof_bins_s)
-    ]
-)
+# TOF bin-centre positions in 3-D (bin 0 = closest to xstart)
+tof_centers_s = np.array([
+    midpoint_xyz + (k - (num_tof_bins_s - 1) / 2) * tofbin_width_s * lor_dir
+    for k in range(num_tof_bins_s)
+])
 
 # %%
 # Four events — two orderings of the same LOR
@@ -376,9 +371,9 @@ for i, (dt_val, bin_val, sgn) in enumerate(zip(dt_evs, sino_bins, signs), start=
         f"  {k_th:>9.3f}  {bin_val:>4d}"
     )
 
-# Physical emission positions: s = -sign × dx_blue_red from midpoint toward xend
-ev_xy = [
-    midpoint_xy + (-signs[i] * dt_evs[i] * C_MM_PER_NS / 2) * lor_dir
+# Physical emission positions in 3-D: s = -sign × dx_blue_red from midpoint
+ev_xyz = [
+    midpoint_xyz + (-signs[i] * dt_evs[i] * C_MM_PER_NS / 2) * lor_dir
     for i in range(4)
 ]
 
@@ -401,93 +396,50 @@ for i in range(4):
 
 # %%
 # Visualisation
+#
+# Use the built-in scanner and LOR-descriptor methods to draw detector
+# positions in 3-D, then overlay the LOR, TOF bin edges, and events.
 
-fig_sign, ax_sign = plt.subplots(figsize=(9, 9))
+fig_sign = plt.figure(figsize=(9, 9))
+ax_sign = fig_sign.add_subplot(111, projection="3d")
 
-# Scanner ring
-theta = np.linspace(0, 2 * np.pi, 300)
+# All detector positions, labelled with their crystal index.
+scanner_sign.show_lor_endpoints(ax_sign, annotation_fontsize=11)
+
+# The projector LOR: a line from xstart to xend with coloured endpoint markers.
 ax_sign.plot(
-    radius_sign * np.cos(theta),
-    radius_sign * np.sin(theta),
-    color="lightgray",
-    lw=1,
-    zorder=0,
+    [xstart_xyz[0], xend_xyz[0]],
+    [xstart_xyz[1], xend_xyz[1]],
+    [xstart_xyz[2], xend_xyz[2]],
+    "k-", lw=1.5, zorder=4,
 )
+ax_sign.scatter(*xstart_xyz, color="green",     s=80, zorder=6, marker="D",
+                label=f"xstart = d{idx_xstart}")
+ax_sign.scatter(*xend_xyz,   color="firebrick", s=80, zorder=6, marker="D",
+                label=f"xend   = d{idx_xend}")
 
-# All 8 detectors
-for d in range(8):
-    ax_sign.scatter(*all_coords_s[d], color="steelblue", s=180, zorder=5)
-    offset = all_coords_s[d] / np.linalg.norm(all_coords_s[d]) * 26
-    ax_sign.annotate(
-        f"d{d}",
-        all_coords_s[d] + offset,
-        ha="center",
-        va="center",
-        fontsize=11,
-    )
+# TOF bin edges: N+1 line segments perpendicular to the LOR in the z=0 plane.
+perp_dir = np.array([-lor_dir[1], lor_dir[0], 0.0])   # unit vector ⊥ LOR
+seg_half = 40.0                                         # mm  →  80 mm total
 
-# LOR arrow (xstart → xend)
-ax_sign.annotate(
-    "",
-    xy=xend_xy,
-    xytext=xstart_xy,
-    arrowprops={"arrowstyle": "->", "color": "black", "lw": 2.0},
-)
-ax_sign.scatter(
-    *xstart_xy,
-    color="green",
-    s=50,
-    zorder=6,
-    marker="D",
-    label=f"xstart = d{idx_xstart}",
-)
-ax_sign.scatter(
-    *xend_xy,
-    color="firebrick",
-    s=50,
-    zorder=6,
-    marker="D",
-    label=f"xend   = d{idx_xend}",
-)
-
-# TOF bin edges as coloured line segments perpendicular to the LOR.
-# There are N+1 edges; colours run from blue (xstart end) to red (xend end).
-perp_dir = np.array([-lor_dir[1], lor_dir[0]])  # unit vector ⊥ to LOR
-seg_half = 40.0  # mm  →  80 mm total segment length
-
-# Edge j sits at (j − N/2) × W from the LOR midpoint toward xend.
-edge_xy = np.array(
-    [
-        midpoint_xy + (j - num_tof_bins_s / 2) * tofbin_width_s * lor_dir
-        for j in range(num_tof_bins_s + 1)
-    ]
-)
-edge_colors = plt.cm.coolwarm(np.linspace(0, 1, num_tof_bins_s + 1))
+edge_xyz = np.array([
+    midpoint_xyz + (j - num_tof_bins_s / 2) * tofbin_width_s * lor_dir
+    for j in range(num_tof_bins_s + 1)
+])
 
 for j in range(num_tof_bins_s + 1):
-    p1 = edge_xy[j] - seg_half * perp_dir
-    p2 = edge_xy[j] + seg_half * perp_dir
-    ax_sign.plot(
-        [p1[0], p2[0]],
-        [p1[1], p2[1]],
-        # color=edge_colors[j],
-        color="k",
-        lw=1.0,
-        solid_capstyle="round",
-    )
+    p1 = edge_xyz[j] - seg_half * perp_dir
+    p2 = edge_xyz[j] + seg_half * perp_dir
+    ax_sign.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+                 color="k", lw=1.0, solid_capstyle="round")
 
-# Bin labels placed at the bin centres, offset beyond the segment end.
-label_side = perp_dir * (seg_half + 18)
+# Bin labels at bin centres, offset perpendicular to the LOR.
+label_offset = perp_dir * (seg_half + 22)
 for k in range(num_tof_bins_s):
-    ax_sign.annotate(
-        f"sino TOF bin {k}",
-        tof_centers_s[k] + label_side,
-        ha="center",
-        va="center",
-        fontsize=9,
-    )
+    lp = tof_centers_s[k] + label_offset
+    ax_sign.text(lp[0], lp[1], lp[2], f"bin {k}", fontsize=8, ha="center")
 
-# Two events (stars) with dashed line to their assigned bin
+# Events as stars, with a dashed line to their sinogram TOF bin centre.
 ev_colors = ["C0", "C1", "C2", "C3"]
 ev_labels = [
     f"Event {i+1}: d_red={int(d_red_arr[i])}, d_blue={int(d_blue_arr[i])},"
@@ -496,24 +448,24 @@ ev_labels = [
 ]
 
 for i in range(4):
-    ax_sign.scatter(
-        *ev_xy[i], color=ev_colors[i], marker="*", s=200, zorder=7, label=ev_labels[i]
-    )
-    ax_sign.plot(
-        [ev_xy[i][0], tof_centers_s[sino_bins[i]][0]],
-        [ev_xy[i][1], tof_centers_s[sino_bins[i]][1]],
-        color=ev_colors[i],
-        lw=1.2,
-        linestyle="--",
-        zorder=3,
-    )
+    ax_sign.scatter(*ev_xyz[i], color=ev_colors[i], marker="*", s=200,
+                    zorder=7, label=ev_labels[i])
+    bc = tof_centers_s[sino_bins[i]]
+    ax_sign.plot([ev_xyz[i][0], bc[0]], [ev_xyz[i][1], bc[1]],
+                 [ev_xyz[i][2], bc[2]],
+                 color=ev_colors[i], lw=1.2, linestyle="--", zorder=3)
 
-ax_sign.set_aspect("equal")
-ax_sign.set_xlim(-500, 500)
-ax_sign.set_ylim(-500, 500)
-ax_sign.legend(loc="upper right", fontsize=9, framealpha=0.9, ncols=2)
-ax_sign.set_xlabel("x (mm)")
-ax_sign.set_ylabel("y (mm)")
+lim = radius_sign * 1.3
+ax_sign.set_xlim(-lim, lim)
+ax_sign.set_ylim(-lim, lim)
+ax_sign.set_zlim(-lim / 4, lim / 4)
+ax_sign.view_init(elev=25, azim=-60)
+ax_sign.legend(loc="upper right", fontsize=8, framealpha=0.9, ncols=2)
+ax_sign.set_title(
+    f"TOF sign — d_red=d{d_red_ev}, d_blue=d{d_blue_ev},  "
+    f"{num_tof_bins_s} bins × {tofbin_width_s:.0f} mm",
+    fontsize=10,
+)
 fig_sign.tight_layout()
 fig_sign.show()
 
