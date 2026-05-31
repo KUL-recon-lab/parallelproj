@@ -5,28 +5,68 @@ Listmode to sinogram histogramming (unlister)
 This example demonstrates :func:`.regular_polygon_events_to_sinogram`,
 which histograms listmode events into a sinogram.
 
-Each event is described by four arrays ``(d_red, r_red, d_blue, r_blue)``
-— in-ring crystal and ring indices for the two coincidence detectors —
-plus an optional ``unsigned_sinogram_tof_bin`` array in the **projector convention**
-(bin 0 = closest to the canonical xstart crystal).
+Red / blue detector naming
+--------------------------
+Each coincidence event involves two crystal detectors.  We label them
+**red** and **blue** — arbitrary colour names with *no* implied ordering.
+The older *d1 / d2* labels were dropped because "1" suggests
+"first-to-fire", but in raw PET data either crystal can fire first.  The
+colour labels make it unambiguous that only *identity*, not
+*chronological order*, is encoded.
 
-The *red / blue* labels have no physical meaning beyond identifying the two
-detectors; they replace the older *d1 / d2* notation to avoid implying
-chronological ordering.
+t_blue − t_red convention
+--------------------------
+:func:`.detection_times_to_tof_bin` always expects the arrival-time
+difference as ``t_blue − t_red`` (blue minus red, in nanoseconds).  The
+sign of this number tells you which detector fired *later*:
 
-We build a full simulation pipeline:
+* ``t_blue − t_red > 0`` → blue fired later → emission is closer to the
+  **red** detector.
+* ``t_blue − t_red < 0`` → red fired later → emission is closer to the
+  **blue** detector.
 
-1. **Forward-project** an ``elliptic_cylinder_phantom`` into a **TOF sinogram**.
+You **must** pass the difference in this fixed order.  Swapping to
+``t_red − t_blue`` would silently mirror every TOF bin assignment.
+
+Projector direction and the need for a sign check
+--------------------------------------------------
+The TOF sinogram projector always traces each LOR in one fixed direction:
+from the **canonical xstart** crystal to the **canonical xend** crystal.
+These are defined once by the LOR descriptor and never change.  The TOF
+bin numbering follows the projector direction: **bin 0 = closest to
+xstart**.
+
+Because the colour labels are arbitrary, the (d_red, d_blue) pair in a
+listmode file may or may not match the (xstart, xend) order the projector
+uses for that LOR:
+
+* ``d_red = xstart, d_blue = xend`` → ``t_blue − t_red > 0`` means
+  emission closer to xstart → low bin numbers.  No additional flip
+  needed.
+* ``d_red = xend,   d_blue = xstart`` → the same physical event now has
+  ``t_blue − t_red < 0``, and the mapping to sinogram TOF bins is
+  **mirrored**.
+
+:func:`.detection_times_to_tof_bin` resolves this per event by looking
+up whether d_red is xstart or xend from the LOR descriptor, and applies
+the correct sign flip automatically.
+
+Simulation pipeline
+-------------------
+1. **Forward-project** an ``elliptic_cylinder_phantom`` into a **TOF
+   sinogram**.
 2. **Add Poisson noise** to obtain ``y_tof``.
-3. Derive the non-TOF sinogram ``y_span1`` by **summing over the TOF axis**.
+3. Derive the non-TOF sinogram ``y_span1`` by **summing over the TOF
+   axis**.
 4. **Convert** ``y_tof`` to crystal-index events with
    :meth:`.RegularPolygonPETProjector.convert_sinogram_to_crystal_index_events`;
    non-TOF events drop the TOF column.
 5. Verify **non-TOF span-1 round-trip**.
 6. Verify **span-3 round-trip** (``max_ring_difference = 2``).
 7. Verify **TOF round-trip**.
-8. **TOF sign illustration** — shows why a per-event sign check is required
-   when converting raw detection times to projector-convention TOF bins.
+8. **TOF sign illustration** — four events on the same LOR, two with
+   d_red = xstart and two with d_red = xend, show that
+   :func:`.detection_times_to_tof_bin` handles both cases correctly.
 """
 
 # %%
@@ -183,19 +223,23 @@ print("TOF  round-trip: OK")
 # TOF sign illustration
 # ---------------------
 #
-# A single-ring scanner with 8 detectors and 6 TOF bins (100 mm each)
+# A single-ring scanner with 8 detectors and 6 TOF bins of 100 mm each
 # covering the full 600 mm diameter.
 #
-# We look at two events on the LOR between d1 and d5:
+# The projector traces the LOR connecting d1 and d5 always from
+# **xstart → xend** (determined by the LOR descriptor, fixed).
+# We construct four events on that LOR to show that
+# :func:`.detection_times_to_tof_bin` gives the correct sinogram TOF bin
+# regardless of which colour label is assigned to which physical detector:
 #
-# * **Event 1** — emission 150 mm from centre toward d_red (d1):
-#   ``t_blue − t_red = +1 ns`` (blue photon arrives later).
-# * **Event 2** — emission 150 mm from centre toward d_blue (d5):
-#   ``t_blue − t_red = −1 ns`` (blue photon arrives first).
+# * **Events 1 & 2** — ``d_red = xstart`` (same order as projector).
+#   Passing ``t_blue − t_red`` directly gives the right bin.
+# * **Events 3 & 4** — ``d_red = xend`` (reversed relative to projector).
+#   The sign of ``t_blue − t_red`` is now *mirrored* compared to the
+#   projector convention, and the helper applies the flip automatically.
 #
-# :func:`.detection_times_to_tof_bin` looks up whether d_red is xstart or xend
-# and applies the correct sign so that both events land in the expected TOF bin for the
-# sinogram projector
+# All four events call :func:`.detection_times_to_tof_bin` with the same
+# interface: ``(d_red, d_blue, t_blue − t_red, projector)``.
 #
 radius_sign = 300.0  # mm  →  diameter = 600 mm
 num_tof_bins_s = 6
@@ -278,8 +322,17 @@ tof_centers_s = np.array(
 )
 
 # %%
-# Two events on the same LOR, 150 mm off-centre in opposite directions.
-
+# Four events — two orderings of the same LOR
+# -------------------------------------------
+#
+# Events 1 & 2: d_red = d{d_red_ev} = xstart, d_blue = d{d_blue_ev} = xend.
+#   The (red, blue) labelling matches the projector direction → sign = +1.
+#
+# Events 3 & 4: d_red = d{d_blue_ev} = xend,  d_blue = d{d_red_ev} = xstart.
+#   Red and blue are swapped relative to the projector → sign = -1.
+#   The helper detects this and applies the flip automatically.
+#   Note that t_blue − t_red is now the difference in the *opposite* sense:
+#   positive means d_blue (= xstart here) arrived later.
 
 d_red_arr = xp.asarray(
     [d_red_ev, d_red_ev, d_blue_ev, d_blue_ev], dtype=xp.int32, device=dev
@@ -288,30 +341,46 @@ d_blue_arr = xp.asarray(
     [d_blue_ev, d_blue_ev, d_red_ev, d_red_ev], dtype=xp.int32, device=dev
 )
 
+# dt = t_blue − t_red for each event (nanoseconds)
 dt_evs = [+1.0, -1.0, +0.5, -0.5]
 dt_arr = xp.asarray(np.array(dt_evs, dtype=np.float32), device=dev)
 
-sino_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
+sino_bins = to_numpy_array(
+    detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
+)
+
+# Per-event sign: +1 if d_red is xstart for that event, -1 if d_red is xend.
+# Needed both for the formula display and for the physical emission positions.
+d_red_list  = [int(d_red_arr[i])  for i in range(4)]
+d_blue_list = [int(d_blue_arr[i]) for i in range(4)]
+signs = []
+for dr, db in zip(d_red_list, d_blue_list):
+    m = ((sc == dr) & (ec == db)) | ((sc == db) & (ec == dr))
+    vr = np.argwhere(m)[0]
+    signs.append(1 if sc[vr[0], vr[1]] == dr else -1)
 
 # %%
-# Step-by-step calculation
+# Step-by-step formula for each event
 print(
     f"\nN={num_tof_bins_s} bins, W={tofbin_width_s:.0f} mm,  "
-    f"c/2 = {C_MM_PER_NS/2:.3f} mm/ns"
+    f"c/2 = {C_MM_PER_NS/2:.3f} mm/ns\n"
+    f"  {'Event':<8}  {'d_red':>6}  {'d_blue':>6}  {'sign':>5}"
+    f"  {'dt (ns)':>8}  {'dx (mm)':>8}  {'k_theory':>9}  {'bin':>4}"
 )
-for i, (dt_val, bin_val) in enumerate(zip(dt_evs, sino_bins), start=1):
-    dx = dt_val * C_MM_PER_NS / 2
-    k_th = (num_tof_bins_s - 1) / 2.0 - sign_val * dx / tofbin_width_s
+for i, (dt_val, bin_val, sgn) in enumerate(zip(dt_evs, sino_bins, signs), start=1):
+    dx   = dt_val * C_MM_PER_NS / 2
+    k_th = (num_tof_bins_s - 1) / 2.0 - sgn * dx / tofbin_width_s
     print(
-        f"  Event {i}: dt={dt_val:+.1f} ns"
-        f"  dx_blue_red = {dx:+.1f} mm"
-        f"  k = round({(num_tof_bins_s-1)/2:.1f}"
-        f" − ({sign_val:+d})×{dx:.0f}/{tofbin_width_s:.0f})"
-        f" = round({k_th:.2f}) = bin {bin_val}"
+        f"  Event {i:<3}  {d_red_list[i-1]:>6}  {d_blue_list[i-1]:>6}"
+        f"  {sgn:>+5d}  {dt_val:>+8.1f}  {dx:>+8.1f}"
+        f"  {k_th:>9.3f}  {bin_val:>4d}"
     )
 
-# Physical emission positions along the LOR
-ev_xy = [midpoint_xy + (-sign_val * dt * C_MM_PER_NS / 2) * lor_dir for dt in dt_evs]
+# Physical emission positions: s = -sign × dx_blue_red from midpoint toward xend
+ev_xy = [
+    midpoint_xy + (-signs[i] * dt_evs[i] * C_MM_PER_NS / 2) * lor_dir
+    for i in range(4)
+]
 
 # Also unlist the events and verify the sinogram bin
 for i in range(4):
