@@ -847,7 +847,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     def show_tof_bins(
         self,
-        ax: Axes3D | None = None,
+        ax: Axes3D,
         views: int | Array | None = None,
         plane: int = 0,
         show_endpoints: bool = True,
@@ -855,7 +855,8 @@ class RegularPolygonPETProjector(LinearOperator):
         show_bin_labels: bool = False,
         label_fontsize: float = 8.0,
         lw: float = 2.0,
-    ) -> tuple:
+        show_colorbar: bool = False,
+    ) -> None:
         """Visualise the TOF bin grid for the specified sinogram views and plane.
 
         Each LOR is drawn as a sequence of coloured line segments — one per
@@ -868,9 +869,9 @@ class RegularPolygonPETProjector(LinearOperator):
 
         Parameters
         ----------
-        ax : Axes3D or None
-            3-D matplotlib axes to draw on.  A new figure is created when
-            ``None``.
+        ax : Axes3D
+            3-D matplotlib axes to draw on.  The caller is responsible for
+            creating the figure and axes.
         views : int, array-like, or None
             Sinogram view index / indices to draw.
 
@@ -896,11 +897,8 @@ class RegularPolygonPETProjector(LinearOperator):
             Font size for bin labels when ``show_bin_labels=True``.
         lw : float
             Line width of the coloured bin segments.  Default ``2.0``.
-
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-        ax : Axes3D
+        show_colorbar : bool
+            Add a colorbar mapping bin index to colour.  Default ``False``.
 
         Raises
         ------
@@ -915,11 +913,7 @@ class RegularPolygonPETProjector(LinearOperator):
         tofcenter_off = self._tof_parameters.tofcenter_offset
         lor_desc      = self.lor_descriptor
 
-        if ax is None:
-            fig = plt.figure()
-            ax = fig.add_subplot(111, projection="3d")
-        else:
-            fig = ax.get_figure()
+        fig = ax.get_figure()
 
         if views is None:
             views = self.xp.asarray(
@@ -1010,7 +1004,15 @@ class RegularPolygonPETProjector(LinearOperator):
         ax.set_ylabel("y (mm)")
         ax.set_zlabel("z (mm)")
 
-        return fig, ax
+        if show_colorbar:
+            from matplotlib.colors import Normalize
+            import matplotlib.cm as mpl_cm
+
+            norm = Normalize(vmin=0, vmax=num_tof_bins - 1)
+            sm = mpl_cm.ScalarMappable(cmap=bin_cmap, norm=norm)
+            sm.set_array([])
+            cbar = fig.colorbar(sm, ax=ax, shrink=0.4, pad=0.05, label="TOF bin")
+            cbar.set_ticks(range(num_tof_bins))
 
     def convert_sinogram_to_crystal_index_events(
         self, sinogram: Array, shuffle: bool = False

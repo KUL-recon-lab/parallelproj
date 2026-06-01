@@ -399,7 +399,9 @@ for i in range(4):
 # Visualisation — proj_sign.show_tof_bins() draws scanner + all LOR bin edges.
 # We overlay the four events on top.
 
-fig_sign, ax_sign = proj_sign.show_tof_bins(show_bin_labels=True)
+fig_sign = plt.figure(figsize=(10, 8))
+ax_sign = fig_sign.add_subplot(111, projection="3d")
+proj_sign.show_tof_bins(ax=ax_sign, views=int(v_lor), show_colorbar=True)
 
 ev_colors = ["C0", "C1", "C2", "C3"]
 ev_labels = [
@@ -428,7 +430,7 @@ ax_sign.set_xlim(-lim, lim)
 ax_sign.set_ylim(-lim, lim)
 ax_sign.set_zlim(-lim / 4, lim / 4)
 ax_sign.view_init(elev=25, azim=-60)
-ax_sign.legend(loc="upper right", fontsize=8, framealpha=0.9, ncols=2)
+ax_sign.legend(loc="upper right", fontsize=7, framealpha=0.9, ncols=1)
 fig_sign.tight_layout()
 fig_sign.show()
 
