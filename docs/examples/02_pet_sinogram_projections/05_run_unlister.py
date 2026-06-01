@@ -14,19 +14,19 @@ The older *d1 / d2* labels were dropped because "1" suggests
 colour labels make it unambiguous that only *identity*, not
 *chronological order*, is encoded.
 
-t_blue − t_red convention
---------------------------
-:func:`.detection_times_to_tof_bin` always expects the arrival-time
-difference as ``t_blue − t_red`` (blue minus red, in nanoseconds).  The
-sign of this number tells you which detector fired *later*:
+.. note::
 
-* ``t_blue − t_red > 0`` → blue fired later → emission is closer to the
-  **red** detector.
-* ``t_blue − t_red < 0`` → red fired later → emission is closer to the
-  **blue** detector.
+   :func:`.detection_times_to_tof_bin` always expects the arrival-time
+   difference as ``t_blue − t_red`` (blue minus red, in nanoseconds).
+   The sign tells you which detector fired *later*:
 
-You **must** pass the difference in this fixed order.  Swapping to
-``t_red − t_blue`` would silently mirror every TOF bin assignment.
+   * ``t_blue − t_red > 0`` → blue fired later → emission is closer to
+     the **red** detector.
+   * ``t_blue − t_red < 0`` → red fired later → emission is closer to
+     the **blue** detector.
+
+   You **must** pass the difference in this fixed order.  Swapping to
+   ``t_red − t_blue`` silently mirrors every TOF bin assignment.
 
 Projector direction and the need for a sign check
 --------------------------------------------------
@@ -59,14 +59,13 @@ Simulation pipeline
 3. Derive the non-TOF sinogram ``y_span1`` by **summing over the TOF
    axis**.
 4. **Convert** ``y_tof`` to crystal-index events with
-   :meth:`.RegularPolygonPETProjector.convert_sinogram_to_crystal_index_events`;
-   non-TOF events drop the TOF column.
+   :meth:`.RegularPolygonPETProjector.convert_sinogram_to_crystal_index_events`.
 5. Verify **non-TOF span-1 round-trip**.
 6. Verify **span-3 round-trip** (``max_ring_difference = 2``).
 7. Verify **TOF round-trip**.
-8. **TOF sign illustration** — four events on the same LOR, two with
-   d_red = xstart and two with d_red = xend, show that
-   :func:`.detection_times_to_tof_bin` handles both cases correctly.
+8. **TOF sign illustration** — six events on two LORs, with both orderings
+   of (d_red, d_blue) relative to (xstart, xend), show that
+   :func:`.detection_times_to_tof_bin` handles the sign flip correctly.
 """
 
 # %%
@@ -79,7 +78,6 @@ import parallelproj.projectors
 import parallelproj.tof
 from parallelproj import to_numpy_array
 from parallelproj.unlist import (
-    C_MM_PER_NS,
     detection_times_to_tof_bin,
     regular_polygon_events_to_sinogram,
 )
@@ -91,8 +89,12 @@ from array_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
+# Simulation setup
+# ----------------
+
+# %%
 # Scanner and LOR descriptor
-# --------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 num_rings = 5
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -127,8 +129,8 @@ print(
 print(f"Sinogram : {lor_desc.spatial_sinogram_shape}  (rad × views × planes)")
 
 # %%
-# Simulate TOF data; derive non-TOF sinogram by summing over TOF axis
-# -------------------------------------------------------------------
+# Simulate TOF data
+# ~~~~~~~~~~~~~~~~~
 
 proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
@@ -156,12 +158,12 @@ print(
 )
 
 # %%
-# Listmode events — unpack the stacked array into separate column arrays
-# ----------------------------------------------------------------------
+# Listmode events
+# ~~~~~~~~~~~~~~~
 #
-# ``convert_sinogram_to_crystal_index_events`` returns a numpy array with
-# columns ``(d_red, r_red, d_blue, r_blue[, unsigned_sinogram_tof_bin])``.
-# We move the arrays to the active device and unpack them.
+# :meth:`~.RegularPolygonPETProjector.convert_sinogram_to_crystal_index_events`
+# returns a numpy array with columns
+# ``(d_red, r_red, d_blue, r_blue, unsigned_sinogram_tof_bin)``.
 
 _events_np = proj.convert_sinogram_to_crystal_index_events(y_tof, shuffle=True)
 
@@ -177,16 +179,20 @@ d_red, r_red, d_blue, r_blue = d_red_tof, r_red_tof, d_blue_tof, r_blue_tof
 print(f"\nTotal events : {d_red.shape[0]}")
 
 # %%
-# Non-TOF round-trip (span-1)
-# ---------------------------
+# Round-trip verification
+# -----------------------
+
+# %%
+# Non-TOF round-trip
+# ~~~~~~~~~~~~~~~~~~
 
 sino_unlisted = regular_polygon_events_to_sinogram(proj, d_red, r_red, d_blue, r_blue)
 assert bool(xp.all(sino_unlisted == y_span1)), "Span-1 round-trip failed"
 print("\nSpan-1 round-trip: OK")
 
 # %%
-# Span-3 comparison  (max_ring_difference = 2)
-# --------------------------------------------
+# Span-3 comparison
+# ~~~~~~~~~~~~~~~~~
 
 op_compress = ppl.SinogramAxialCompressionOperator(lor_desc, target_span=3)
 span3_desc = op_compress.out_lor_descriptor
@@ -205,8 +211,8 @@ assert bool(xp.all(sino_span3_unlisted == y_span3)), "Span-3 round-trip failed"
 print("Span-3 round-trip: OK")
 
 # %%
-# TOF round-trip (span-1)
-# -----------------------
+# TOF round-trip
+# ~~~~~~~~~~~~~~
 
 sino_tof_unlisted = regular_polygon_events_to_sinogram(
     proj,
@@ -220,26 +226,22 @@ assert bool(xp.all(sino_tof_unlisted == y_tof)), "TOF round-trip failed"
 print("TOF  round-trip: OK")
 
 # %%
-# Event vs Sinogram TOF sign illustration
-# ---------------------------------------
+# Event vs sinogram TOF sign illustration
+# ----------------------------------------
 #
-# A single-ring scanner with 32 detectors (organized in 4 modules) and 25 TOF bins of 24 mm each
-# covering the full 600 mm diameter.
+# A single-ring scanner with 32 detectors (8 modules × 4 crystals) and
+# 25 TOF bins of 24 mm each covering the full 600 mm diameter.
 #
-# The projector traces the LOR connecting d1 and d5 always from
-# **xstart → xend** (determined by the LOR descriptor, fixed).
-# We construct four events on that LOR to show that
-# :func:`.detection_times_to_tof_bin` gives the correct sinogram TOF bin
-# regardless of which colour label is assigned to which physical detector:
+# Six events on two LORs demonstrate that :func:`.detection_times_to_tof_bin`
+# assigns the correct sinogram TOF bin regardless of which colour label is
+# assigned to which physical detector:
 #
-# * **Events 0 & 1** — ``d_red = xstart`` (same order as projector).
-#   Passing ``t_blue − t_red`` directly gives the right bin.
-# * **Events 2 & 3** — ``d_red = xend`` (reversed relative to projector).
-#   The sign of ``t_blue − t_red`` is now *mirrored* compared to the
-#   projector convention, and the helper applies the flip automatically.
-#
-# All four events call :func:`.detection_times_to_tof_bin` with the same
-# interface: ``(d_red, d_blue, t_blue − t_red, projector)``.
+# * **Events 0–4** are on the d\ :sub:`7`\–d\ :sub:`24` LOR.
+#   Events 0–1 have ``d_red = xstart``; events 2–4 have ``d_red = xend``
+#   (reversed relative to the projector direction).
+# * **Event 5** is on the d\ :sub:`1`\–d\ :sub:`29` LOR and illustrates
+#   that out-of-sinogram events (trimmed by ``radial_trim``) are silently
+#   dropped (``unsigned_sinogram_tof_bin = −1``).
 #
 radius_sign = 300.0  # mm  →  diameter = 600 mm
 num_tof_bins_s = 25
@@ -275,7 +277,7 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 
 # %%
 # Setup of 6 coincidence events
-# -----------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 d_red_arr = xp.asarray([7, 7, 24, 24, 24, 1], dtype=xp.int32, device=dev)
 d_blue_arr = xp.asarray([24, 24, 7, 7, 7, 29], dtype=xp.int32, device=dev)
@@ -289,18 +291,26 @@ r_blue_arr = xp.zeros(num_events, dtype=xp.int32, device=dev)
 dt_arr = xp.asarray([+1.0, -1.0, +1.0, -1.0, 0.0, 0.0], device=dev)
 
 # %%
-# Unlist the events into a TOF sinogram
-# -------------------------------------
+# Unlist events
+# ~~~~~~~~~~~~~
 #
-# The unlister needs the unsigned TOF bins for every event that correspond to
-# the projector TOF definition. These can be calculate using :func:`.detection_times_to_tof_bin`
+# :func:`.detection_times_to_tof_bin` converts each event's ``t_blue − t_red``
+# into the unsigned TOF bin index expected by the projector.
 #
-# Note 1: that event 0 and 2 are detected om the same physical LOR with the same arrival
-# time difference, they end of in opposite TOF sinogram bins, since the order of the red
-# and blue detectors is reversed.
+# .. note::
 #
-# Note 2: the sum of the unlisted sinogram can be less than the number of events
-# if we use radial trimming of LOR in the sinogram. For those events, the unsigned sinogram TOF bin is set to -1.
+#    Events 0 and 2 are on the same physical LOR with the same
+#    ``|t_blue − t_red|``, but their (d_red, d_blue) order is reversed.
+#    Because the projector direction is fixed, this reversal maps them to
+#    **symmetric TOF bins on opposite sides of the LOR midpoint**.
+#
+# .. note::
+#
+#    The total count in the unlisted sinogram can be less than the number
+#    of input events when ``radial_trim > 0`` removes edge LORs from the
+#    sinogram.  Events that fall on a trimmed LOR receive
+#    ``unsigned_sinogram_tof_bin = −1`` and are silently dropped by
+#    :func:`.regular_polygon_events_to_sinogram`.
 
 ev_sino_tof_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
 
@@ -308,7 +318,8 @@ for i, (dr, db, dt, tb) in enumerate(
     zip(d_red_arr, d_blue_arr, dt_arr, ev_sino_tof_bins)
 ):
     print(
-        f"event {i}, d_red = {int(dr):02}, b_blue = {int(db):02}, sino tof bin {int(tb):02}, dt = {float(dt):+.1f} ns"
+        f"event {i}: d_red={int(dr):2d}, d_blue={int(db):2d},"
+        f" sino tof bin={int(tb):2d}, dt={float(dt):+.1f} ns"
     )
 
 unlisted_tof_sino = regular_polygon_events_to_sinogram(
@@ -317,7 +328,7 @@ unlisted_tof_sino = regular_polygon_events_to_sinogram(
     r_red_arr,
     d_blue_arr,
     r_blue_arr,
-    unsigned_sinogram_tof_bin=ev_sino_tof_bins,  # unsigned TOF bin of each event matching projector definition
+    unsigned_sinogram_tof_bin=ev_sino_tof_bins,
 )
 
 print(f"number of listmode events:           {num_events}")
@@ -325,12 +336,11 @@ print(f"num counts in unlisted TOF sinogram: {int(xp.sum(unlisted_tof_sino))}")
 
 
 # %%
-# Visualisation of unsigned TOF bin covention
-# -------------------------------------------
+# Visualisation
+# ~~~~~~~~~~~~~
 #
-# The following plots illustrates the start end detector for all LORs of view 0
-# as well as the defined TOF bins.
-# The "start" detectors are the ones closer to TOF bin 0 (dark blue color).
+# All LORs in view 0 are drawn as coloured segments — one colour per TOF bin.
+# TOF bin 0 (dark blue) is always at the **xstart** end of each LOR.
 
 fig_sign = plt.figure(figsize=(10, 8))
 ax_sign = fig_sign.add_subplot(111, projection="3d")
