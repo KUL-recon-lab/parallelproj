@@ -203,7 +203,9 @@ class ParallelViewProjector2D(LinearOperator):
             the matplotlib figure
         """
         if views_to_show is None:
-            views_to_show = np.linspace(0, self._num_views - 1, 5).astype(int)  # type: ignore[assignment]
+            views_to_show = np.linspace(  # type: ignore[assignment]
+                0, self._num_views - 1, 5
+            ).astype(int)
 
         assert views_to_show is not None
 
@@ -665,7 +667,8 @@ class RegularPolygonPETProjector(LinearOperator):
             + " with sinogram shape ("
             + ", ".join(
                 [
-                    f"{self.lor_descriptor.spatial_sinogram_shape[i]} {self.lor_descriptor.sinogram_order.name[i]}"
+                    f"{self.lor_descriptor.spatial_sinogram_shape[i]}"
+                    f" {self.lor_descriptor.sinogram_order.name[i]}"
                     for i in range(3)
                 ]
             )
@@ -841,6 +844,173 @@ class RegularPolygonPETProjector(LinearOperator):
         )
 
         self.lor_descriptor.scanner.show_lor_endpoints(ax)
+
+    def show_tof_bins(
+        self,
+        ax: Axes3D | None = None,
+        views: int | Array | None = None,
+        plane: int = 0,
+        show_endpoints: bool = True,
+        bin_cmap: str = "coolwarm",
+        show_bin_labels: bool = False,
+        label_fontsize: float = 8.0,
+        lw: float = 2.0,
+    ) -> tuple:
+        """Visualise the TOF bin grid for the specified sinogram views and plane.
+
+        Each LOR is drawn as a sequence of coloured line segments — one per
+        TOF bin — directly along the LOR ("zebra" style).  Bin colour runs
+        from blue (bin 0, xstart side) to red (bin N−1, xend side) via
+        ``bin_cmap``.  Bins whose extent falls completely outside the physical
+        LOR (i.e. beyond the detector positions) are silently skipped, so
+        short edge LORs naturally show fewer coloured segments than central
+        ones.
+
+        Parameters
+        ----------
+        ax : Axes3D or None
+            3-D matplotlib axes to draw on.  A new figure is created when
+            ``None``.
+        views : int, array-like, or None
+            Sinogram view index / indices to draw.
+
+            * ``int`` — draw only that view.
+            * array-like — draw those specific views.
+            * ``None`` (default) — draw the single middle view
+              (``num_views // 2``).
+
+            Showing all views is possible by passing
+            ``views=range(proj.lor_descriptor.num_views)`` but can be
+            visually busy for large scanners.
+        plane : int
+            Sinogram plane index (axial ring pair).  Default ``0``.
+        show_endpoints : bool
+            Call :meth:`~.RegularPolygonPETScannerGeometry.show_lor_endpoints`
+            first to annotate detector positions.  Default ``True``.
+        bin_cmap : str
+            Matplotlib colourmap for the bin segments.  Default ``"coolwarm"``.
+        show_bin_labels : bool
+            Annotate the bin numbers on the central LOR of the drawn set.
+            Default ``False`` (useful only for scanners with few LORs).
+        label_fontsize : float
+            Font size for bin labels when ``show_bin_labels=True``.
+        lw : float
+            Line width of the coloured bin segments.  Default ``2.0``.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+        ax : Axes3D
+
+        Raises
+        ------
+        ValueError
+            If ``tof_parameters`` is ``None``.
+        """
+        if self._tof_parameters is None:
+            raise ValueError("show_tof_bins requires tof_parameters to be set")
+
+        num_tof_bins  = self._tof_parameters.num_tofbins
+        tofbin_width  = self._tof_parameters.tofbin_width
+        tofcenter_off = self._tof_parameters.tofcenter_offset
+        lor_desc      = self.lor_descriptor
+
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection="3d")
+        else:
+            fig = ax.get_figure()
+
+        if views is None:
+            views = self.xp.asarray(
+                [lor_desc.num_views // 2], device=self._dev
+            )
+        elif isinstance(views, int):
+            views = self.xp.asarray([views], device=self._dev)
+        else:
+            views = self.xp.asarray(views, device=self._dev)
+
+        if show_endpoints:
+            lor_desc.scanner.show_lor_endpoints(ax, annotation_fontsize=8)
+
+        # LOR coordinates for all selected views and planes.
+        # Shape for RVP order: (num_rad, len(views), num_planes, 3).
+        xstart_all, xend_all = lor_desc.get_lor_coordinates(views=views)
+        xs_np = to_numpy_array(xstart_all)
+        xe_np = to_numpy_array(xend_all)
+
+        # Extract the requested plane and flatten to (N_lors, 3).
+        p_ax     = lor_desc.plane_axis_num
+        xs_plane = np.take(xs_np, [plane], axis=p_ax).squeeze(axis=p_ax)
+        xe_plane = np.take(xe_np, [plane], axis=p_ax).squeeze(axis=p_ax)
+        xs_flat  = xs_plane.reshape(-1, 3)
+        xe_flat  = xe_plane.reshape(-1, 3)
+
+        # One colour per bin (N samples).
+        bin_colors = plt.get_cmap(bin_cmap)(np.linspace(0, 1, num_tof_bins))
+
+        # Unit vector along the symmetry axis (needed only for bin labels).
+        sym_hat = np.zeros(3)
+        sym_hat[lor_desc.scanner.symmetry_axis] = 1.0
+
+        n_lors    = xs_flat.shape[0]
+        label_idx = n_lors // 2   # central LOR for optional labels
+
+        for idx in range(n_lors):
+            xs = xs_flat[idx]
+            xe = xe_flat[idx]
+            lor_vec = xe - xs
+            lor_len = np.linalg.norm(lor_vec)
+            if lor_len < 1e-6:
+                continue
+            lor_dir  = lor_vec / lor_len
+            midpoint = (xs + xe) / 2
+            lor_half = lor_len / 2.0
+
+            # Draw N coloured segments along the LOR, clipped to the physical
+            # LOR extent [−lor_half, +lor_half] from the midpoint.
+            for k in range(num_tof_bins):
+                t_a = (k     - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_b = (k + 1 - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_a = max(t_a, -lor_half)
+                t_b = min(t_b,  lor_half)
+                if t_a >= t_b:
+                    continue   # bin is fully outside the physical LOR
+                p1 = midpoint + t_a * lor_dir
+                p2 = midpoint + t_b * lor_dir
+                ax.plot(
+                    [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+                    color=bin_colors[k], lw=lw, solid_capstyle="butt", zorder=3,
+                )
+
+            # Optional bin-number labels on the central LOR only.
+            if show_bin_labels and idx == label_idx:
+                # Perpendicular offset for label placement.
+                lor_proj = lor_dir - np.dot(lor_dir, sym_hat) * sym_hat
+                proj_len = np.linalg.norm(lor_proj)
+                if proj_len > 1e-6:
+                    lor_proj /= proj_len
+                perp     = np.cross(sym_hat, lor_proj)
+                perp_len = np.linalg.norm(perp)
+                if perp_len > 1e-6:
+                    perp /= perp_len
+                label_off = perp * lor_desc.scanner.radius * 0.12
+
+                for k in range(num_tof_bins):
+                    t_c = (k - (num_tof_bins - 1) / 2) * tofbin_width + tofcenter_off
+                    if abs(t_c) > lor_half:
+                        continue
+                    lc = midpoint + t_c * lor_dir + label_off
+                    ax.text(
+                        lc[0], lc[1], lc[2], str(k),
+                        fontsize=label_fontsize, ha="center",
+                    )
+
+        ax.set_xlabel("x (mm)")
+        ax.set_ylabel("y (mm)")
+        ax.set_zlabel("z (mm)")
+
+        return fig, ax
 
     def convert_sinogram_to_crystal_index_events(
         self, sinogram: Array, shuffle: bool = False
