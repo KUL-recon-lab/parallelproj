@@ -274,62 +274,36 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 )
 
 # %%
-# Identify xstart / xend for the d_red=1 / d_blue=5 LOR.
+# Identify xstart / xend for the (d_red, d_blue) = (1, 5) LOR.
 #
-# ``start_in_ring_index`` and ``end_in_ring_index`` record which crystal is
-# the canonical xstart / xend for every sinogram bin.  We find the bin that
-# covers our crystal pair, then read off the world coordinates directly from
-# ``get_lor_coordinates()``.
+# ``start_in_ring_index`` and ``end_in_ring_index`` record the canonical
+# xstart / xend crystal for every sinogram bin.
 
 d_red_ev, d_blue_ev = 1, 5
 
 sc = to_numpy_array(lor_desc_sign.start_in_ring_index)  # (num_views, num_rad)
 ec = to_numpy_array(lor_desc_sign.end_in_ring_index)
 
-# Find which (view, rad) entry covers the d_red–d_blue LOR.
 lor_mask = ((sc == d_red_ev) & (ec == d_blue_ev)) | (
     (sc == d_blue_ev) & (ec == d_red_ev)
 )
 v_lor, r_lor = np.argwhere(lor_mask)[0]
 
-# get_lor_coordinates returns (xstart, xend) in the sinogram axis order (RVP).
-# Shape: (num_rad, num_views, num_planes, 3)  →  index [r, v, plane, xyz].
 xstart_all, xend_all = lor_desc_sign.get_lor_coordinates()
-xstart_xyz = to_numpy_array(xstart_all)[r_lor, v_lor, 0, :]  # full (x, y, z)
+xstart_xyz = to_numpy_array(xstart_all)[r_lor, v_lor, 0, :]
 xend_xyz = to_numpy_array(xend_all)[r_lor, v_lor, 0, :]
 
 idx_xstart = int(sc[v_lor, r_lor])
 idx_xend = int(ec[v_lor, r_lor])
-sign_val = 1 if idx_xstart == d_red_ev else -1
 
-print(
-    f"\nLOR d{d_red_ev}–d{d_blue_ev}: xstart=d{idx_xstart}, xend=d{idx_xend}"
-    f"  (sign={sign_val:+d})"
-)
-
-midpoint_xyz = (xstart_xyz + xend_xyz) / 2
-lor_dir = (xend_xyz - xstart_xyz) / np.linalg.norm(xend_xyz - xstart_xyz)
-
-# TOF bin-centre positions in 3-D (bin 0 = closest to xstart)
-tof_centers_s = np.array(
-    [
-        midpoint_xyz + (k - (num_tof_bins_s - 1) / 2) * tofbin_width_s * lor_dir
-        for k in range(num_tof_bins_s)
-    ]
-)
+print(f"\nLOR d{d_red_ev}–d{d_blue_ev}: xstart=d{idx_xstart}, xend=d{idx_xend}")
 
 # %%
 # Four events — two orderings of the same LOR
 # -------------------------------------------
 #
-# Events 1 & 2: d_red = d{d_red_ev} = xstart, d_blue = d{d_blue_ev} = xend.
-#   The (red, blue) labelling matches the projector direction → sign = +1.
-#
-# Events 3 & 4: d_red = d{d_blue_ev} = xend,  d_blue = d{d_red_ev} = xstart.
-#   Red and blue are swapped relative to the projector → sign = -1.
-#   The helper detects this and applies the flip automatically.
-#   Note that t_blue − t_red is now the difference in the *opposite* sense:
-#   positive means d_blue (= xstart here) arrived later.
+# Events 1 & 2: d_red = xstart, d_blue = xend  (sign = +1).
+# Events 3 & 4: d_red = xend,   d_blue = xstart (sign = −1, flip applied automatically).
 
 d_red_arr = xp.asarray(
     [d_red_ev, d_red_ev, d_blue_ev, d_blue_ev], dtype=xp.int32, device=dev
@@ -346,9 +320,10 @@ sino_bins = to_numpy_array(
     detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
 )
 
-# Per-event sign: +1 if d_red is xstart for that event, -1 if d_red is xend.
-# Needed both for the formula display and for the physical emission positions.
-d_red_list = [int(d_red_arr[i]) for i in range(4)]
+# %%
+# Step-by-step formula for each event
+
+d_red_list  = [int(d_red_arr[i])  for i in range(4)]
 d_blue_list = [int(d_blue_arr[i]) for i in range(4)]
 signs = []
 for dr, db in zip(d_red_list, d_blue_list):
@@ -356,8 +331,6 @@ for dr, db in zip(d_red_list, d_blue_list):
     vr = np.argwhere(m)[0]
     signs.append(1 if sc[vr[0], vr[1]] == dr else -1)
 
-# %%
-# Step-by-step formula for each event
 print(
     f"\nN={num_tof_bins_s} bins, W={tofbin_width_s:.0f} mm,  "
     f"c/2 = {C_MM_PER_NS/2:.3f} mm/ns\n"
@@ -373,12 +346,9 @@ for i, (dt_val, bin_val, sgn) in enumerate(zip(dt_evs, sino_bins, signs), start=
         f"  {k_th:>9.3f}  {bin_val:>4d}"
     )
 
-# Physical emission positions in 3-D: s = -sign × dx_blue_red from midpoint
-ev_xyz = [
-    midpoint_xyz + (-signs[i] * dt_evs[i] * C_MM_PER_NS / 2) * lor_dir for i in range(4)
-]
+# %%
+# Sinogram round-trip: unlist each event and verify the bin.
 
-# Also unlist the events and verify the sinogram bin
 for i in range(4):
     ev_bin_xp = xp.asarray(sino_bins[i : i + 1], dtype=xp.int32, device=dev)
     r_zero = xp.zeros(1, dtype=xp.int32, device=dev)
@@ -396,8 +366,14 @@ for i in range(4):
     print(f"  Event {i+1}: sinogram bin (unlisted) = {actual}  ✓")
 
 # %%
-# Visualisation — proj_sign.show_tof_bins() draws scanner + all LOR bin edges.
-# We overlay the four events on top.
+# Visualisation
+# -------------
+# Draw the TOF bin grid for the (1, 5) view, then highlight each event's
+# assigned bin as a thick semi-transparent overlay on the (1, 5) LOR.
+
+midpoint_xyz = (xstart_xyz + xend_xyz) / 2
+lor_dir = (xend_xyz - xstart_xyz) / np.linalg.norm(xend_xyz - xstart_xyz)
+lor_half = np.linalg.norm(xend_xyz - xstart_xyz) / 2
 
 fig_sign = plt.figure(figsize=(10, 8))
 ax_sign = fig_sign.add_subplot(111, projection="3d")
@@ -411,18 +387,15 @@ ev_labels = [
 ]
 
 for i in range(4):
-    ax_sign.scatter(
-        *ev_xyz[i], color=ev_colors[i], marker="*", s=200, zorder=7, label=ev_labels[i]
-    )
-    bc = tof_centers_s[sino_bins[i]]
+    k = sino_bins[i]
+    t_a = max((k     - num_tof_bins_s / 2) * tofbin_width_s, -lor_half)
+    t_b = min((k + 1 - num_tof_bins_s / 2) * tofbin_width_s,  lor_half)
+    p1 = midpoint_xyz + t_a * lor_dir
+    p2 = midpoint_xyz + t_b * lor_dir
     ax_sign.plot(
-        [ev_xyz[i][0], bc[0]],
-        [ev_xyz[i][1], bc[1]],
-        [ev_xyz[i][2], bc[2]],
-        color=ev_colors[i],
-        lw=1.2,
-        linestyle="--",
-        zorder=3,
+        [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+        color=ev_colors[i], lw=8, alpha=0.5, solid_capstyle="butt",
+        zorder=5, label=ev_labels[i],
     )
 
 lim = radius_sign * 1.3
