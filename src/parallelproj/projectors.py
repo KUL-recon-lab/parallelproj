@@ -851,7 +851,7 @@ class RegularPolygonPETProjector(LinearOperator):
         views: int | Array | None = None,
         plane: int = 0,
         show_endpoints: bool = True,
-        bin_cmap: str = "coolwarm",
+        bin_cmap: str = "seismic",
         show_bin_labels: bool = False,
         label_fontsize: float = 8.0,
         lw: float = 2.0,
@@ -889,7 +889,7 @@ class RegularPolygonPETProjector(LinearOperator):
             Call :meth:`~.RegularPolygonPETScannerGeometry.show_lor_endpoints`
             first to annotate detector positions.  Default ``True``.
         bin_cmap : str
-            Matplotlib colourmap for the bin segments.  Default ``"coolwarm"``.
+            Matplotlib colourmap for the bin segments.  Default ``"seismic"``.
         show_bin_labels : bool
             Annotate the bin numbers on the central LOR of the drawn set.
             Default ``False`` (useful only for scanners with few LORs).
@@ -908,17 +908,15 @@ class RegularPolygonPETProjector(LinearOperator):
         if self._tof_parameters is None:
             raise ValueError("show_tof_bins requires tof_parameters to be set")
 
-        num_tof_bins  = self._tof_parameters.num_tofbins
-        tofbin_width  = self._tof_parameters.tofbin_width
+        num_tof_bins = self._tof_parameters.num_tofbins
+        tofbin_width = self._tof_parameters.tofbin_width
         tofcenter_off = self._tof_parameters.tofcenter_offset
-        lor_desc      = self.lor_descriptor
+        lor_desc = self.lor_descriptor
 
         fig = ax.get_figure()
 
         if views is None:
-            views = self.xp.asarray(
-                [lor_desc.num_views // 2], device=self._dev
-            )
+            views = self.xp.asarray([lor_desc.num_views // 2], device=self._dev)
         elif isinstance(views, int):
             views = self.xp.asarray([views], device=self._dev)
         else:
@@ -934,11 +932,11 @@ class RegularPolygonPETProjector(LinearOperator):
         xe_np = to_numpy_array(xend_all)
 
         # Extract the requested plane and flatten to (N_lors, 3).
-        p_ax     = lor_desc.plane_axis_num
+        p_ax = lor_desc.plane_axis_num
         xs_plane = np.take(xs_np, [plane], axis=p_ax).squeeze(axis=p_ax)
         xe_plane = np.take(xe_np, [plane], axis=p_ax).squeeze(axis=p_ax)
-        xs_flat  = xs_plane.reshape(-1, 3)
-        xe_flat  = xe_plane.reshape(-1, 3)
+        xs_flat = xs_plane.reshape(-1, 3)
+        xe_flat = xe_plane.reshape(-1, 3)
 
         # One colour per bin (N samples).
         bin_colors = plt.get_cmap(bin_cmap)(np.linspace(0, 1, num_tof_bins))
@@ -947,8 +945,8 @@ class RegularPolygonPETProjector(LinearOperator):
         sym_hat = np.zeros(3)
         sym_hat[lor_desc.scanner.symmetry_axis] = 1.0
 
-        n_lors    = xs_flat.shape[0]
-        label_idx = n_lors // 2   # central LOR for optional labels
+        n_lors = xs_flat.shape[0]
+        label_idx = n_lors // 2  # central LOR for optional labels
 
         for idx in range(n_lors):
             xs = xs_flat[idx]
@@ -957,24 +955,29 @@ class RegularPolygonPETProjector(LinearOperator):
             lor_len = np.linalg.norm(lor_vec)
             if lor_len < 1e-6:
                 continue
-            lor_dir  = lor_vec / lor_len
+            lor_dir = lor_vec / lor_len
             midpoint = (xs + xe) / 2
             lor_half = lor_len / 2.0
 
             # Draw N coloured segments along the LOR, clipped to the physical
             # LOR extent [−lor_half, +lor_half] from the midpoint.
             for k in range(num_tof_bins):
-                t_a = (k     - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_a = (k - num_tof_bins / 2) * tofbin_width + tofcenter_off
                 t_b = (k + 1 - num_tof_bins / 2) * tofbin_width + tofcenter_off
                 t_a = max(t_a, -lor_half)
-                t_b = min(t_b,  lor_half)
+                t_b = min(t_b, lor_half)
                 if t_a >= t_b:
-                    continue   # bin is fully outside the physical LOR
+                    continue  # bin is fully outside the physical LOR
                 p1 = midpoint + t_a * lor_dir
                 p2 = midpoint + t_b * lor_dir
                 ax.plot(
-                    [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
-                    color=bin_colors[k], lw=lw, solid_capstyle="butt", zorder=3,
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color=bin_colors[k],
+                    lw=lw,
+                    solid_capstyle="butt",
+                    zorder=3,
                 )
 
             # Optional bin-number labels on the central LOR only.
@@ -984,7 +987,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 proj_len = np.linalg.norm(lor_proj)
                 if proj_len > 1e-6:
                     lor_proj /= proj_len
-                perp     = np.cross(sym_hat, lor_proj)
+                perp = np.cross(sym_hat, lor_proj)
                 perp_len = np.linalg.norm(perp)
                 if perp_len > 1e-6:
                     perp /= perp_len
@@ -996,8 +999,12 @@ class RegularPolygonPETProjector(LinearOperator):
                         continue
                     lc = midpoint + t_c * lor_dir + label_off
                     ax.text(
-                        lc[0], lc[1], lc[2], str(k),
-                        fontsize=label_fontsize, ha="center",
+                        lc[0],
+                        lc[1],
+                        lc[2],
+                        str(k),
+                        fontsize=label_fontsize,
+                        ha="center",
                     )
 
         ax.set_xlabel("x (mm)")
@@ -1079,7 +1086,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
         sc = to_numpy_array(lor_desc.start_in_ring_index)  # (num_views, num_rad)
         ec = to_numpy_array(lor_desc.end_in_ring_index)
-        sr = to_numpy_array(lor_desc.start_plane_index)    # (num_planes,)
+        sr = to_numpy_array(lor_desc.start_plane_index)  # (num_planes,)
         er = to_numpy_array(lor_desc.end_plane_index)
 
         p_ax = lor_desc.plane_axis_num
@@ -1114,9 +1121,9 @@ class RegularPolygonPETProjector(LinearOperator):
             rv = np.repeat(v_idx, cnt)
             rr = np.repeat(r_idx, cnt)
             rp = np.repeat(p_idx, cnt)
-            events = np.column_stack(
-                [sc[rv, rr], sr[rp], ec[rv, rr], er[rp]]
-            ).astype(np.int32)
+            events = np.column_stack([sc[rv, rr], sr[rp], ec[rv, rr], er[rp]]).astype(
+                np.int32
+            )
 
         if shuffle:
             perm = np.random.permutation(len(events))
@@ -1146,7 +1153,9 @@ class RegularPolygonPETProjector(LinearOperator):
             event_start_coordinates, event_end_coordinates, event_tofbin
             in case of non-TOF, event_tofbin is None
         """
-        events = self.convert_sinogram_to_crystal_index_events(sinogram, shuffle=shuffle)
+        events = self.convert_sinogram_to_crystal_index_events(
+            sinogram, shuffle=shuffle
+        )
 
         scanner = self.lor_descriptor.scanner
         d1 = self.xp.asarray(events[:, 0].astype(np.int64), device=self._dev)

@@ -223,7 +223,7 @@ print("TOF  round-trip: OK")
 # TOF sign illustration
 # ---------------------
 #
-# A single-ring scanner with 32 detectors (organized in 4 modules) and 6 TOF bins of 100 mm each
+# A single-ring scanner with 32 detectors (organized in 4 modules) and 25 TOF bins of 24 mm each
 # covering the full 600 mm diameter.
 #
 # The projector traces the LOR connecting d1 and d5 always from
@@ -242,8 +242,8 @@ print("TOF  round-trip: OK")
 # interface: ``(d_red, d_blue, t_blue − t_red, projector)``.
 #
 radius_sign = 300.0  # mm  →  diameter = 600 mm
-num_tof_bins_s = 6
-tofbin_width_s = 100.0  # mm  (6 × 100 mm = 600 mm = full diameter)
+num_tof_bins_s = 25
+tofbin_width_s = 24.0  # mm  (25 × 24 mm = 600 mm = full diameter)
 
 scanner_sign = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
@@ -259,7 +259,7 @@ scanner_sign = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 lor_desc_sign = ppl.RegularPolygonPETLORDescriptor(
     scanner_sign,
     ppl.Michelogram(scanner_sign.num_rings, max_ring_difference=0, span=1),
-    radial_trim=0,
+    radial_trim=7,
     sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
 )
 
@@ -277,30 +277,41 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 # Four events — two orderings of the same LOR
 # -------------------------------------------
 
-d_red_arr = xp.asarray([7, 7, 24, 24], dtype=xp.int32, device=dev)
-r_red_arr = xp.zeros(4, dtype=xp.int32, device=dev)
+d_red_arr = xp.asarray([7, 7, 24, 24, 24, 1], dtype=xp.int32, device=dev)
+d_blue_arr = xp.asarray([24, 24, 7, 7, 7, 29], dtype=xp.int32, device=dev)
 
-d_blue_arr = xp.asarray([24, 24, 7, 7], dtype=xp.int32, device=dev)
-r_blue_arr = xp.zeros(4, dtype=xp.int32, device=dev)
+num_events = d_red_arr.shape[0]
+
+r_red_arr = xp.zeros(num_events, dtype=xp.int32, device=dev)
+r_blue_arr = xp.zeros(num_events, dtype=xp.int32, device=dev)
 
 # dt = t_blue − t_red for each event (nanoseconds)
-dt_arr = xp.asarray([+1.0, -1.0, +1.0, -1.0], device=dev)
+dt_arr = xp.asarray([+1.0, -1.0, +1.0, -1.0, 0.0, 0.0], device=dev)
 
 # %%
 # Unlist the events into a TOF sinogram
 # -------------------------------------
 
-# the unlister needs the unsigned TOF bins for every event that correspond to
-# the projector TOF definition
-# these can be calculate using :func:`.detection_times_to_tof_bin`
+# The unlister needs the unsigned TOF bins for every event that correspond to
+# the projector TOF definition. These can be calculate using :func:`.detection_times_to_tof_bin`
+#
+# Note 1: that event 0 and 2 are detected om the same physical LOR with the same arrival
+# time difference, they end of in opposite TOF sinogram bins, since the order of the red
+# and blue detectors is reversed.
+#
+# Note 2: the sum of the unlisted sinogram can be less than the number of events
+# if we use radial trimming of LOR in the sinogram.
+
 ev_sino_tof_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
 
-for dr, db, dt, tb in zip(d_red_arr, d_blue_arr, dt_arr, ev_sino_tof_bins):
+for i, (dr, db, dt, tb) in enumerate(
+    zip(d_red_arr, d_blue_arr, dt_arr, ev_sino_tof_bins)
+):
     print(
-        f"d_red = {int(dr):03}, b_blue = {int(db):03}, sino tof bin {int(tb):03}, dt = {float(dt):.1f} ns"
+        f"event {i}, d_red = {int(dr):02}, b_blue = {int(db):02}, sino tof bin {int(tb):02}, dt = {float(dt):.1f} ns"
     )
 
-sino_ev = regular_polygon_events_to_sinogram(
+unlisted_tof_sino = regular_polygon_events_to_sinogram(
     proj_sign,
     d_red_arr,
     r_red_arr,
@@ -308,6 +319,9 @@ sino_ev = regular_polygon_events_to_sinogram(
     r_blue_arr,
     unsigned_sinogram_tof_bin=ev_sino_tof_bins,  # unsigned TOF bin of each event matching projector definition
 )
+
+print(f"number of listmode events:           {num_events}")
+print(f"num counts in unlisted TOF sinogram: {int(xp.sum(unlisted_tof_sino))}")
 
 
 # %%
