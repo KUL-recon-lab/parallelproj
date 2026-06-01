@@ -15,9 +15,12 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Circle
 
 
+from mpl_toolkits.mplot3d import Axes3D
+
 from ._backend import Array, to_numpy_array
 
 from .operators import LinearOperator
+from .tof import TOFParameters
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
@@ -1444,6 +1447,151 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         ls = ls.reshape((-1, 2, 3))
         lc = Line3DCollection(ls, linewidths=lw, **kwargs)
         ax.add_collection(lc)
+
+    def show_tof_bins(
+        self,
+        ax: Axes3D,
+        tof_parameters: TOFParameters,
+        views: int | Array | None = None,
+        plane: int = 0,
+        show_endpoints: bool = True,
+        bin_cmap: str = "seismic",
+        show_bin_labels: bool = False,
+        label_fontsize: float = 8.0,
+        lw: float = 2.0,
+        show_colorbar: bool = False,
+    ) -> None:
+        """Visualise the TOF bin grid for the specified sinogram views and plane.
+
+        Each LOR is drawn as a sequence of coloured line segments — one per
+        TOF bin — directly along the LOR ("zebra" style).  Bin colour runs
+        from blue (bin 0, xstart side) to red (bin N−1, xend side) via
+        ``bin_cmap``.  Bins whose extent falls completely outside the physical
+        LOR (i.e. beyond the detector positions) are silently skipped, so
+        short edge LORs naturally show fewer coloured segments than central
+        ones.
+
+        Parameters
+        ----------
+        ax : Axes3D
+            3-D matplotlib axes to draw on.  The caller is responsible for
+            creating the figure and axes.
+        tof_parameters : TOFParameters
+            TOF bin geometry (number of bins, bin width, centre offset).
+        views : int, array-like, or None
+            Sinogram view index / indices to draw.
+
+            * ``int`` — draw only that view.
+            * array-like — draw those specific views.
+            * ``None`` (default) — draw the single middle view
+              (``num_views // 2``).
+
+        plane : int
+            Sinogram plane index (axial ring pair).  Default ``0``.
+        show_endpoints : bool
+            Call :meth:`~.RegularPolygonPETScannerGeometry.show_lor_endpoints`
+            to annotate detector positions.  Default ``True``.
+        bin_cmap : str
+            Matplotlib colourmap for the bin segments.  Default ``"seismic"``.
+        show_bin_labels : bool
+            Annotate the bin numbers on the central LOR of the drawn set.
+            Default ``False`` (useful only for scanners with few LORs).
+        label_fontsize : float
+            Font size for bin labels when ``show_bin_labels=True``.
+        lw : float
+            Line width of the coloured bin segments.  Default ``2.0``.
+        show_colorbar : bool
+            Add a colorbar mapping bin index to colour.  Default ``False``.
+        """
+        num_tof_bins  = tof_parameters.num_tofbins
+        tofbin_width  = tof_parameters.tofbin_width
+        tofcenter_off = tof_parameters.tofcenter_offset
+
+        fig = ax.get_figure()
+
+        if views is None:
+            views = self.xp.asarray([self.num_views // 2], device=self.dev)
+        elif isinstance(views, int):
+            views = self.xp.asarray([views], device=self.dev)
+        else:
+            views = self.xp.asarray(views, device=self.dev)
+
+        if show_endpoints:
+            self.scanner.show_lor_endpoints(ax, annotation_fontsize=8)
+
+        xstart_all, xend_all = self.get_lor_coordinates(views=views)
+        xs_np = to_numpy_array(xstart_all)
+        xe_np = to_numpy_array(xend_all)
+
+        p_ax     = self.plane_axis_num
+        xs_plane = np.take(xs_np, [plane], axis=p_ax).squeeze(axis=p_ax)
+        xe_plane = np.take(xe_np, [plane], axis=p_ax).squeeze(axis=p_ax)
+        xs_flat  = xs_plane.reshape(-1, 3)
+        xe_flat  = xe_plane.reshape(-1, 3)
+
+        bin_colors = plt.get_cmap(bin_cmap)(np.linspace(0, 1, num_tof_bins))
+
+        sym_hat = np.zeros(3)
+        sym_hat[self.scanner.symmetry_axis] = 1.0
+
+        n_lors    = xs_flat.shape[0]
+        label_idx = n_lors // 2
+
+        for idx in range(n_lors):
+            xs      = xs_flat[idx]
+            xe      = xe_flat[idx]
+            lor_vec = xe - xs
+            lor_len = np.linalg.norm(lor_vec)
+            lor_dir  = lor_vec / lor_len
+            midpoint = (xs + xe) / 2
+            lor_half = lor_len / 2.0
+
+            for k in range(num_tof_bins):
+                t_a = (k     - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_b = (k + 1 - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_a = max(t_a, -lor_half)
+                t_b = min(t_b,  lor_half)
+                if t_a >= t_b:
+                    continue
+                p1 = midpoint + t_a * lor_dir
+                p2 = midpoint + t_b * lor_dir
+                ax.plot(
+                    [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+                    color=bin_colors[k], lw=lw, solid_capstyle="butt", zorder=3,
+                )
+
+            if show_bin_labels and idx == label_idx:
+                lor_proj = lor_dir - np.dot(lor_dir, sym_hat) * sym_hat
+                proj_len = np.linalg.norm(lor_proj)
+                if proj_len > 1e-6:
+                    lor_proj /= proj_len
+                perp     = np.cross(sym_hat, lor_proj)
+                perp_len = np.linalg.norm(perp)
+                if perp_len > 1e-6:
+                    perp /= perp_len
+                label_off = perp * self.scanner.radius * 0.12
+
+                for k in range(num_tof_bins):
+                    t_c = (k - (num_tof_bins - 1) / 2) * tofbin_width + tofcenter_off
+                    if abs(t_c) > lor_half:
+                        continue
+                    lc = midpoint + t_c * lor_dir + label_off
+                    ax.text(lc[0], lc[1], lc[2], str(k),
+                            fontsize=label_fontsize, ha="center")
+
+        ax.set_xlabel("x (mm)")
+        ax.set_ylabel("y (mm)")
+        ax.set_zlabel("z (mm)")
+
+        if show_colorbar:
+            from matplotlib.colors import Normalize
+            import matplotlib.cm as mpl_cm
+
+            norm = Normalize(vmin=0, vmax=num_tof_bins - 1)
+            sm   = mpl_cm.ScalarMappable(cmap=bin_cmap, norm=norm)
+            sm.set_array([])
+            cbar = fig.colorbar(sm, ax=ax, shrink=0.4, pad=0.05, label="TOF bin")
+            cbar.set_ticks(range(num_tof_bins))
 
     def show_michelogram(
         self,

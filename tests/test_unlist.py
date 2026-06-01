@@ -605,3 +605,36 @@ def test_error_no_bincount_backend(xp: ModuleType, dev: str) -> None:  # noqa: A
 
     with pytest.raises(NotImplementedError, match="bincount"):
         _sinogram_native(proj, d_red, r_red, d_blue, r_blue)
+
+
+def test_error_convert_sinogram_span_gt1(xp: ModuleType, dev: str) -> None:
+    """convert_sinogram_to_crystal_index_events raises for span > 1."""
+    scanner = _small_scanner(xp, dev, num_rings=3)
+    proj = _small_proj(scanner, span=3)
+    sino = xp.zeros(proj.lor_descriptor.spatial_sinogram_shape, dtype=xp.int32, device=dev)
+    with pytest.raises(ValueError, match="span-1"):
+        proj.convert_sinogram_to_crystal_index_events(sino)
+
+
+def test_error_sinogram_tof_bin_without_tof_params(xp: ModuleType, dev: str) -> None:
+    """regular_polygon_events_to_sinogram raises when unsigned_sinogram_tof_bin
+    is supplied but the projector has no tof_parameters."""
+    scanner = _small_scanner(xp, dev, num_rings=1)
+    proj = _small_proj(scanner)  # tof_parameters=None
+    d = xp.asarray([0], dtype=xp.int32, device=dev)
+    r = xp.asarray([0], dtype=xp.int32, device=dev)
+    tof_bin = xp.asarray([0], dtype=xp.int32, device=dev)
+    with pytest.raises(ValueError, match="tof_parameters"):
+        _sinogram_native(proj, d, r, d, r, unsigned_sinogram_tof_bin=tof_bin)
+
+
+def test_error_detection_times_no_tof_params(xp: ModuleType, dev: str) -> None:
+    """detection_times_to_tof_bin raises when projector.tof_parameters is None."""
+    if detection_times_to_tof_bin is None:
+        pytest.skip("detection_times_to_tof_bin not available")
+    scanner = _small_scanner(xp, dev, num_rings=1)
+    proj = _small_proj(scanner)  # tof_parameters=None
+    d = xp.asarray([0], dtype=xp.int32, device=dev)
+    dt = xp.asarray([0.0], dtype=xp.float32, device=dev)
+    with pytest.raises(ValueError, match="tof_parameters"):
+        detection_times_to_tof_bin(d, d, dt, proj)

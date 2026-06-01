@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
+import parallelproj.tof as tof
 import matplotlib.pyplot as plt
 
 from parallelproj import to_numpy_array
@@ -39,7 +40,7 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
         assert lor_desc.radial_axis_num == sinogram_order.name.find("R")
         assert lor_desc.view_axis_num == sinogram_order.name.find("V")
 
-        lor_coords = lor_desc.get_lor_coordinates()
+        lor_desc.get_lor_coordinates()
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
@@ -1372,6 +1373,39 @@ def test_michelogram_show(xp: ModuleType, dev: str) -> None:
     m_patch._plane_axial_midpoint_int = _np.zeros(4, dtype=_np.int32)
 
     fig = m_patch.show_segment_lors(_np.asarray([0.0, 1.0, 2.0]))
+    plt.close(fig)
+
+
+def test_show_tof_bins(xp: ModuleType, dev: str) -> None:
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings=1, symmetry_axis=2)
+    lor_desc = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, max_ring_difference=0, span=1),
+        radial_trim=0,
+        sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    )
+    tof_params = tof.TOFParameters(num_tofbins=5, tofbin_width=40.0, sigma_tof=20.0)
+
+    # views=int, show_colorbar
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    lor_desc.show_tof_bins(ax, tof_params, views=0, plane=0, show_colorbar=True)
+    plt.close(fig)
+
+    # views as array-like (covers the else branch in views normalisation)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    lor_desc.show_tof_bins(ax, tof_params, views=xp.asarray([0, 1], device=dev))
+    plt.close(fig)
+
+    # show_bin_labels with bins wider than the LOR so some centres fall outside
+    # the physical LOR extent (covers the inner `continue` in the labels loop)
+    tof_wide = tof.TOFParameters(num_tofbins=3, tofbin_width=400.0, sigma_tof=20.0)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    lor_desc.show_tof_bins(
+        ax, tof_wide, show_bin_labels=True, show_endpoints=False
+    )
     plt.close(fig)
 
 
