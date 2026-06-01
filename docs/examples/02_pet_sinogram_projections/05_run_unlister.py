@@ -274,136 +274,52 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 )
 
 # %%
-# Identify xstart / xend for the (d_red, d_blue) = (1, 5) LOR.
-#
-# ``start_in_ring_index`` and ``end_in_ring_index`` record the canonical
-# xstart / xend crystal for every sinogram bin.
-
-d_red_ev, d_blue_ev = 1, 5
-
-sc = to_numpy_array(lor_desc_sign.start_in_ring_index)  # (num_views, num_rad)
-ec = to_numpy_array(lor_desc_sign.end_in_ring_index)
-
-lor_mask = ((sc == d_red_ev) & (ec == d_blue_ev)) | (
-    (sc == d_blue_ev) & (ec == d_red_ev)
-)
-v_lor, r_lor = np.argwhere(lor_mask)[0]
-
-xstart_all, xend_all = lor_desc_sign.get_lor_coordinates()
-xstart_xyz = to_numpy_array(xstart_all)[r_lor, v_lor, 0, :]
-xend_xyz = to_numpy_array(xend_all)[r_lor, v_lor, 0, :]
-
-idx_xstart = int(sc[v_lor, r_lor])
-idx_xend = int(ec[v_lor, r_lor])
-
-print(f"\nLOR d{d_red_ev}–d{d_blue_ev}: xstart=d{idx_xstart}, xend=d{idx_xend}")
-
-# %%
 # Four events — two orderings of the same LOR
 # -------------------------------------------
-#
-# Events 1 & 2: d_red = xstart, d_blue = xend  (sign = +1).
-# Events 3 & 4: d_red = xend,   d_blue = xstart (sign = −1, flip applied automatically).
 
-d_red_arr = xp.asarray(
-    [d_red_ev, d_red_ev, d_blue_ev, d_blue_ev], dtype=xp.int32, device=dev
-)
-d_blue_arr = xp.asarray(
-    [d_blue_ev, d_blue_ev, d_red_ev, d_red_ev], dtype=xp.int32, device=dev
-)
+d_red_arr = xp.asarray([1, 1, 5, 5], dtype=xp.int32, device=dev)
+r_red_arr = xp.zeros(4, dtype=xp.int32, device=dev)
+
+d_blue_arr = xp.asarray([5, 5, 1, 1], dtype=xp.int32, device=dev)
+r_blue_arr = xp.zeros(4, dtype=xp.int32, device=dev)
 
 # dt = t_blue − t_red for each event (nanoseconds)
 dt_evs = [+1.0, -1.0, +0.5, -0.5]
 dt_arr = xp.asarray(np.array(dt_evs, dtype=np.float32), device=dev)
 
-sino_bins = to_numpy_array(
-    detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
+# %%
+# Unlist the events into a TOF sinogram
+# -------------------------------------
+
+# the unlister needs the unsigned TOF bins for every event that correspond to
+# the projector TOF definition
+# these can be calculate using :func:`.detection_times_to_tof_bin`
+ev_sino_tof_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
+
+sino_ev = regular_polygon_events_to_sinogram(
+    proj_sign,
+    d_red_arr,
+    r_red_arr,
+    d_blue_arr,
+    r_blue_arr,
+    unsigned_sinogram_tof_bin=ev_sino_tof_bins,  # unsigned TOF bin of each event matching projector definition
 )
 
-# %%
-# Step-by-step formula for each event
-
-d_red_list  = [int(d_red_arr[i])  for i in range(4)]
-d_blue_list = [int(d_blue_arr[i]) for i in range(4)]
-signs = []
-for dr, db in zip(d_red_list, d_blue_list):
-    m = ((sc == dr) & (ec == db)) | ((sc == db) & (ec == dr))
-    vr = np.argwhere(m)[0]
-    signs.append(1 if sc[vr[0], vr[1]] == dr else -1)
-
-print(
-    f"\nN={num_tof_bins_s} bins, W={tofbin_width_s:.0f} mm,  "
-    f"c/2 = {C_MM_PER_NS/2:.3f} mm/ns\n"
-    f"  {'Event':<8}  {'d_red':>6}  {'d_blue':>6}  {'sign':>5}"
-    f"  {'dt (ns)':>8}  {'dx (mm)':>8}  {'k_theory':>9}  {'bin':>4}"
-)
-for i, (dt_val, bin_val, sgn) in enumerate(zip(dt_evs, sino_bins, signs), start=1):
-    dx = dt_val * C_MM_PER_NS / 2
-    k_th = (num_tof_bins_s - 1) / 2.0 - sgn * dx / tofbin_width_s
-    print(
-        f"  Event {i:<3}  {d_red_list[i-1]:>6}  {d_blue_list[i-1]:>6}"
-        f"  {sgn:>+5d}  {dt_val:>+8.1f}  {dx:>+8.1f}"
-        f"  {k_th:>9.3f}  {bin_val:>4d}"
-    )
-
-# %%
-# Sinogram round-trip: unlist each event and verify the bin.
-
-for i in range(4):
-    ev_bin_xp = xp.asarray(sino_bins[i : i + 1], dtype=xp.int32, device=dev)
-    r_zero = xp.zeros(1, dtype=xp.int32, device=dev)
-    sino_ev = to_numpy_array(
-        regular_polygon_events_to_sinogram(
-            proj_sign,
-            d_red_arr[i : i + 1],
-            r_zero,
-            d_blue_arr[i : i + 1],
-            r_zero,
-            unsigned_sinogram_tof_bin=ev_bin_xp,
-        )
-    )
-    actual = int(np.argwhere(sino_ev > 0)[0, -1])
-    print(f"  Event {i+1}: sinogram bin (unlisted) = {actual}  ✓")
 
 # %%
 # Visualisation
 # -------------
-# Draw the TOF bin grid for the (1, 5) view, then highlight each event's
-# assigned bin as a thick semi-transparent overlay on the (1, 5) LOR.
-
-midpoint_xyz = (xstart_xyz + xend_xyz) / 2
-lor_dir = (xend_xyz - xstart_xyz) / np.linalg.norm(xend_xyz - xstart_xyz)
-lor_half = np.linalg.norm(xend_xyz - xstart_xyz) / 2
 
 fig_sign = plt.figure(figsize=(10, 8))
 ax_sign = fig_sign.add_subplot(111, projection="3d")
-proj_sign.show_tof_bins(ax=ax_sign, views=int(v_lor), show_colorbar=True)
-
-ev_colors = ["C0", "C1", "C2", "C3"]
-ev_labels = [
-    f"Event {i+1}: d_red={int(d_red_arr[i])}, d_blue={int(d_blue_arr[i])},"
-    f" dt={dt_evs[i]:+.1f} ns → bin {sino_bins[i]}"
-    for i in range(4)
-]
-
-for i in range(4):
-    k = sino_bins[i]
-    t_a = max((k     - num_tof_bins_s / 2) * tofbin_width_s, -lor_half)
-    t_b = min((k + 1 - num_tof_bins_s / 2) * tofbin_width_s,  lor_half)
-    p1 = midpoint_xyz + t_a * lor_dir
-    p2 = midpoint_xyz + t_b * lor_dir
-    ax_sign.plot(
-        [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
-        color=ev_colors[i], lw=8, alpha=0.5, solid_capstyle="butt",
-        zorder=5, label=ev_labels[i],
-    )
+proj_sign.show_tof_bins(ax=ax_sign, views=0, show_colorbar=True)
 
 lim = radius_sign * 1.3
 ax_sign.set_xlim(-lim, lim)
 ax_sign.set_ylim(-lim, lim)
 ax_sign.set_zlim(-lim / 4, lim / 4)
-ax_sign.view_init(elev=25, azim=-60)
-ax_sign.legend(loc="upper right", fontsize=7, framealpha=0.9, ncols=1)
+ax_sign.view_init(elev=75, azim=270)
+# ax_sign.legend(loc="upper right", fontsize=7, framealpha=0.9, ncols=1)
 fig_sign.tight_layout()
 fig_sign.show()
 
