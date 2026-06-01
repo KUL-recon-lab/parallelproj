@@ -223,7 +223,7 @@ print("TOF  round-trip: OK")
 # TOF sign illustration
 # ---------------------
 #
-# A single-ring scanner with 8 detectors and 6 TOF bins of 100 mm each
+# A single-ring scanner with 32 detectors (organized in 4 modules) and 6 TOF bins of 100 mm each
 # covering the full 600 mm diameter.
 #
 # The projector traces the LOR connecting d1 and d5 always from
@@ -250,8 +250,8 @@ scanner_sign = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     dev,
     radius=radius_sign,
     num_sides=8,
-    num_lor_endpoints_per_side=1,
-    lor_spacing=1.0,
+    num_lor_endpoints_per_side=4,
+    lor_spacing=50.0,
     ring_positions=xp.asarray([0.0], device=dev),
     symmetry_axis=2,
 )
@@ -277,15 +277,14 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 # Four events — two orderings of the same LOR
 # -------------------------------------------
 
-d_red_arr = xp.asarray([1, 1, 5, 5], dtype=xp.int32, device=dev)
+d_red_arr = xp.asarray([7, 7, 24, 24], dtype=xp.int32, device=dev)
 r_red_arr = xp.zeros(4, dtype=xp.int32, device=dev)
 
-d_blue_arr = xp.asarray([5, 5, 1, 1], dtype=xp.int32, device=dev)
+d_blue_arr = xp.asarray([24, 24, 7, 7], dtype=xp.int32, device=dev)
 r_blue_arr = xp.zeros(4, dtype=xp.int32, device=dev)
 
 # dt = t_blue − t_red for each event (nanoseconds)
-dt_evs = [+1.0, -1.0, +0.5, -0.5]
-dt_arr = xp.asarray(np.array(dt_evs, dtype=np.float32), device=dev)
+dt_arr = xp.asarray([+1.0, -1.0, +1.0, -1.0], device=dev)
 
 # %%
 # Unlist the events into a TOF sinogram
@@ -295,6 +294,11 @@ dt_arr = xp.asarray(np.array(dt_evs, dtype=np.float32), device=dev)
 # the projector TOF definition
 # these can be calculate using :func:`.detection_times_to_tof_bin`
 ev_sino_tof_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
+
+for dr, db, dt, tb in zip(d_red_arr, d_blue_arr, dt_arr, ev_sino_tof_bins):
+    print(
+        f"d_red = {int(dr):03}, b_blue = {int(db):03}, sino tof bin {int(tb):03}, dt = {float(dt):.1f} ns"
+    )
 
 sino_ev = regular_polygon_events_to_sinogram(
     proj_sign,
