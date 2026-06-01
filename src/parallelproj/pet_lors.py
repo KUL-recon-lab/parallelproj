@@ -658,9 +658,7 @@ class Michelogram:
                 # [1, 0]: Michelogram inset instead of the non-existent
                 # segment -0.
                 if row_idx == 1 and abs_seg == 0:
-                    self._draw_axes(
-                        ax, plane_index_fontsize=inset_plane_index_fontsize
-                    )
+                    self._draw_axes(ax, plane_index_fontsize=inset_plane_index_fontsize)
                     continue
 
                 seg_val = abs_seg if row_idx == 0 else -abs_seg
@@ -1285,12 +1283,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._end_plane_z = xp.asarray(end_z, device=dev)
 
         if self._span == 1:
-            self._start_plane_index = xp.asarray(
-                m.plane_start_rings[:, 0], device=dev
-            )
-            self._end_plane_index = xp.asarray(
-                m.plane_end_rings[:, 0], device=dev
-            )
+            self._start_plane_index = xp.asarray(m.plane_start_rings[:, 0], device=dev)
+            self._end_plane_index = xp.asarray(m.plane_end_rings[:, 0], device=dev)
         else:
             self._start_plane_index = None
             self._end_plane_index = None
@@ -1503,8 +1497,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         show_colorbar : bool
             Add a colorbar mapping bin index to colour.  Default ``False``.
         """
-        num_tof_bins  = tof_parameters.num_tofbins
-        tofbin_width  = tof_parameters.tofbin_width
+        num_tof_bins = tof_parameters.num_tofbins
+        tofbin_width = tof_parameters.tofbin_width
         tofcenter_off = tof_parameters.tofcenter_offset
 
         fig = ax.get_figure()
@@ -1523,41 +1517,46 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         xs_np = to_numpy_array(xstart_all)
         xe_np = to_numpy_array(xend_all)
 
-        p_ax     = self.plane_axis_num
+        p_ax = self.plane_axis_num
         xs_plane = np.take(xs_np, [plane], axis=p_ax).squeeze(axis=p_ax)
         xe_plane = np.take(xe_np, [plane], axis=p_ax).squeeze(axis=p_ax)
-        xs_flat  = xs_plane.reshape(-1, 3)
-        xe_flat  = xe_plane.reshape(-1, 3)
+        xs_flat = xs_plane.reshape(-1, 3)
+        xe_flat = xe_plane.reshape(-1, 3)
 
         bin_colors = plt.get_cmap(bin_cmap)(np.linspace(0, 1, num_tof_bins))
 
         sym_hat = np.zeros(3)
         sym_hat[self.scanner.symmetry_axis] = 1.0
 
-        n_lors    = xs_flat.shape[0]
+        n_lors = xs_flat.shape[0]
         label_idx = n_lors // 2
 
         for idx in range(n_lors):
-            xs      = xs_flat[idx]
-            xe      = xe_flat[idx]
+            xs = xs_flat[idx]
+            xe = xe_flat[idx]
             lor_vec = xe - xs
             lor_len = np.linalg.norm(lor_vec)
-            lor_dir  = lor_vec / lor_len
+            lor_dir = lor_vec / lor_len
             midpoint = (xs + xe) / 2
             lor_half = lor_len / 2.0
 
             for k in range(num_tof_bins):
-                t_a = (k     - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_a = (k - num_tof_bins / 2) * tofbin_width + tofcenter_off
                 t_b = (k + 1 - num_tof_bins / 2) * tofbin_width + tofcenter_off
                 t_a = max(t_a, -lor_half)
-                t_b = min(t_b,  lor_half)
+                t_b = min(t_b, lor_half)
                 if t_a >= t_b:
                     continue
                 p1 = midpoint + t_a * lor_dir
                 p2 = midpoint + t_b * lor_dir
                 ax.plot(
-                    [p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
-                    color=bin_colors[k], lw=lw, solid_capstyle="butt", zorder=3,
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color=bin_colors[k],
+                    lw=lw,
+                    solid_capstyle="butt",
+                    zorder=3,
                 )
 
             if show_bin_labels and idx == label_idx:
@@ -1565,7 +1564,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                 proj_len = np.linalg.norm(lor_proj)
                 if proj_len > 1e-6:
                     lor_proj /= proj_len
-                perp     = np.cross(sym_hat, lor_proj)
+                perp = np.cross(sym_hat, lor_proj)
                 perp_len = np.linalg.norm(perp)
                 if perp_len > 1e-6:
                     perp /= perp_len
@@ -1576,8 +1575,14 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                     if abs(t_c) > lor_half:
                         continue
                     lc = midpoint + t_c * lor_dir + label_off
-                    ax.text(lc[0], lc[1], lc[2], str(k),
-                            fontsize=label_fontsize, ha="center")
+                    ax.text(
+                        lc[0],
+                        lc[1],
+                        lc[2],
+                        str(k),
+                        fontsize=label_fontsize,
+                        ha="center",
+                    )
 
         ax.set_xlabel("x (mm)")
         ax.set_ylabel("y (mm)")
@@ -1588,7 +1593,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             import matplotlib.cm as mpl_cm
 
             norm = Normalize(vmin=0, vmax=num_tof_bins - 1)
-            sm   = mpl_cm.ScalarMappable(cmap=bin_cmap, norm=norm)
+            sm = mpl_cm.ScalarMappable(cmap=bin_cmap, norm=norm)
             sm.set_array([])
             cbar = fig.colorbar(sm, ax=ax, shrink=0.4, pad=0.05, label="TOF bin")
             cbar.set_ticks(range(num_tof_bins))
@@ -1790,9 +1795,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
             raise ValueError("target_span must be an odd positive integer")
         if mode not in ("sum", "average"):
-            raise ValueError(
-                f"mode must be 'sum' or 'average', got {mode!r}"
-            )
+            raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
         ):

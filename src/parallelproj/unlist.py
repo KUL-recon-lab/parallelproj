@@ -139,8 +139,8 @@ def regular_polygon_events_to_sinogram(
             )
         num_tof_bins = projector.tof_parameters.num_tofbins
 
-    d_red_xp  = xp.asarray(d_red,  dtype=xp.int32, device=dev)
-    r_red_xp  = xp.asarray(r_red,  dtype=xp.int32, device=dev)
+    d_red_xp = xp.asarray(d_red, dtype=xp.int32, device=dev)
+    r_red_xp = xp.asarray(r_red, dtype=xp.int32, device=dev)
     d_blue_xp = xp.asarray(d_blue, dtype=xp.int32, device=dev)
     r_blue_xp = xp.asarray(r_blue, dtype=xp.int32, device=dev)
 
@@ -157,30 +157,34 @@ def regular_polygon_events_to_sinogram(
         return xp.zeros(shape_spatial, dtype=xp.int32, device=dev)
 
     inring_lut_np, inring_tof_sign_lut_np = _build_inring_luts(lor_descriptor)
-    inring_lut          = xp.asarray(inring_lut_np,          device=dev)
+    inring_lut = xp.asarray(inring_lut_np, device=dev)
     inring_tof_sign_lut = xp.asarray(inring_tof_sign_lut_np, device=dev)
     ring_pair_table = xp.asarray(
         lor_descriptor.michelogram.plane_for_ring_pair_table, device=dev
     )
 
     n_crystals = lor_descriptor.scanner.num_lor_endpoints_per_ring
-    num_rings  = lor_descriptor.scanner.num_rings
-    num_rad    = lor_descriptor.num_rad
+    num_rings = lor_descriptor.scanner.num_rings
+    num_rad = lor_descriptor.num_rad
 
     zero = xp.zeros(1, dtype=xp.int32, device=dev)
 
     # primary validity: all indices within bounds
     valid = (
-        (d_red_xp  >= 0) & (d_red_xp  < n_crystals)
-        & (d_blue_xp >= 0) & (d_blue_xp < n_crystals)
-        & (r_red_xp  >= 0) & (r_red_xp  < num_rings)
-        & (r_blue_xp >= 0) & (r_blue_xp < num_rings)
+        (d_red_xp >= 0)
+        & (d_red_xp < n_crystals)
+        & (d_blue_xp >= 0)
+        & (d_blue_xp < n_crystals)
+        & (r_red_xp >= 0)
+        & (r_red_xp < num_rings)
+        & (r_blue_xp >= 0)
+        & (r_blue_xp < num_rings)
     )
 
-    d_red_s  = xp.where(valid, d_red_xp,  zero)
+    d_red_s = xp.where(valid, d_red_xp, zero)
     d_blue_s = xp.where(valid, d_blue_xp, zero)
 
-    inring_flat   = inring_lut[d_red_s, d_blue_s]
+    inring_flat = inring_lut[d_red_s, d_blue_s]
     tof_sign_vals = inring_tof_sign_lut[d_red_s, d_blue_s]
 
     valid = valid & (inring_flat >= 0)
@@ -188,11 +192,11 @@ def regular_polygon_events_to_sinogram(
     # Canonical ring ordering from the sinogram definition.
     # tof_sign_vals = +1  →  d_red is xstart  →  r_red  is r_start
     # tof_sign_vals = -1  →  d_blue is xstart →  r_blue is r_start
-    r_red_s  = xp.where(valid, r_red_xp,  zero)
+    r_red_s = xp.where(valid, r_red_xp, zero)
     r_blue_s = xp.where(valid, r_blue_xp, zero)
     is_red_start = tof_sign_vals == 1
-    r_start = xp.where(is_red_start, r_red_s,  r_blue_s)
-    r_end   = xp.where(is_red_start, r_blue_s, r_red_s)
+    r_start = xp.where(is_red_start, r_red_s, r_blue_s)
+    r_end = xp.where(is_red_start, r_blue_s, r_red_s)
 
     plane_idx = ring_pair_table[r_start, r_end]
     valid = valid & (plane_idx >= 0)
@@ -206,36 +210,34 @@ def regular_polygon_events_to_sinogram(
 
     # decompose the in-ring flat index into view and radial indices
     safe_flat = xp.where(valid, inring_flat, zero)
-    view_idx  = safe_flat // num_rad
-    rad_idx   = safe_flat % num_rad
+    view_idx = safe_flat // num_rad
+    rad_idx = safe_flat % num_rad
 
     # compute the flat sinogram index respecting sinogram_order
     p_ax = lor_descriptor.plane_axis_num
     v_ax = lor_descriptor.view_axis_num
     r_ax = lor_descriptor.radial_axis_num
-    strides = [int(np.prod(shape_spatial[i + 1:])) for i in range(3)]
+    strides = [int(np.prod(shape_spatial[i + 1 :])) for i in range(3)]
 
     safe_plane = xp.where(valid, plane_idx, zero)
     flat_sino = (
-        xp.astype(rad_idx,     xp.int64) * strides[r_ax]
-        + xp.astype(view_idx,  xp.int64) * strides[v_ax]
+        xp.astype(rad_idx, xp.int64) * strides[r_ax]
+        + xp.astype(view_idx, xp.int64) * strides[v_ax]
         + xp.astype(safe_plane, xp.int64) * strides[p_ax]
     )
 
     if tof_mode:
         flat_sino = flat_sino * num_tof_bins + xp.astype(tof_bin_safe, xp.int64)
-        total_bins  = int(np.prod(shape_spatial)) * num_tof_bins
+        total_bins = int(np.prod(shape_spatial)) * num_tof_bins
         output_shape = (*shape_spatial, num_tof_bins)
     else:
-        total_bins   = int(np.prod(shape_spatial))
+        total_bins = int(np.prod(shape_spatial))
         output_shape = shape_spatial
 
     flat_sino_valid = flat_sino[valid]
     if flat_sino_valid.shape[0] == 0:
         return xp.zeros(output_shape, dtype=xp.int32, device=dev)
-    sino_flat = xp.astype(
-        xp.bincount(flat_sino_valid, minlength=total_bins), xp.int32
-    )
+    sino_flat = xp.astype(xp.bincount(flat_sino_valid, minlength=total_bins), xp.int32)
     return xp.reshape(sino_flat, output_shape)
 
 
@@ -309,33 +311,35 @@ def detection_times_to_tof_bin(
     if projector.tof_parameters is None:
         raise ValueError("projector.tof_parameters is None")
 
-    num_tof_bins    = projector.tof_parameters.num_tofbins
-    tofbin_width    = projector.tof_parameters.tofbin_width
+    num_tof_bins = projector.tof_parameters.num_tofbins
+    tofbin_width = projector.tof_parameters.tofbin_width
     tofcenter_offset = projector.tof_parameters.tofcenter_offset
 
     lor_desc = projector.lor_descriptor
     lut_np, sign_lut_np = _build_inring_luts(lor_desc)
 
-    xp  = array_api_compat.get_namespace(dt_blue_minus_red)
+    xp = array_api_compat.get_namespace(dt_blue_minus_red)
     dev = array_api_compat.device(dt_blue_minus_red)
 
-    lut      = xp.asarray(lut_np,      device=dev)
+    lut = xp.asarray(lut_np, device=dev)
     sign_lut = xp.asarray(sign_lut_np, device=dev)
 
     n_crystals = lor_desc.scanner.num_lor_endpoints_per_ring
 
-    d_red_xp  = xp.asarray(d_red,  dtype=xp.int32,   device=dev)
-    d_blue_xp = xp.asarray(d_blue, dtype=xp.int32,   device=dev)
-    dt_xp     = xp.asarray(dt_blue_minus_red, dtype=xp.float32, device=dev)
+    d_red_xp = xp.asarray(d_red, dtype=xp.int32, device=dev)
+    d_blue_xp = xp.asarray(d_blue, dtype=xp.int32, device=dev)
+    dt_xp = xp.asarray(dt_blue_minus_red, dtype=xp.float32, device=dev)
 
     zero = xp.zeros(1, dtype=xp.int32, device=dev)
 
     # bounds check + valid-LOR check (catches self-pairs via lut[d,d] == -1)
     in_bounds = (
-        (d_red_xp  >= 0) & (d_red_xp  < n_crystals)
-        & (d_blue_xp >= 0) & (d_blue_xp < n_crystals)
+        (d_red_xp >= 0)
+        & (d_red_xp < n_crystals)
+        & (d_blue_xp >= 0)
+        & (d_blue_xp < n_crystals)
     )
-    d_red_s  = xp.where(in_bounds, d_red_xp,  zero)
+    d_red_s = xp.where(in_bounds, d_red_xp, zero)
     d_blue_s = xp.where(in_bounds, d_blue_xp, zero)
 
     valid = in_bounds & (lut[d_red_s, d_blue_s] >= 0)
@@ -349,12 +353,12 @@ def detection_times_to_tof_bin(
     # bin-centre position from LOR midpoint (toward xend) = -sign * dx_blue_red
     # so k = round((N-1)/2 - (sign*dx + tofcenter_offset) / W)
     half_n = xp.asarray((num_tof_bins - 1) / 2.0, dtype=xp.float32, device=dev)
-    offset  = xp.asarray(tofcenter_offset / tofbin_width,   dtype=xp.float32, device=dev)
-    scale   = xp.asarray(1.0 / tofbin_width,                dtype=xp.float32, device=dev)
+    offset = xp.asarray(tofcenter_offset / tofbin_width, dtype=xp.float32, device=dev)
+    scale = xp.asarray(1.0 / tofbin_width, dtype=xp.float32, device=dev)
 
     k_float = half_n - sign * dx_blue_red * scale - offset
-    k_int   = xp.astype(xp.round(k_float), xp.int32)
+    k_int = xp.astype(xp.round(k_float), xp.int32)
 
     in_range = valid & (k_int >= 0) & (k_int < num_tof_bins)
-    invalid  = xp.asarray(np.array([-1], dtype=np.int32), device=dev)
+    invalid = xp.asarray(np.array([-1], dtype=np.int32), device=dev)
     return xp.where(in_range, k_int, invalid)

@@ -824,7 +824,10 @@ class LogCosh(C2Function):
         xp = get_namespace(x)
         z = x if self._delta is None else x / self._delta
         az = xp.abs(z)
-        raw = float(xp.sum(az + xp.log(1 + xp.exp(-2 * az)))) - math.prod(x.shape) * self._log2
+        raw = (
+            float(xp.sum(az + xp.log(1 + xp.exp(-2 * az))))
+            - math.prod(x.shape) * self._log2
+        )
         return raw if self._delta is None else self._delta * raw
 
     def _gradient(self, x: Array) -> Array:
@@ -836,7 +839,10 @@ class LogCosh(C2Function):
         xp = get_namespace(x)
         z = x if self._delta is None else x / self._delta
         az = xp.abs(z)
-        raw = float(xp.sum(az + xp.log(1 + xp.exp(-2 * az)))) - math.prod(x.shape) * self._log2
+        raw = (
+            float(xp.sum(az + xp.log(1 + xp.exp(-2 * az))))
+            - math.prod(x.shape) * self._log2
+        )
         return (raw if self._delta is None else self._delta * raw), xp.tanh(z)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:

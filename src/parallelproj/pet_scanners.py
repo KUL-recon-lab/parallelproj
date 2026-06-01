@@ -480,9 +480,9 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             inds = self.lor_endpoint_numbers
 
         if self._ring_endpoint_ordering is RingEndpointOrdering.COUNTERCLOCKWISE:
-            side   = inds // self._num_lor_endpoints_per_side
+            side = inds // self._num_lor_endpoints_per_side
             within = inds - side * self._num_lor_endpoints_per_side
-            new_side   = self.xp.astype(
+            new_side = self.xp.astype(
                 (self._num_sides - side) % self._num_sides, self.xp.int32
             )
             new_within = self.xp.astype(
