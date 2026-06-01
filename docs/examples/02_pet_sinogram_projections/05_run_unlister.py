@@ -1,6 +1,6 @@
 """
-Listmode to sinogram histogramming (unlister)
-=============================================
+Listmode to sinogram unlisting
+==============================
 
 This example demonstrates :func:`.regular_polygon_events_to_sinogram`,
 which histograms listmode events into a sinogram.
@@ -220,8 +220,8 @@ assert bool(xp.all(sino_tof_unlisted == y_tof)), "TOF round-trip failed"
 print("TOF  round-trip: OK")
 
 # %%
-# TOF sign illustration
-# ---------------------
+# Event vs Sinogram TOF sign illustration
+# ---------------------------------------
 #
 # A single-ring scanner with 32 detectors (organized in 4 modules) and 25 TOF bins of 24 mm each
 # covering the full 600 mm diameter.
@@ -232,9 +232,9 @@ print("TOF  round-trip: OK")
 # :func:`.detection_times_to_tof_bin` gives the correct sinogram TOF bin
 # regardless of which colour label is assigned to which physical detector:
 #
-# * **Events 1 & 2** — ``d_red = xstart`` (same order as projector).
+# * **Events 0 & 1** — ``d_red = xstart`` (same order as projector).
 #   Passing ``t_blue − t_red`` directly gives the right bin.
-# * **Events 3 & 4** — ``d_red = xend`` (reversed relative to projector).
+# * **Events 2 & 3** — ``d_red = xend`` (reversed relative to projector).
 #   The sign of ``t_blue − t_red`` is now *mirrored* compared to the
 #   projector convention, and the helper applies the flip automatically.
 #
@@ -274,8 +274,8 @@ proj_sign.tof_parameters = parallelproj.tof.TOFParameters(
 )
 
 # %%
-# Four events — two orderings of the same LOR
-# -------------------------------------------
+# Setup of 6 coincidence events
+# -----------------------------
 
 d_red_arr = xp.asarray([7, 7, 24, 24, 24, 1], dtype=xp.int32, device=dev)
 d_blue_arr = xp.asarray([24, 24, 7, 7, 7, 29], dtype=xp.int32, device=dev)
@@ -291,7 +291,7 @@ dt_arr = xp.asarray([+1.0, -1.0, +1.0, -1.0, 0.0, 0.0], device=dev)
 # %%
 # Unlist the events into a TOF sinogram
 # -------------------------------------
-
+#
 # The unlister needs the unsigned TOF bins for every event that correspond to
 # the projector TOF definition. These can be calculate using :func:`.detection_times_to_tof_bin`
 #
@@ -300,7 +300,7 @@ dt_arr = xp.asarray([+1.0, -1.0, +1.0, -1.0, 0.0, 0.0], device=dev)
 # and blue detectors is reversed.
 #
 # Note 2: the sum of the unlisted sinogram can be less than the number of events
-# if we use radial trimming of LOR in the sinogram.
+# if we use radial trimming of LOR in the sinogram. For those events, the unsigned sinogram TOF bin is set to -1.
 
 ev_sino_tof_bins = detection_times_to_tof_bin(d_red_arr, d_blue_arr, dt_arr, proj_sign)
 
@@ -308,7 +308,7 @@ for i, (dr, db, dt, tb) in enumerate(
     zip(d_red_arr, d_blue_arr, dt_arr, ev_sino_tof_bins)
 ):
     print(
-        f"event {i}, d_red = {int(dr):02}, b_blue = {int(db):02}, sino tof bin {int(tb):02}, dt = {float(dt):.1f} ns"
+        f"event {i}, d_red = {int(dr):02}, b_blue = {int(db):02}, sino tof bin {int(tb):02}, dt = {float(dt):+.1f} ns"
     )
 
 unlisted_tof_sino = regular_polygon_events_to_sinogram(
@@ -325,8 +325,12 @@ print(f"num counts in unlisted TOF sinogram: {int(xp.sum(unlisted_tof_sino))}")
 
 
 # %%
-# Visualisation
-# -------------
+# Visualisation of unsigned TOF bin covention
+# -------------------------------------------
+#
+# The following plots illustrates the start end detector for all LORs of view 0
+# as well as the defined TOF bins.
+# The "start" detectors are the ones closer to TOF bin 0 (dark blue color).
 
 fig_sign = plt.figure(figsize=(10, 8))
 ax_sign = fig_sign.add_subplot(111, projection="3d")
@@ -339,7 +343,6 @@ ax_sign.set_xlim(-lim, lim)
 ax_sign.set_ylim(-lim, lim)
 ax_sign.set_zlim(-lim / 4, lim / 4)
 ax_sign.view_init(elev=75, azim=270)
-# ax_sign.legend(loc="upper right", fontsize=7, framealpha=0.9, ncols=1)
 fig_sign.tight_layout()
 fig_sign.show()
 
