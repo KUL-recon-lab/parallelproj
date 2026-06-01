@@ -229,7 +229,7 @@ print("TOF  round-trip: OK")
 # Event vs sinogram TOF sign illustration
 # ----------------------------------------
 #
-# A single-ring scanner with 32 detectors (8 modules × 4 crystals) and
+# A dual-ring scanner with 32 detectors (8 modules × 4 crystals) and
 # 25 TOF bins of 24 mm each covering the full 600 mm diameter.
 #
 # Six events on two LORs demonstrate that :func:`.detection_times_to_tof_bin`
@@ -254,7 +254,7 @@ scanner_sign = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_sides=8,
     num_lor_endpoints_per_side=4,
     lor_spacing=50.0,
-    ring_positions=xp.asarray([0.0], device=dev),
+    ring_positions=xp.asarray([0.0, 50.0], device=dev),
     symmetry_axis=2,
 )
 
@@ -351,8 +351,8 @@ lor_desc_sign.show_tof_bins(
 lim = radius_sign * 1.3
 ax_sign.set_xlim(-lim, lim)
 ax_sign.set_ylim(-lim, lim)
-ax_sign.set_zlim(-lim / 4, lim / 4)
-ax_sign.view_init(elev=75, azim=270)
+ax_sign.set_zlim(0, 50)
+ax_sign.view_init(elev=45, azim=-45)
 fig_sign.tight_layout()
 fig_sign.show()
 
