@@ -1,4 +1,5 @@
 """Shared visualisation utilities for parallelproj examples."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -71,7 +72,9 @@ def show_vol_cuts(
     if axis_labels is None:
         axis_labels = ("t", "x", "y", "z") if is_4d else ("x", "y", "z")
     elif len(axis_labels) != vol.ndim:
-        raise ValueError(f"axis_labels must have {vol.ndim} entries for a {vol.ndim}-D array")
+        raise ValueError(
+            f"axis_labels must have {vol.ndim} entries for a {vol.ndim}-D array"
+        )
 
     if is_4d:
         n0, nx, ny, nz = vol.shape
@@ -103,7 +106,8 @@ def show_vol_cuts(
 
     if is_4d:
         gs = fig.add_gridspec(
-            5, 3,
+            5,
+            3,
             height_ratios=[8, 1, 1, 1, 0.5],
             hspace=0.6,
             wspace=0.35,
@@ -114,7 +118,8 @@ def show_vol_cuts(
         ax_cb = fig.add_subplot(gs[4, :])
     else:
         gs = fig.add_gridspec(
-            4, 3,
+            4,
+            3,
             height_ratios=[8, 1, 1, 0.5],
             hspace=0.6,
             wspace=0.35,
@@ -131,9 +136,9 @@ def show_vol_cuts(
     #   panel 0: cut along lx -> shows (ly, lz) plane, aspect = dz / dy
     #   panel 1: cut along ly -> shows (lx, lz) plane, aspect = dz / dx
     #   panel 2: cut along lz -> shows (lx, ly) plane, aspect = dy / dx
-    aspects       = [dz / dy, dz / dx, dy / dx]
-    panel_xlabels = [ly,      lx,      lx     ]
-    panel_ylabels = [lz,      lz,      ly     ]
+    aspects = [dz / dy, dz / dx, dy / dx]
+    panel_xlabels = [ly, lx, lx]
+    panel_ylabels = [lz, lz, ly]
 
     def _get_cuts(i0, ix, iy, iz):
         if is_4d:

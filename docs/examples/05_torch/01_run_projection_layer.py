@@ -44,7 +44,9 @@ class LinearSingleChannelOperator(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, x: torch.Tensor, operator: parallelproj.operators.LinearOperator) -> torch.Tensor:
+    def forward(
+        ctx, x: torch.Tensor, operator: parallelproj.operators.LinearOperator
+    ) -> torch.Tensor:
         """forward pass of the linear operator
 
         Parameters
@@ -135,7 +137,9 @@ class AdjointLinearSingleChannelOperator(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, x: torch.Tensor, operator: parallelproj.operators.LinearOperator) -> torch.Tensor:
+    def forward(
+        ctx, x: torch.Tensor, operator: parallelproj.operators.LinearOperator
+    ) -> torch.Tensor:
         """forward pass of the adjoint of the linear operator
 
         Parameters
