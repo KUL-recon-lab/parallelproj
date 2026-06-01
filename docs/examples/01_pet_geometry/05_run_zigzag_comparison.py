@@ -1,6 +1,6 @@
 """
-Zig-zag LOR sampling: END_FIRST vs START_FIRST
-===============================================
+Zig-zag sampling of LORs in a sinogram view
+===========================================
 
 For a given sinogram view, a regular polygon PET scanner connects pairs of
 in-ring detector endpoints in a zig-zag pattern as the radial bin index moves
