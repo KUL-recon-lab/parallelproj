@@ -1080,7 +1080,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._max_ring_difference = self._michelogram.max_ring_difference
         self._span = self._michelogram.span
 
-        self._num_rad = (scanner.num_lor_endpoints_per_ring + 1) - 2 * self._radial_trim
+        self._num_rad = scanner.num_lor_endpoints_per_ring - 2 * self._radial_trim
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
         self._sinogram_order = sinogram_order
@@ -1312,19 +1312,15 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         for view in np.arange(self._num_views):
             if self._zig_zag_order is SinogramZigZagOrder.END_FIRST:
                 # end crystal steps first: (0,n-1),(0,n-2),(1,n-2),(1,n-3),...
-                start_seq = self.xp.concat(
-                    (self.xp.arange(m) // 2, self.xp.asarray([n // 2]))
-                )
+                start_seq = self.xp.arange(m) // 2
                 end_seq = self.xp.concat(
-                    (self.xp.asarray([-1]), -((self.xp.arange(m) + 4) // 2))
+                    (self.xp.asarray([-1]), -((self.xp.arange(m - 1) + 4) // 2))
                 )
             else:
                 # start crystal steps first: (0,n-1),(1,n-1),(1,n-2),(2,n-2),...
-                start_seq = self.xp.concat(
-                    ((self.xp.arange(m) + 1) // 2, self.xp.asarray([n // 2]))
-                )
+                start_seq = (self.xp.arange(m) + 1) // 2
                 end_seq = self.xp.concat(
-                    (self.xp.asarray([-1]), -((self.xp.arange(m) + 3) // 2))
+                    (self.xp.asarray([-1]), -((self.xp.arange(m - 1) + 3) // 2))
                 )
 
             self._start_in_ring_index[view, :] = self.xp.astype(
