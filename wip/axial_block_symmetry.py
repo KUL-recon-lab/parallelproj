@@ -119,7 +119,7 @@ def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None):
         sens = 0.35 + 0.65 * np.cos(np.pi * (k_arr - (B - 1) / 2) / (B - 1)) ** 2
         sens /= sens.max()
     else:
-        sens = np.ones(1)   # single crystal per block: uniform sensitivity
+        sens = np.ones(1)  # single crystal per block: uniform sensitivity
 
     z = np.array(
         [blk * (B + GAP) + pos for blk, pos in (divmod(r, B) for r in range(N))]
@@ -329,7 +329,9 @@ def draw_class_sizes(ax, class_members, n_classes, highlight_cls=None):
     base_colours = plt.cm.tab20.colors
     bar_colours = [base_colours[i % len(base_colours)] for i in range(n_classes)]
 
-    bars = ax.bar(range(n_classes), sizes, color=bar_colours, edgecolor="none", width=0.8)
+    bars = ax.bar(
+        range(n_classes), sizes, color=bar_colours, edgecolor="none", width=0.8
+    )
 
     # Highlight selected class with a thick red outline
     if highlight_cls is not None and 0 <= highlight_cls < n_classes:
@@ -344,7 +346,10 @@ def draw_class_sizes(ax, class_members, n_classes, highlight_cls=None):
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 0.15,
                 str(sz),
-                ha="center", va="bottom", fontsize=fs, color="k",
+                ha="center",
+                va="bottom",
+                fontsize=fs,
+                color="k",
             )
 
     # x-ticks: show every tick if few classes, otherwise every 5th
@@ -373,10 +378,12 @@ def _parse(tb, default, lo, hi):
 
 # ── Figure and initial state ──────────────────────────────────────────────────
 
-INIT_B, INIT_NB, INIT_R1, INIT_R2, INIT_DIFF = 7, 4, 10, 14, 27
+INIT_B, INIT_NB, INIT_R1, INIT_R2, INIT_DIFF = 5, 4, 10, 14, 19
 
 fig, (ax_lor, ax_mich, ax_bar) = plt.subplots(
-    1, 3, figsize=(20, 8),
+    1,
+    3,
+    figsize=(20, 8),
     gridspec_kw={"wspace": 0.32, "width_ratios": [1.6, 1.4, 1.0]},
 )
 plt.subplots_adjust(bottom=0.18, left=0.05, right=0.98, top=0.95)
@@ -385,8 +392,16 @@ plt.subplots_adjust(bottom=0.18, left=0.05, right=0.98, top=0.95)
 _cm0, _mb0, _nc0 = _get_class_data(INIT_B, INIT_NB, INIT_DIFF)
 _cls0 = _cm0.get((INIT_R1, INIT_R2))
 draw_panel(ax_lor, INIT_B, INIT_NB, INIT_R1, INIT_R2, class_idx=_cls0)
-draw_michelogram(ax_mich, INIT_B, INIT_NB, INIT_DIFF, _cm0, _mb0, _nc0,
-                 highlight_pair=(INIT_R1, INIT_R2))
+draw_michelogram(
+    ax_mich,
+    INIT_B,
+    INIT_NB,
+    INIT_DIFF,
+    _cm0,
+    _mb0,
+    _nc0,
+    highlight_pair=(INIT_R1, INIT_R2),
+)
 draw_class_sizes(ax_bar, _mb0, _nc0, highlight_cls=_cls0)
 
 # ── Text-box controls ─────────────────────────────────────────────────────────
@@ -419,18 +434,17 @@ tb_r2 = TextBox(ax_tr2, "r2   ", initial=str(INIT_R2))
 
 def _update(_text=None):
     """Recompute and redraw all three panels from current text-box values."""
-    B        = _parse(tb_B,    INIT_B,    1,  20)
-    nb       = _parse(tb_nb,   INIT_NB,   2,  10)
-    N        = B * nb
-    r1       = _parse(tb_r1,   0,          0,  N - 1)
-    r2       = _parse(tb_r2,   0,          0,  N - 1)
-    max_diff = _parse(tb_diff, min(B, N-1), 1,  N - 1)
+    B = _parse(tb_B, INIT_B, 1, 20)
+    nb = _parse(tb_nb, INIT_NB, 2, 10)
+    N = B * nb
+    r1 = _parse(tb_r1, 0, 0, N - 1)
+    r2 = _parse(tb_r2, 0, 0, N - 1)
+    max_diff = _parse(tb_diff, min(B, N - 1), 1, N - 1)
 
     cm, members, nc = _get_class_data(B, nb, max_diff)
     cls_idx = cm.get((r1, r2))
     draw_panel(ax_lor, B, nb, r1, r2, class_idx=cls_idx)
-    draw_michelogram(ax_mich, B, nb, max_diff, cm, members, nc,
-                     highlight_pair=(r1, r2))
+    draw_michelogram(ax_mich, B, nb, max_diff, cm, members, nc, highlight_pair=(r1, r2))
     draw_class_sizes(ax_bar, members, nc, highlight_cls=cls_idx)
     fig.canvas.draw_idle()
 
@@ -465,9 +479,4 @@ def _on_mich_click(event):
 
 fig.canvas.mpl_connect("button_press_event", _on_mich_click)
 
-fig.savefig(
-    "/mnt/c/projects/parallelproj/wip/axial_block_symmetry.png",
-    dpi=150,
-    bbox_inches="tight",
-)
 plt.show()
