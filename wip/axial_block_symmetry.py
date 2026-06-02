@@ -1,132 +1,33 @@
-"""Visualise axial LOR equivalence classes for block-detector PET scanners."""
+"""Visualise axial sinogram plane symmetries for a PET scanner with cylindrical symmetry."""
+
+import os
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.widgets import Button, TextBox
 
-# ── Symmetry generators ──────────────────────────────────────────────────────
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sinogram_plane_symmetries import (
+    is_interior_ring,
+    plane_orbit,
+    compute_sinogram_plane_symmetries,
+)
 
-
-def _is_interior(r, N, n_edge):
-    """True iff ring r is not in the edge group.
-
-    ``n_edge`` is the number of rings at each scanner end whose sensitivity
-    differs due to missing neighbouring blocks.  ``n_edge=0`` disables edge
-    correction and returns True for every ring.
-    """
-    if n_edge <= 0:
-        return True
-    return n_edge <= r < N - n_edge
-
-
-def block_shifts_fn(r_a, r_b, B, N, n_edge=0):
-    """All block-shifted copies of (r_a, r_b) within [0, N).
-
-    When ``n_edge > 0`` only shifts are returned where both endpoints stay in
-    the same interior/edge category, preventing edge-of-scanner crystals from
-    being treated as equivalent to interior crystals.
-    """
-    candidates = [
-        (r_a + k * B, r_b + k * B)
-        for k in range(-(N // B), N // B + 1)
-        if 0 <= r_a + k * B < N and 0 <= r_b + k * B < N
-    ]
-    if n_edge <= 0:
-        return candidates
-    int_a = _is_interior(r_a, N, n_edge)
-    int_b = _is_interior(r_b, N, n_edge)
-    return [
-        (ra, rb) for ra, rb in candidates
-        if _is_interior(ra, N, n_edge) == int_a and _is_interior(rb, N, n_edge) == int_b
-    ]
-
-
-def z_mirror_fn(r_a, r_b, N):
-    """Axial midplane reflection: (r1, r2) → (N-1-r2, N-1-r1)."""
-    return N - 1 - r_b, N - 1 - r_a
-
-
-def flip_fn(r_a, r_b):
-    """Swap start/end ring — same physical LOR, opposite direction."""
-    return r_b, r_a
-
-
-def equivalence_class_fn(r1, r2, B, N, n_edge=0):
-    """Orbit of (r1, r2) under block-shift, z-reflection, and flip."""
-    seeds = [
-        (r1, r2),
-        z_mirror_fn(r1, r2, N),
-        flip_fn(r1, r2),
-        flip_fn(*z_mirror_fn(r1, r2, N)),
-    ]
-    lors = set()
-    for seed in seeds:
-        for lor in block_shifts_fn(*seed, B=B, N=N, n_edge=n_edge):
-            lors.add(lor)
-    return sorted(lors)
-
-
-# ── Equivalence-class catalogue ───────────────────────────────────────────────
-
-
-def all_equivalence_classes(B, num_blocks, max_ring_diff=None, n_edge=0):
-    """Return all equivalence classes for a span-1 sinogram.
-
-    Parameters
-    ----------
-    B : int
-        Axial crystals per block.
-    num_blocks : int
-        Number of axial detector blocks.
-    max_ring_diff : int or None
-        Maximum |r1 − r2| included in the sinogram (None → N-1).
-
-    Returns
-    -------
-    class_map : dict[(int, int), int]
-        Forward lookup: ring pair → equivalence-class index.
-    class_members : dict[int, list[(int, int)]]
-        Reverse lookup: class index → sorted list of ring pairs.
-    n_classes : int
-        Number of distinct equivalence classes.
-    """
-    N = B * num_blocks
-    if max_ring_diff is None:
-        max_ring_diff = N - 1
-
-    remaining = {
-        (r1, r2) for r1 in range(N) for r2 in range(N) if abs(r1 - r2) <= max_ring_diff
-    }
-    class_map: dict = {}
-    class_members: dict = {}
-    class_idx = 0
-    while remaining:
-        seed = min(remaining)
-        equiv = sorted(
-            p
-            for p in equivalence_class_fn(*seed, B=B, N=N, n_edge=n_edge)
-            if abs(p[0] - p[1]) <= max_ring_diff
-        )
-        class_members[class_idx] = equiv
-        for pair in equiv:
-            class_map[pair] = class_idx
-            remaining.discard(pair)
-        class_idx += 1
-    return class_map, class_members, class_idx
-
-
-# ── Cached class data (recomputed only when B / num_blocks / max_diff change) ──
+# ── Cache (recomputed only when block_size / num_blocks / max_ring_diff / n_edge change) ──
 
 _cache: dict = {"key": None, "data": ({}, {}, 0)}
 
 
-def _get_class_data(B, num_blocks, max_diff, n_edge=0):
-    """Cached wrapper around all_equivalence_classes."""
-    key = (B, num_blocks, max_diff, n_edge)
+def _cached_symmetry_classes(block_size, num_blocks, max_ring_diff, n_edge=0):
+    """Return (plane_to_class, class_to_planes, num_classes), reusing cached data when possible."""
+    key = (block_size, num_blocks, max_ring_diff, n_edge)
     if _cache["key"] != key:
         _cache["key"] = key
-        _cache["data"] = all_equivalence_classes(B, num_blocks, max_diff, n_edge=n_edge)
+        _cache["data"] = compute_sinogram_plane_symmetries(
+            block_size, num_blocks, max_ring_diff, n_edge=n_edge
+        )
     return _cache["data"]
 
 
@@ -151,12 +52,12 @@ def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None, n_edge=0):
     )
     z -= z.mean()
 
-    all_equiv = equivalence_class_fn(r1_base, r2_base, B, N, n_edge=n_edge)
+    all_equiv = plane_orbit(r1_base, r2_base, B, N, n_edge)
     p1_base, p2_base = r1_base % B, r2_base % B
     prod = float(sens[p1_base] * sens[p2_base])
 
     for r in range(N):
-        is_edge = not _is_interior(r, N, n_edge)
+        is_edge = not is_interior_ring(r, N, n_edge)
         fc = (plt.cm.Greys(0.30 + 0.45 * sens[r % B]) if is_edge
               else plt.cm.magma(0.01 + 0.99 * sens[r % B]))
         ec = "dimgray" if is_edge else "k"
@@ -414,7 +315,7 @@ fig, (ax_lor, ax_mich, ax_bar) = plt.subplots(
 plt.subplots_adjust(bottom=0.18, left=0.05, right=0.98, top=0.95)
 
 # Pre-compute and draw initial state  (n_edge=0: no edge correction by default)
-_cm0, _mb0, _nc0 = _get_class_data(INIT_B, INIT_NB, INIT_DIFF, n_edge=0)
+_cm0, _mb0, _nc0 = _cached_symmetry_classes(INIT_B, INIT_NB, INIT_DIFF, n_edge=0)
 _cls0 = _cm0.get((INIT_R1, INIT_R2))
 draw_panel(ax_lor, INIT_B, INIT_NB, INIT_R1, INIT_R2, class_idx=_cls0, n_edge=0)
 draw_michelogram(
@@ -466,7 +367,7 @@ def _update(_event=None):
     max_diff = _parse(tb_diff, min(B, N-1), 1,  N - 1)
     n_edge   = _parse(tb_ne,   0,          0,  N // 2)
 
-    cm, members, nc = _get_class_data(B, nb, max_diff, n_edge=n_edge)
+    cm, members, nc = _cached_symmetry_classes(B, nb, max_diff, n_edge=n_edge)
     cls_idx = cm.get((r1, r2))
     draw_panel(ax_lor, B, nb, r1, r2, class_idx=cls_idx, n_edge=n_edge)
     draw_michelogram(ax_mich, B, nb, max_diff, cm, members, nc, highlight_pair=(r1, r2))
