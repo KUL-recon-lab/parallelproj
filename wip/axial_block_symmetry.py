@@ -1,12 +1,12 @@
 """Visualise axial sinogram plane symmetries for a PET scanner with cylindrical symmetry."""
 
+import argparse
 import os
 import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.widgets import Button, TextBox
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sinogram_plane_symmetries import (
@@ -14,22 +14,6 @@ from sinogram_plane_symmetries import (
     plane_orbit,
     compute_sinogram_plane_symmetries,
 )
-
-# ── Cache (recomputed only when block_size / num_blocks / max_ring_diff / n_edge change) ──
-
-_cache: dict = {"key": None, "data": ({}, {}, 0)}
-
-
-def _cached_symmetry_classes(block_size, num_blocks, max_ring_diff, n_edge=0):
-    """Return (plane_to_class, class_to_planes, num_classes), reusing cached data when possible."""
-    key = (block_size, num_blocks, max_ring_diff, n_edge)
-    if _cache["key"] != key:
-        _cache["key"] = key
-        _cache["data"] = compute_sinogram_plane_symmetries(
-            block_size, num_blocks, max_ring_diff, n_edge=n_edge
-        )
-    return _cache["data"]
-
 
 # ── Drawing helpers ───────────────────────────────────────────────────────────
 
@@ -58,15 +42,23 @@ def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None, n_edge=0):
 
     for r in range(N):
         is_edge = not is_interior_ring(r, N, n_edge)
-        fc = (plt.cm.Greys(0.30 + 0.45 * sens[r % B]) if is_edge
-              else plt.cm.magma(0.01 + 0.99 * sens[r % B]))
+        fc = (
+            plt.cm.Greys(0.30 + 0.45 * sens[r % B])
+            if is_edge
+            else plt.cm.magma(0.005 + 0.995 * sens[r % B])
+        )
         ec = "dimgray" if is_edge else "k"
         lw = 0.8 if is_edge else 0.4
         for y0 in (-D - ch, D):
             ax.add_patch(
                 mpatches.Rectangle(
-                    (z[r] - cw / 2, y0), cw, ch,
-                    facecolor=fc, edgecolor=ec, linewidth=lw, zorder=2,
+                    (z[r] - cw / 2, y0),
+                    cw,
+                    ch,
+                    facecolor=fc,
+                    edgecolor=ec,
+                    linewidth=lw,
+                    zorder=2,
                 )
             )
 
@@ -294,114 +286,122 @@ def draw_class_sizes(ax, class_members, n_classes, highlight_cls=None):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _parse(tb, default, lo, hi):
-    """Parse a TextBox value as a clamped integer."""
-    try:
-        return max(lo, min(hi, int(tb.text)))
-    except ValueError:
-        return default
+# ── Command-line interface ────────────────────────────────────────────────────
 
 
-# ── Figure and initial state ──────────────────────────────────────────────────
-
-INIT_B, INIT_NB, INIT_R1, INIT_R2, INIT_DIFF = 5, 4, 10, 14, 19
-
-fig, (ax_lor, ax_mich, ax_bar) = plt.subplots(
-    1,
-    3,
-    figsize=(20, 8),
-    gridspec_kw={"wspace": 0.32, "width_ratios": [1.6, 1.4, 1.0]},
-)
-plt.subplots_adjust(bottom=0.18, left=0.05, right=0.98, top=0.95)
-
-# Pre-compute and draw initial state  (n_edge=0: no edge correction by default)
-_cm0, _mb0, _nc0 = _cached_symmetry_classes(INIT_B, INIT_NB, INIT_DIFF, n_edge=0)
-_cls0 = _cm0.get((INIT_R1, INIT_R2))
-draw_panel(ax_lor, INIT_B, INIT_NB, INIT_R1, INIT_R2, class_idx=_cls0, n_edge=0)
-draw_michelogram(
-    ax_mich, INIT_B, INIT_NB, INIT_DIFF, _cm0, _mb0, _nc0,
-    highlight_pair=(INIT_R1, INIT_R2),
-)
-draw_class_sizes(ax_bar, _mb0, _nc0, highlight_cls=_cls0)
-
-# ── Text-box controls ─────────────────────────────────────────────────────────
-#
-# Layout (figure fractions):
-#   Left column  (x ≈ 0.07 … 0.43): B, num_blocks, max|Δ|, n_edge
-#   Right column (x ≈ 0.55 … 0.92): r1, r2
-#   Centre:                           Recalculate button
-
-sh, sg = 0.032, 0.010  # text-box height, gap
-
-
-def _sy(row):
-    """Bottom edge of row (0 = lowest)."""
-    return 0.03 + row * (sh + sg)
-
-
-# axes widths are the INPUT FIELD only; matplotlib places the label to the left
-ax_tB    = fig.add_axes([0.22, _sy(3), 0.20, sh])
-ax_tnb   = fig.add_axes([0.22, _sy(2), 0.20, sh])
-ax_tdiff = fig.add_axes([0.22, _sy(1), 0.20, sh])
-ax_tne   = fig.add_axes([0.22, _sy(0), 0.20, sh])
-ax_tr1   = fig.add_axes([0.72, _sy(2), 0.20, sh])
-ax_tr2   = fig.add_axes([0.72, _sy(1), 0.20, sh])
-ax_btn   = fig.add_axes([0.42, _sy(0), 0.16, sh * 1.3])
-
-tb_B    = TextBox(ax_tB,    "B (cryst/blk)   ", initial=str(INIT_B))
-tb_nb   = TextBox(ax_tnb,   "Num blocks      ", initial=str(INIT_NB))
-tb_diff = TextBox(ax_tdiff, "Max |Δ|         ", initial=str(INIT_DIFF))
-tb_ne   = TextBox(ax_tne,   "Edge n          ", initial="0")
-tb_r1   = TextBox(ax_tr1,   "r1   ", initial=str(INIT_R1))
-tb_r2   = TextBox(ax_tr2,   "r2   ", initial=str(INIT_R2))
-btn_recalc = Button(ax_btn, "↻  Recalculate", color="0.85", hovercolor="0.70")
-
-
-def _update(_event=None):
-    """Recompute and redraw all three panels from current text-box values."""
-    B        = _parse(tb_B,    INIT_B,    1,  20)
-    nb       = _parse(tb_nb,   INIT_NB,   2,  10)
-    N        = B * nb
-    r1       = _parse(tb_r1,   0,          0,  N - 1)
-    r2       = _parse(tb_r2,   0,          0,  N - 1)
-    max_diff = _parse(tb_diff, min(B, N-1), 1,  N - 1)
-    n_edge   = _parse(tb_ne,   0,          0,  N // 2)
-
-    cm, members, nc = _cached_symmetry_classes(B, nb, max_diff, n_edge=n_edge)
-    cls_idx = cm.get((r1, r2))
-    draw_panel(ax_lor, B, nb, r1, r2, class_idx=cls_idx, n_edge=n_edge)
-    draw_michelogram(ax_mich, B, nb, max_diff, cm, members, nc, highlight_pair=(r1, r2))
-    draw_class_sizes(ax_bar, members, nc, highlight_cls=cls_idx)
-    fig.canvas.draw_idle()
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description=(
+            "Visualise axial sinogram plane symmetries for a "
+            "cylindrically-symmetric PET scanner."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "-B",
+        "--block-size",
+        type=int,
+        default=7,
+        metavar="B",
+        help="Axial crystals per detector block",
+    )
+    p.add_argument(
+        "-n",
+        "--num-blocks",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Number of axial detector blocks",
+    )
+    p.add_argument(
+        "--r1",
+        type=int,
+        default=28,
+        metavar="R1",
+        help="Start ring of the highlighted plane",
+    )
+    p.add_argument(
+        "--r2",
+        type=int,
+        default=29,
+        metavar="R2",
+        help="End ring of the highlighted plane",
+    )
+    p.add_argument(
+        "-d",
+        "--max-ring-diff",
+        type=int,
+        default=None,
+        metavar="D",
+        help="Maximum |r1-r2| in the sinogram (default: block_size)",
+    )
+    p.add_argument(
+        "-e",
+        "--n-edge",
+        type=int,
+        default=0,
+        metavar="E",
+        help="Edge rings at each scanner end with different sensitivity",
+    )
+    p.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Save figure to FILE instead of (or in addition to) showing it",
+    )
+    return p
 
 
-btn_recalc.on_clicked(_update)
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-# ── Click on michelogram to select plane ──────────────────────────────────────
+if __name__ == "__main__":
+    args = _build_parser().parse_args()
 
+    block_size = args.block_size
+    num_blocks = args.num_blocks
+    num_rings = block_size * num_blocks
+    r1 = max(0, min(args.r1, num_rings - 1))
+    r2 = max(0, min(args.r2, num_rings - 1))
+    max_ring_diff = (
+        args.max_ring_diff if args.max_ring_diff is not None else num_rings - 1
+    )
+    max_ring_diff = max(1, min(max_ring_diff, num_rings - 1))
+    n_edge = max(0, args.n_edge)
 
-def _on_mich_click(event):
-    """Select (r1, r2) by clicking a cell in the michelogram."""
-    if event.inaxes is not ax_mich or event.button != 1:
-        return
-    if event.xdata is None or event.ydata is None:
-        return
-    B = _parse(tb_B, INIT_B, 1, 20)
-    nb = _parse(tb_nb, INIT_NB, 2, 10)
-    N = B * nb
-    r1 = int(round(event.xdata))
-    r2 = int(round(event.ydata))
-    if not (0 <= r1 < N and 0 <= r2 < N):
-        return
-    max_diff = _parse(tb_diff, min(B, N - 1), 1, N - 1)
-    if abs(r1 - r2) > max_diff:
-        return
-    # Update text boxes (set_val does not trigger on_submit)
-    tb_r1.set_val(str(r1))
-    tb_r2.set_val(str(r2))
-    _update()
+    plane_to_class, class_to_planes, num_classes = compute_sinogram_plane_symmetries(
+        block_size, num_blocks, max_ring_diff, n_edge=n_edge
+    )
+    cls_idx = plane_to_class.get((r1, r2))
 
+    fig, (ax_lor, ax_mich, ax_bar) = plt.subplots(
+        1,
+        3,
+        figsize=(20, 7),
+        layout="constrained",
+    )
+    fig.suptitle(
+        f"Axial sinogram plane symmetries  "
+        f"(B={block_size}, {num_blocks} blocks, "
+        rf"$|\Delta|\leq${max_ring_diff}, n_edge={n_edge})",
+        fontsize=12,
+    )
 
-fig.canvas.mpl_connect("button_press_event", _on_mich_click)
+    draw_panel(ax_lor, block_size, num_blocks, r1, r2, class_idx=cls_idx, n_edge=n_edge)
+    draw_michelogram(
+        ax_mich,
+        block_size,
+        num_blocks,
+        max_ring_diff,
+        plane_to_class,
+        class_to_planes,
+        num_classes,
+        highlight_pair=(r1, r2),
+    )
+    draw_class_sizes(ax_bar, class_to_planes, num_classes, highlight_cls=cls_idx)
 
-plt.show()
+    if args.output:
+        fig.savefig(args.output, dpi=300)
+        print(f"Saved to {args.output}")
+    plt.show()
