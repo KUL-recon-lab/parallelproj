@@ -27,6 +27,9 @@ stay within the same interior / edge category after the shift.
 
 from __future__ import annotations
 
+import numpy as np
+import array_api_compat
+
 
 def is_interior_ring(ring: int, num_rings: int, n_edge: int) -> bool:
     """Return True iff *ring* is not affected by edge effects.
@@ -73,8 +76,7 @@ def axial_block_shifted_planes(
     shifted = [
         (r1 + k * block_size, r2 + k * block_size)
         for k in range(-num_blocks, num_blocks + 1)
-        if 0 <= r1 + k * block_size < num_rings
-        and 0 <= r2 + k * block_size < num_rings
+        if 0 <= r1 + k * block_size < num_rings and 0 <= r2 + k * block_size < num_rings
     ]
     if n_edge <= 0:
         return shifted
@@ -168,3 +170,98 @@ def compute_sinogram_plane_symmetries(
             remaining.discard(plane)
         class_idx += 1
     return plane_to_class, class_to_planes, class_idx
+
+
+# ── Sinogram reduction ────────────────────────────────────────────────────────
+
+
+def build_plane_class_indices(
+    plane_for_ring_pair_table: np.ndarray,
+    class_to_planes: dict,
+    num_classes: int,
+) -> list:
+    """Build per-class sinogram plane index arrays.
+
+    Returns a list of ``num_classes`` numpy integer arrays.  Element ``c``
+    contains the sinogram plane indices for equivalence class ``c``.  Ring
+    pairs whose ``plane_for_ring_pair_table`` entry is ``−1`` (outside
+    ``max_ring_diff``) are silently omitted.
+
+    Parameters
+    ----------
+    plane_for_ring_pair_table : np.ndarray, shape (num_rings, num_rings)
+        ``Michelogram.plane_for_ring_pair_table`` — entry ``[s, e]`` is the
+        sinogram plane index for ring pair ``(s, e)``, or ``−1`` if absent.
+    class_to_planes : dict[int, list[(int, int)]]
+        Reverse lookup from :func:`compute_sinogram_plane_symmetries`.
+    num_classes : int
+        Third return value of :func:`compute_sinogram_plane_symmetries`.
+
+    Returns
+    -------
+    list of np.ndarray, length num_classes
+        Each element is a 1-D int64 array of sinogram plane indices.
+    """
+    indices = []
+    for cls_idx in range(num_classes):
+        plane_ids = [
+            int(plane_for_ring_pair_table[r1, r2])
+            for r1, r2 in class_to_planes[cls_idx]
+            if int(plane_for_ring_pair_table[r1, r2]) >= 0
+        ]
+        indices.append(np.asarray(plane_ids, dtype=np.int64))
+    return indices
+
+
+def reduce_sinogram_by_plane_symmetry_class(
+    sinogram,
+    plane_class_indices: list,
+    plane_axis: int,
+    reduction=None,
+):
+    """Contract the plane axis of *sinogram* by symmetry-class aggregation.
+
+    For each equivalence class the sinogram planes belonging to that class are
+    gathered with ``xp.take`` and reduced along the plane axis, so that axis
+    shrinks from ``num_planes`` to ``num_classes``.
+
+    The function is array-API compliant and works with any backend that
+    implements ``xp.take``, ``xp.sum``, and ``xp.stack`` (numpy, PyTorch,
+    CuPy, …).
+
+    Parameters
+    ----------
+    sinogram : array, shape ``(..., num_planes, ...)``
+        Any array-API-compatible array.
+    plane_class_indices : list of 1-D integer arrays
+        Output of :func:`build_plane_class_indices`.  Element ``c`` contains
+        the sinogram plane indices for equivalence class ``c``.
+    plane_axis : int
+        Axis of the plane dimension (``RegularPolygonPETLORDescriptor.plane_axis_num``).
+    reduction : callable or None, optional
+        Reduction function with signature ``f(x, axis=k) -> array``.
+        Defaults to ``xp.sum``.  Pass ``xp.mean`` to normalise by the number
+        of planes per class, which is useful for sensitivity estimation.
+
+    Returns
+    -------
+    reduced : array, same backend as *sinogram*
+        Shape identical to *sinogram* except ``sinogram.shape[plane_axis]``
+        is replaced by ``len(plane_class_indices)``.
+    """
+    xp = array_api_compat.array_namespace(sinogram)
+    dev = array_api_compat.device(sinogram)
+
+    if reduction is None:
+        reduction = xp.sum
+
+    return xp.stack(
+        [
+            reduction(
+                xp.take(sinogram, xp.asarray(idx, device=dev), axis=plane_axis),
+                axis=plane_axis,
+            )
+            for idx in plane_class_indices
+        ],
+        axis=plane_axis,
+    )
