@@ -3,17 +3,42 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.widgets import TextBox
+from matplotlib.widgets import CheckButtons, TextBox
 
 # ── Symmetry generators ──────────────────────────────────────────────────────
 
 
-def block_shifts_fn(r_a, r_b, B, N):
-    """All block-shifted copies of (r_a, r_b) within [0, N)."""
-    return [
+def _is_interior(r, B, N):
+    """True iff ring r is not in the edge group.
+
+    The edge group consists of the first ``B//2`` rings (outer face of block 0,
+    no left neighbour) and the last ``B//2`` rings (outer face of the last block,
+    no right neighbour).  For B=1 every ring is interior (no intra-block split).
+    """
+    half = B // 2
+    return half <= r < N - half
+
+
+def block_shifts_fn(r_a, r_b, B, N, edge_correction=False):
+    """All block-shifted copies of (r_a, r_b) within [0, N).
+
+    When ``edge_correction=True`` only shifts are returned where both endpoints
+    stay in the same interior/edge category as the originals.  This prevents
+    treating edge-of-scanner crystals (no neighbouring block) as equivalent to
+    interior crystals at the same intra-block position.
+    """
+    candidates = [
         (r_a + k * B, r_b + k * B)
         for k in range(-(N // B), N // B + 1)
         if 0 <= r_a + k * B < N and 0 <= r_b + k * B < N
+    ]
+    if not edge_correction:
+        return candidates
+    int_a = _is_interior(r_a, B, N)
+    int_b = _is_interior(r_b, B, N)
+    return [
+        (ra, rb) for ra, rb in candidates
+        if _is_interior(ra, B, N) == int_a and _is_interior(rb, B, N) == int_b
     ]
 
 
@@ -27,7 +52,7 @@ def flip_fn(r_a, r_b):
     return r_b, r_a
 
 
-def equivalence_class_fn(r1, r2, B, N):
+def equivalence_class_fn(r1, r2, B, N, edge_correction=False):
     """Orbit of (r1, r2) under block-shift, z-reflection, and flip."""
     seeds = [
         (r1, r2),
@@ -37,7 +62,7 @@ def equivalence_class_fn(r1, r2, B, N):
     ]
     lors = set()
     for seed in seeds:
-        for lor in block_shifts_fn(*seed, B=B, N=N):
+        for lor in block_shifts_fn(*seed, B=B, N=N, edge_correction=edge_correction):
             lors.add(lor)
     return sorted(lors)
 
@@ -45,7 +70,7 @@ def equivalence_class_fn(r1, r2, B, N):
 # ── Equivalence-class catalogue ───────────────────────────────────────────────
 
 
-def all_equivalence_classes(B, num_blocks, max_ring_diff=None):
+def all_equivalence_classes(B, num_blocks, max_ring_diff=None, edge_correction=False):
     """Return all equivalence classes for a span-1 sinogram.
 
     Parameters
@@ -80,7 +105,7 @@ def all_equivalence_classes(B, num_blocks, max_ring_diff=None):
         seed = min(remaining)
         equiv = sorted(
             p
-            for p in equivalence_class_fn(*seed, B=B, N=N)
+            for p in equivalence_class_fn(*seed, B=B, N=N, edge_correction=edge_correction)
             if abs(p[0] - p[1]) <= max_ring_diff
         )
         class_members[class_idx] = equiv
@@ -96,19 +121,21 @@ def all_equivalence_classes(B, num_blocks, max_ring_diff=None):
 _cache: dict = {"key": None, "data": ({}, {}, 0)}
 
 
-def _get_class_data(B, num_blocks, max_diff):
+def _get_class_data(B, num_blocks, max_diff, edge_correction=False):
     """Cached wrapper around all_equivalence_classes."""
-    key = (B, num_blocks, max_diff)
+    key = (B, num_blocks, max_diff, edge_correction)
     if _cache["key"] != key:
         _cache["key"] = key
-        _cache["data"] = all_equivalence_classes(B, num_blocks, max_diff)
+        _cache["data"] = all_equivalence_classes(
+            B, num_blocks, max_diff, edge_correction=edge_correction
+        )
     return _cache["data"]
 
 
 # ── Drawing helpers ───────────────────────────────────────────────────────────
 
 
-def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None):
+def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None, edge_correction=False):
     """Draw scanner cross-section with all equivalent LORs."""
     ax.cla()
     N = B * num_blocks
@@ -126,22 +153,21 @@ def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None):
     )
     z -= z.mean()
 
-    all_equiv = equivalence_class_fn(r1_base, r2_base, B, N)
+    all_equiv = equivalence_class_fn(r1_base, r2_base, B, N, edge_correction=edge_correction)
     p1_base, p2_base = r1_base % B, r2_base % B
     prod = float(sens[p1_base] * sens[p2_base])
 
     for r in range(N):
-        fc = plt.cm.magma(0.01 + 0.99 * sens[r % B])
+        is_edge = edge_correction and not _is_interior(r, B, N)
+        fc = (plt.cm.YlOrRd(0.25 + 0.65 * sens[r % B]) if is_edge
+              else plt.cm.magma(0.01 + 0.99 * sens[r % B]))
+        ec = "firebrick" if is_edge else "k"
+        lw = 0.9 if is_edge else 0.4
         for y0 in (-D - ch, D):
             ax.add_patch(
                 mpatches.Rectangle(
-                    (z[r] - cw / 2, y0),
-                    cw,
-                    ch,
-                    facecolor=fc,
-                    edgecolor="k",
-                    linewidth=0.4,
-                    zorder=2,
+                    (z[r] - cw / 2, y0), cw, ch,
+                    facecolor=fc, edgecolor=ec, linewidth=lw, zorder=2,
                 )
             )
 
@@ -220,10 +246,11 @@ def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None):
     cls_str = (
         f"  (class #{class_idx})" if class_idx is not None and class_idx >= 0 else ""
     )
+    ec_str = "  [edge corr. ON]" if edge_correction else ""
     ax.set_title(
         f"Base ({r1_base},{r2_base}),  "
         + rf"$\Delta={r2_base - r1_base}$,  "
-        + f"{len(all_equiv)} equivalent LORs{cls_str}"
+        + f"{len(all_equiv)} equivalent LORs{cls_str}{ec_str}"
     )
     ax.legend(fontsize=8, loc="upper left", framealpha=0.9)
 
@@ -388,18 +415,12 @@ fig, (ax_lor, ax_mich, ax_bar) = plt.subplots(
 )
 plt.subplots_adjust(bottom=0.18, left=0.05, right=0.98, top=0.95)
 
-# Pre-compute and draw initial state
-_cm0, _mb0, _nc0 = _get_class_data(INIT_B, INIT_NB, INIT_DIFF)
+# Pre-compute and draw initial state  (edge correction ON by default)
+_cm0, _mb0, _nc0 = _get_class_data(INIT_B, INIT_NB, INIT_DIFF, edge_correction=True)
 _cls0 = _cm0.get((INIT_R1, INIT_R2))
-draw_panel(ax_lor, INIT_B, INIT_NB, INIT_R1, INIT_R2, class_idx=_cls0)
+draw_panel(ax_lor, INIT_B, INIT_NB, INIT_R1, INIT_R2, class_idx=_cls0, edge_correction=True)
 draw_michelogram(
-    ax_mich,
-    INIT_B,
-    INIT_NB,
-    INIT_DIFF,
-    _cm0,
-    _mb0,
-    _nc0,
+    ax_mich, INIT_B, INIT_NB, INIT_DIFF, _cm0, _mb0, _nc0,
     highlight_pair=(INIT_R1, INIT_R2),
 )
 draw_class_sizes(ax_bar, _mb0, _nc0, highlight_cls=_cls0)
@@ -422,28 +443,31 @@ def _sy(row):
 ax_tB = fig.add_axes([0.22, _sy(2), 0.20, sh])
 ax_tnb = fig.add_axes([0.22, _sy(1), 0.20, sh])
 ax_tdiff = fig.add_axes([0.22, _sy(0), 0.20, sh])
-ax_tr1 = fig.add_axes([0.72, _sy(1), 0.20, sh])
-ax_tr2 = fig.add_axes([0.72, _sy(0), 0.20, sh])
+ax_tr1   = fig.add_axes([0.72, _sy(1), 0.20, sh])
+ax_tr2   = fig.add_axes([0.72, _sy(0), 0.20, sh])
+ax_check = fig.add_axes([0.72, _sy(2), 0.20, sh * 1.2])
 
 tb_B = TextBox(ax_tB, "B (cryst/blk)   ", initial=str(INIT_B))
 tb_nb = TextBox(ax_tnb, "Num blocks      ", initial=str(INIT_NB))
 tb_diff = TextBox(ax_tdiff, "Max |Δ|         ", initial=str(INIT_DIFF))
-tb_r1 = TextBox(ax_tr1, "r1   ", initial=str(INIT_R1))
-tb_r2 = TextBox(ax_tr2, "r2   ", initial=str(INIT_R2))
+tb_r1      = TextBox(ax_tr1, "r1   ", initial=str(INIT_R1))
+tb_r2      = TextBox(ax_tr2, "r2   ", initial=str(INIT_R2))
+check_edge = CheckButtons(ax_check, ["edge correction"], actives=[True])
 
 
 def _update(_text=None):
     """Recompute and redraw all three panels from current text-box values."""
-    B = _parse(tb_B, INIT_B, 1, 20)
-    nb = _parse(tb_nb, INIT_NB, 2, 10)
-    N = B * nb
-    r1 = _parse(tb_r1, 0, 0, N - 1)
-    r2 = _parse(tb_r2, 0, 0, N - 1)
-    max_diff = _parse(tb_diff, min(B, N - 1), 1, N - 1)
+    B        = _parse(tb_B,    INIT_B,    1,  20)
+    nb       = _parse(tb_nb,   INIT_NB,   2,  10)
+    N        = B * nb
+    r1       = _parse(tb_r1,   0,          0,  N - 1)
+    r2       = _parse(tb_r2,   0,          0,  N - 1)
+    max_diff = _parse(tb_diff, min(B, N-1), 1,  N - 1)
+    edge_corr = check_edge.get_status()[0]
 
-    cm, members, nc = _get_class_data(B, nb, max_diff)
+    cm, members, nc = _get_class_data(B, nb, max_diff, edge_correction=edge_corr)
     cls_idx = cm.get((r1, r2))
-    draw_panel(ax_lor, B, nb, r1, r2, class_idx=cls_idx)
+    draw_panel(ax_lor, B, nb, r1, r2, class_idx=cls_idx, edge_correction=edge_corr)
     draw_michelogram(ax_mich, B, nb, max_diff, cm, members, nc, highlight_pair=(r1, r2))
     draw_class_sizes(ax_bar, members, nc, highlight_cls=cls_idx)
     fig.canvas.draw_idle()
@@ -451,6 +475,7 @@ def _update(_text=None):
 
 for _tb in (tb_B, tb_nb, tb_diff, tb_r1, tb_r2):
     _tb.on_submit(_update)
+check_edge.on_clicked(lambda _label: _update())
 
 # ── Click on michelogram to select plane ──────────────────────────────────────
 
