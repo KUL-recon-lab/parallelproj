@@ -7,13 +7,6 @@ This script forward-projects a uniform cylinder, reduces the sinogram over
 each symmetry class, then checks that the coefficient of variation (std/mean)
 within each class is small — confirming that the symmetry holds up to the
 discretisation error of the finite-voxel image.
-
-Scanner setup:
-  DemoPETScannerGeometry  (34 sides × 16 cryst/side = 544 cryst/ring, r≈380 mm)
-  3 axial blocks × 3 rings/block = 9 rings total
-
-Voxel size is set to 2 mm for speed.  Use 0.5 mm for a more stringent check
-(forward projection takes longer but discretisation error is much smaller).
 """
 
 import sys
@@ -22,7 +15,6 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-import array_api_compat.numpy as xp
 import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
 import parallelproj.projectors as pp_proj
@@ -36,13 +28,38 @@ from sinogram_symmetries import (
     reduce_sinogram_by_symmetry_class,
 )
 
+# ── 0. array backend ──────────────────────────────────────────────────────────
+
+import array_api_compat.torch as xp
+
+dev = "cuda"
+
 # ── 1. Scanner ────────────────────────────────────────────────────────────────
 
-RINGS_PER_BLOCK = 9
-NUM_BLOCKS = 2
+SCANNER_RADIUS = 350.0
+RINGS_PER_BLOCK = 5
+NUM_BLOCKS = 3
 NUM_RINGS = RINGS_PER_BLOCK * NUM_BLOCKS  # 9
+NUM_SIDES = 28
+ENDPOINTS_PER_SIDE = 8
+LOR_SPACING = 8.0
 
-scanner = pps.DemoPETScannerGeometry(xp, "cpu", num_rings=NUM_RINGS, symmetry_axis=2)
+RING_POSITIONS = (
+    10.0 * NUM_RINGS * xp.linspace(0, 1, NUM_RINGS, dtype=xp.float32, device=dev)
+) + 15.0 * (xp.arange(NUM_RINGS, device=dev) // RINGS_PER_BLOCK)
+RING_POSITIONS -= 0.5 * RING_POSITIONS.max()
+
+# scanner = pps.DemoPETScannerGeometry(xp, "cpu", num_rings=NUM_RINGS, symmetry_axis=2)
+scanner = pps.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    SCANNER_RADIUS,
+    NUM_SIDES,
+    ENDPOINTS_PER_SIDE,
+    LOR_SPACING,
+    RING_POSITIONS,
+    symmetry_axis=2,
+)
 
 print(
     f"Scanner : radius={scanner.radius:.1f} mm, "
@@ -53,7 +70,7 @@ print(
 
 # ── 2. Span-1 sinogram descriptor ─────────────────────────────────────────────
 
-MAX_RING_DIFF = RINGS_PER_BLOCK  # one block-width: includes one-gap planes
+MAX_RING_DIFF = NUM_RINGS - 1  # one block-width: includes one-gap planes
 RADIAL_TRIM = 50  # keep num_rad manageable
 
 lor_desc = ppl.RegularPolygonPETLORDescriptor(
@@ -74,19 +91,19 @@ print(
 # Centred, circular cylinder filling the axial FOV.
 # Voxel size 2 mm — fast to project.  Reduce to 0.5 mm for a tighter check.
 
-VOXEL_SIZE = (1.0, 1.0, 1.0)  # mm
-CYLINDER_RADIUS = 250.0  # mm, well inside the scanner FOV
+VOXEL_SIZE = (0.5, 0.5, 0.5)  # mm
+CYLINDER_RADIUS = 300.0  # mm, well inside the scanner FOV
 
-ring_z = to_numpy_array(scanner.ring_positions).astype(float)
-ring_spacing = float(np.abs(np.diff(ring_z)).mean())
-block_width = ring_spacing * RINGS_PER_BLOCK  # axial extent of one block
+# ring_z = to_numpy_array(scanner.ring_positions).astype(float)
+# ring_spacing = float(np.abs(np.diff(ring_z)).mean())
+# block_width = ring_spacing * RINGS_PER_BLOCK  # axial extent of one block
 
 # The axial-block-shift symmetry requires the phantom to look the same when
 # shifted by one block_width in z.  So the cylinder must extend at least
 # block_width beyond the outermost ring on each side.
-z_half = float(np.abs(ring_z).max()) + block_width
+z_half = 1.05 * float(RING_POSITIONS.max())
 n_z = int(2 * z_half / VOXEL_SIZE[2]) + 1
-n_xy = int(2 * (CYLINDER_RADIUS + VOXEL_SIZE[0]) / VOXEL_SIZE[0]) + 1
+n_xy = int(2 * (CYLINDER_RADIUS + VOXEL_SIZE[0]) / VOXEL_SIZE[0]) + 3
 img_shape = (n_xy, n_xy, n_z)
 
 # Voxel-centre coordinates for a centred image
@@ -100,7 +117,7 @@ in_cyl = (xx**2 + yy**2) <= CYLINDER_RADIUS**2  # (n_xy, n_xy)
 phantom_np = np.zeros(img_shape, dtype=np.float32)
 phantom_np[in_cyl, :] = 1.0
 
-phantom = xp.asarray(phantom_np)
+phantom = xp.asarray(phantom_np, device=dev)
 print(
     f"Phantom : {img_shape}, voxel {VOXEL_SIZE} mm, "
     f"cylinder r={CYLINDER_RADIUS} mm, "
@@ -112,14 +129,10 @@ print(
 proj = pp_proj.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=VOXEL_SIZE
 )
-print("Forward projecting …", end=" ", flush=True)
+print("Forward projecting ...", end=" ", flush=True)
 sino = proj(phantom)
 sino_np = to_numpy_array(sino).astype(np.float64)
-print(
-    f"done.  "
-    f"Non-zero bins: {(sino_np > 0).sum()} / {sino_np.size}  "
-    f"(range [{sino_np.min():.2f}, {sino_np.max():.2f}])"
-)
+print(f"done.  " f"(range [{sino_np.min():.2f}, {sino_np.max():.2f}])")
 
 # ── 5. Build symmetry index lists ─────────────────────────────────────────────
 
