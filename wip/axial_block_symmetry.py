@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sinogram_plane_symmetries import (
+from sinogram_symmetries import (
     is_interior_ring,
     plane_orbit,
     compute_sinogram_plane_symmetries,

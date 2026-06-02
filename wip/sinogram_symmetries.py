@@ -1,15 +1,17 @@
 """
-Axial sinogram plane symmetries for a PET scanner with cylindrical symmetry.
+Sinogram symmetries for a regular-polygon PET scanner with cylindrical symmetry.
 
 For a cylindrically-symmetric imaged object (e.g. a uniform cylinder or a
-rotating line source) the expected counts on a sinogram plane (r1, r2) depend
-only on the axial ring-pair geometry — not on the azimuthal angle.  Within
-the axial direction, three independent symmetries reduce the number of
-geometrically distinct planes that need to be measured or calculated:
+rotating line source) the expected counts on a sinogram bin depend only on
+the LOR geometry — not on the azimuthal orientation.  Three families of
+symmetry each reduce the number of geometrically distinct bins that need to
+be measured or calculated.
 
+Axial (plane) symmetries — acting on the ring-pair axis
+--------------------------------------------------------
 1. **Axial block shift**: shifting both ring indices by one full block width
    maps every crystal to the crystal at the same position in the adjacent block.
-   Detector efficiency and geometry are therefore preserved.
+   geometry is therefore preserved.
 
 2. **Scanner midplane reflection**: reflecting the scanner about its axial
    centre maps ring r to ring N−1−r.  For a z-symmetric imaged object this
@@ -20,9 +22,23 @@ geometrically distinct planes that need to be measured or calculated:
 
 Edge correction (``n_edge > 0``): the outermost ``n_edge`` rings of the first
 and last detector block are missing a neighbouring block on one side.  Their
-crystal sensitivity differs from the same intra-block position in interior
+sensitivity differs from the same intra-block position in interior
 blocks, so the axial block-shift equivalence is restricted to ring pairs that
 stay within the same interior / edge category after the shift.
+
+In-plane symmetries — acting on the view and radial-bin axes
+------------------------------------------------------------
+4. **Scanner rotational symmetry**: a regular polygon with ``num_sides`` sides
+   has ``num_sides``-fold rotational symmetry.  This maps view ``v`` to view
+   ``v + n`` where ``n = num_lor_endpoints_per_side`` is the transaxial block
+   width in view space.  Within ``[0, num_views)`` there are therefore only
+   ``n`` distinct view types, each repeated ``num_sides / 2`` times.
+
+5. **Radial mirror symmetry**: for a centred object, LORs at radial bins ``r``
+   and ``num_rad − 1 − r`` have the same perpendicular distance from the FOV
+   centre and are therefore equivalent.  Because ``num_rad`` is always odd for
+   regular-polygon scanners (``num_rad = N − 1 − 2 · radial_trim`` with N
+   even), there is a unique centre bin that maps to itself.
 """
 
 from __future__ import annotations
@@ -213,17 +229,19 @@ def build_plane_class_indices(
     return indices
 
 
-def reduce_sinogram_by_plane_symmetry_class(
+def reduce_sinogram_by_symmetry_class(
     sinogram,
-    plane_class_indices: list,
-    plane_axis: int,
+    class_indices: list,
+    axis: int,
     reduction=None,
 ):
-    """Contract the plane axis of *sinogram* by symmetry-class aggregation.
+    """Contract one sinogram axis by symmetry-class aggregation.
 
-    For each equivalence class the sinogram planes belonging to that class are
-    gathered with ``xp.take`` and reduced along the plane axis, so that axis
-    shrinks from ``num_planes`` to ``num_classes``.
+    For each equivalence class the bins belonging to that class are gathered
+    with ``xp.take`` and reduced along *axis*, so that axis shrinks from its
+    original size to ``len(class_indices)``.  The same function handles view,
+    radial, and plane reductions — just pass the appropriate index list and
+    axis number.
 
     The function is array-API compliant and works with any backend that
     implements ``xp.take``, ``xp.sum``, and ``xp.stack`` (numpy, PyTorch,
@@ -231,23 +249,27 @@ def reduce_sinogram_by_plane_symmetry_class(
 
     Parameters
     ----------
-    sinogram : array, shape ``(..., num_planes, ...)``
+    sinogram : array
         Any array-API-compatible array.
-    plane_class_indices : list of 1-D integer arrays
-        Output of :func:`build_plane_class_indices`.  Element ``c`` contains
-        the sinogram plane indices for equivalence class ``c``.
-    plane_axis : int
-        Axis of the plane dimension (``RegularPolygonPETLORDescriptor.plane_axis_num``).
+    class_indices : list of 1-D integer arrays
+        One array per equivalence class containing the bin indices along
+        *axis* that belong to that class.  Outputs of
+        :func:`build_plane_class_indices`, :func:`build_view_class_indices`,
+        and :func:`build_radial_class_indices` all conform to this contract.
+    axis : int
+        The sinogram axis to reduce.  Use
+        ``RegularPolygonPETLORDescriptor.plane_axis_num``,
+        ``.view_axis_num``, or ``.radial_axis_num`` as appropriate.
     reduction : callable or None, optional
         Reduction function with signature ``f(x, axis=k) -> array``.
         Defaults to ``xp.sum``.  Pass ``xp.mean`` to normalise by the number
-        of planes per class, which is useful for sensitivity estimation.
+        of bins per class.
 
     Returns
     -------
     reduced : array, same backend as *sinogram*
-        Shape identical to *sinogram* except ``sinogram.shape[plane_axis]``
-        is replaced by ``len(plane_class_indices)``.
+        Shape identical to *sinogram* except ``sinogram.shape[axis]`` is
+        replaced by ``len(class_indices)``.
     """
     xp = array_api_compat.array_namespace(sinogram)
     dev = array_api_compat.device(sinogram)
@@ -258,10 +280,79 @@ def reduce_sinogram_by_plane_symmetry_class(
     return xp.stack(
         [
             reduction(
-                xp.take(sinogram, xp.asarray(idx, device=dev), axis=plane_axis),
-                axis=plane_axis,
+                xp.take(sinogram, xp.asarray(idx, device=dev), axis=axis),
+                axis=axis,
             )
-            for idx in plane_class_indices
+            for idx in class_indices
         ],
-        axis=plane_axis,
+        axis=axis,
     )
+
+
+# ── In-plane symmetry index builders ─────────────────────────────────────────
+
+
+def build_view_class_indices(num_views: int, view_period: int) -> list:
+    """Per-class view index arrays under the scanner's rotational symmetry.
+
+    A regular-polygon scanner with ``num_sides`` sides maps view ``v`` to view
+    ``v + n`` (where ``n = num_lor_endpoints_per_side = view_period``), because
+    one scanner rotation step equals exactly ``n`` view steps.  Views
+    ``v, v + n, v + 2n, …`` therefore form one equivalence class.
+
+    Parameters
+    ----------
+    num_views : int
+        Total number of views (``RegularPolygonPETLORDescriptor.num_views``).
+    view_period : int
+        Number of views per scanner rotation period,
+        equal to ``RegularPolygonPETScannerGeometry.num_lor_endpoints_per_side``.
+
+    Returns
+    -------
+    list of np.ndarray, length *view_period*
+        Element ``c`` is a 1-D int64 array of the view indices in class ``c``.
+        There are ``view_period`` distinct classes, each containing
+        ``num_views // view_period`` views.
+    """
+    return [
+        np.arange(v, num_views, view_period, dtype=np.int64) for v in range(view_period)
+    ]
+
+
+def build_radial_class_indices(num_rad: int) -> list:
+    """Per-class radial-bin index arrays under the FOV mirror symmetry.
+
+    Radial bins ``r`` and ``num_rad − 1 − r`` subtend the same perpendicular
+    distance from the FOV centre and are therefore equivalent for a centred,
+    cylindrically-symmetric object.
+
+    For regular-polygon scanners ``num_rad`` is always odd
+    (``num_rad = N − 1 − 2 · radial_trim`` with N even), so the centre bin
+    ``(num_rad − 1) // 2`` maps to itself and forms a singleton class.
+
+    Parameters
+    ----------
+    num_rad : int
+        Number of radial bins (``RegularPolygonPETLORDescriptor.num_rad``).
+
+    Returns
+    -------
+    list of np.ndarray, length ``(num_rad + 1) // 2``
+        Element ``c`` contains the one or two radial-bin indices in class ``c``.
+        Classes are ordered from the outermost pair inward; the last class is
+        the centre singleton when ``num_rad`` is odd.
+    """
+
+    if num_rad % 2 == 0:
+        raise ValueError("Only odd number of radial elements supported")
+
+    num_classes = (num_rad + 1) // 2
+    return [
+        (
+            np.array([r, num_rad - 1 - r], dtype=np.int64)
+            if r != num_rad - 1 - r
+            else np.array([r], dtype=np.int64)
+        )
+        for r in range(num_classes)
+    ]
