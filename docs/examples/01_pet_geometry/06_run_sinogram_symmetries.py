@@ -44,8 +44,10 @@ from parallelproj.sinogram_symmetries import (
     is_interior_ring,
     plane_orbit,
     compute_sinogram_plane_symmetries,
+    build_plane_class_indices,
     build_view_class_indices,
     build_radial_class_indices,
+    reduce_sinogram_by_symmetry_class,
 )
 
 # %%
@@ -565,4 +567,66 @@ print(
     f"{reduction_total:.1f}x  "
     f"({len(plane_to_class) * lor_desc.num_views * lor_desc.num_rad} -> "
     f"{num_classes * n_view_classes * n_rad_classes} unique bins)"
+)
+
+# %%
+# Reducing a sinogram over equivalence classes
+# ---------------------------------------------
+#
+# Given any sinogram (e.g. a Monte-Carlo emission scan of a uniform cylinder,
+# or a forward-projection of a sensitivity phantom), the three index lists built
+# above can be passed to :func:`.reduce_sinogram_by_symmetry_class` to contract
+# each axis down to its unique equivalence classes.  The reductions are applied
+# one axis at a time and can be chained in any order.
+#
+# The :func:`.reduce_sinogram_by_symmetry_class` function accepts an optional
+# ``reduction`` argument:
+#
+# .. note::
+#
+#    * ``reduction=xp.sum`` (**default**) — accumulates all counts within a
+#      class into a single bin.  The total count across the whole sinogram is
+#      preserved.  This is the right choice when reducing noisy Monte-Carlo
+#      data before dividing by a forward projection to obtain a per-class
+#      sensitivity estimate.
+#
+#    * ``reduction=xp.mean`` — normalises by class size, so every reduced bin
+#      holds the *average* count per original bin.  Useful when you want the
+#      result to be directly comparable to a single unreduced bin value.
+#
+# Here we demonstrate with a Poisson-noise sinogram drawn from a uniform
+# expected value of 10 counts per bin.  After reduction the shape shrinks from
+# ``(num_rad, num_views, num_planes)`` to
+# ``(n_rad_classes, n_view_classes, n_plane_classes)``, and the total count
+# across all bins is exactly preserved.
+
+np.random.seed(42)
+sino = xp.asarray(
+    np.random.poisson(10, lor_desc.spatial_sinogram_shape).astype(np.float64),
+    device=dev,
+)
+
+# Build the per-class plane index arrays (requires a span-1 descriptor)
+plane_class_idx = build_plane_class_indices(
+    lor_desc.michelogram.plane_for_ring_pair_table, class_to_planes, num_classes
+)
+
+print(f"Sinogram shape before reduction : {tuple(sino.shape)}")
+
+# Apply the three reductions in sequence: view → radial → plane
+sino_red = reduce_sinogram_by_symmetry_class(
+    sino, view_classes, lor_desc.view_axis_num, xp.sum
+)
+sino_red = reduce_sinogram_by_symmetry_class(
+    sino_red, rad_classes, lor_desc.radial_axis_num, xp.sum
+)
+sino_red = reduce_sinogram_by_symmetry_class(
+    sino_red, plane_class_idx, lor_desc.plane_axis_num, xp.sum
+)
+
+print(f"Sinogram shape after  reduction : {tuple(sino_red.shape)}")
+print(f"Total counts before : {float(xp.sum(sino)):.0f}")
+print(
+    f"Total counts after  : {float(xp.sum(sino_red)):.0f}"
+    f"  (preserved — xp.sum reduction conserves total)"
 )
