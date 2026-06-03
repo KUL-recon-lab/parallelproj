@@ -1,0 +1,575 @@
+"""
+Sinogram symmetries for a regular-polygon PET scanner with cylindrical symmetry.
+
+For a cylindrically-symmetric imaged object (e.g. a uniform cylinder or a
+rotating line source) the expected counts on a sinogram bin depend only on
+the LOR geometry — not on the azimuthal orientation.  Five families of
+symmetry each reduce the number of geometrically distinct bins that need to
+be measured or calculated.
+
+Axial (plane) symmetries — acting on the ring-pair axis
+--------------------------------------------------------
+1. **Axial block shift**: shifting both ring indices by one full block width
+   maps every crystal to the crystal at the same position in the adjacent block.
+   Geometry is therefore preserved.
+
+2. **Scanner midplane reflection**: reflecting the scanner about its axial
+   centre maps ring r to ring N−1−r.  For a z-symmetric imaged object this
+   maps each plane (r1, r2) to an equivalent plane.
+
+3. **Endpoint swap**: exchanging (r1, r2) with (r2, r1) describes the same
+   physical LOR traversed in the opposite direction; expected counts are equal.
+
+Edge correction (``n_edge > 0``): the outermost ``n_edge`` rings of the first
+and last detector block are missing a neighbouring block on one side.  Their
+sensitivity differs from the same intra-block position in interior blocks, so
+the axial block-shift equivalence is restricted to ring pairs that stay within
+the same interior / edge category after the shift.
+
+In-plane symmetries — acting on the view and radial-bin axes
+------------------------------------------------------------
+4. **Scanner rotational symmetry**: a regular polygon with ``num_sides`` sides
+   has ``num_sides``-fold rotational symmetry.  This maps view ``v`` to view
+   ``v + n`` where ``n = num_lor_endpoints_per_side`` is the transaxial block
+   width in view space.  Within ``[0, num_views)`` there are therefore only
+   ``n`` distinct view types, each repeated ``num_sides / 2`` times.
+
+5. **Radial mirror symmetry**: for a centred object, LORs at radial bins ``r``
+   and ``num_rad − 1 − r`` have the same perpendicular distance from the FOV
+   centre and are therefore equivalent.  Because ``num_rad`` is always odd for
+   regular-polygon scanners (``num_rad = N − 1 − 2 · radial_trim`` with N
+   even), there is a unique centre bin that maps to itself.
+
+Typical workflow for geometric sensitivity
+------------------------------------------
+1. **Reduce**: call :func:`reduce_sinogram_by_symmetry_class` on each axis
+   (planes, views, radial bins) to obtain a compact sinogram with one entry
+   per equivalence class.
+2. **Compute**: run the forward projection / sensitivity calculation on the
+   compact sinogram.
+3. **Expand**: call :func:`expand_sinogram_by_symmetry_class` to broadcast the
+   computed values back to the full sinogram shape.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import array_api_compat
+
+
+# ── Axial (plane) symmetry helpers ───────────────────────────────────────────
+
+
+def is_interior_ring(ring: int, num_rings: int, n_edge: int) -> bool:
+    """Return True iff *ring* is not affected by edge effects.
+
+    Rings 0 … n_edge−1 and N−n_edge … N−1 are *edge rings* — they sit at the
+    outer face of the first / last detector block and have no neighbouring
+    block on one side.  All others are *interior* rings.  ``n_edge=0`` treats
+    every ring as interior (no edge correction).
+
+    Parameters
+    ----------
+    ring : int
+        Zero-based ring index.
+    num_rings : int
+        Total number of detector rings (``block_size * num_blocks``).
+    n_edge : int
+        Number of edge rings at each scanner end.  ``0`` disables the
+        distinction so every ring is treated as interior.
+
+    Returns
+    -------
+    bool
+        ``True`` if *ring* is an interior ring.
+    """
+    if n_edge <= 0:
+        return True
+    return n_edge <= ring < num_rings - n_edge
+
+
+def axially_mirrored_plane(r1: int, r2: int, num_rings: int) -> tuple[int, int]:
+    """Return the plane obtained by reflecting the scanner about its axial midplane.
+
+    Reflection maps ring r → N−1−r, so plane (r1, r2) becomes
+    (N−1−r2, N−1−r1).  The endpoint order is reversed so that the mirrored
+    plane has the same sign of ring difference as the original.
+
+    Parameters
+    ----------
+    r1 : int
+        Start ring index.
+    r2 : int
+        End ring index.
+    num_rings : int
+        Total number of detector rings.
+
+    Returns
+    -------
+    tuple[int, int]
+        The axially mirrored plane ``(N-1-r2, N-1-r1)``.
+    """
+    return num_rings - 1 - r2, num_rings - 1 - r1
+
+
+def swapped_plane(r1: int, r2: int) -> tuple[int, int]:
+    """Return (r2, r1) — the same LOR traversed in the opposite axial direction.
+
+    Parameters
+    ----------
+    r1 : int
+        Start ring index.
+    r2 : int
+        End ring index.
+
+    Returns
+    -------
+    tuple[int, int]
+        The swapped plane ``(r2, r1)``.
+    """
+    return r2, r1
+
+
+def axial_block_shifted_planes(
+    r1: int,
+    r2: int,
+    block_size: int,
+    num_rings: int,
+    n_edge: int = 0,
+) -> list[tuple[int, int]]:
+    """All planes obtained by shifting both ring indices by a multiple of *block_size*.
+
+    When ``n_edge > 0`` only shifts are returned in which both endpoints remain
+    in the same interior / edge category as the originals — preventing
+    edge-of-scanner rings from being treated as equivalent to interior rings.
+
+    Parameters
+    ----------
+    r1 : int
+        Start ring index of the seed plane.
+    r2 : int
+        End ring index of the seed plane.
+    block_size : int
+        Number of axial crystals per detector block.
+    num_rings : int
+        Total number of detector rings (``block_size * num_blocks``).
+    n_edge : int, optional
+        Number of edge rings at each scanner end.  ``0`` disables edge
+        correction (default).
+
+    Returns
+    -------
+    list of tuple[int, int]
+        All valid block-shifted copies of ``(r1, r2)``.  When ``n_edge > 0``
+        only copies preserving the interior / edge category are included.
+    """
+    num_blocks = num_rings // block_size
+    shifted = [
+        (r1 + k * block_size, r2 + k * block_size)
+        for k in range(-num_blocks, num_blocks + 1)
+        if 0 <= r1 + k * block_size < num_rings
+        and 0 <= r2 + k * block_size < num_rings
+    ]
+    if n_edge <= 0:
+        return shifted
+    cat_r1 = is_interior_ring(r1, num_rings, n_edge)
+    cat_r2 = is_interior_ring(r2, num_rings, n_edge)
+    return [
+        (ra, rb)
+        for ra, rb in shifted
+        if is_interior_ring(ra, num_rings, n_edge) == cat_r1
+        and is_interior_ring(rb, num_rings, n_edge) == cat_r2
+    ]
+
+
+def plane_orbit(
+    r1: int,
+    r2: int,
+    block_size: int,
+    num_rings: int,
+    n_edge: int = 0,
+) -> list[tuple[int, int]]:
+    """Return all sinogram planes equivalent to (r1, r2) under the three axial symmetries.
+
+    The orbit is generated by applying — and composing — the axial block shift,
+    the scanner midplane reflection, and the endpoint swap.  Four seeds are
+    constructed from ``(r1, r2)`` by applying each combination of the
+    reflection and swap symmetries; the full set of block shifts is then taken
+    for each seed and merged.
+
+    Parameters
+    ----------
+    r1 : int
+        Start ring index.
+    r2 : int
+        End ring index.
+    block_size : int
+        Number of axial crystals per detector block.
+    num_rings : int
+        Total number of detector rings (``block_size * num_blocks``).
+    n_edge : int, optional
+        Number of edge rings at each scanner end.  ``0`` disables edge
+        correction (default).
+
+    Returns
+    -------
+    list of tuple[int, int]
+        Sorted list of all planes in the orbit.
+    """
+    seeds = [
+        (r1, r2),
+        axially_mirrored_plane(r1, r2, num_rings),
+        swapped_plane(r1, r2),
+        swapped_plane(*axially_mirrored_plane(r1, r2, num_rings)),
+    ]
+    orbit: set[tuple[int, int]] = set()
+    for seed in seeds:
+        for plane in axial_block_shifted_planes(*seed, block_size, num_rings, n_edge):
+            orbit.add(plane)
+    return sorted(orbit)
+
+
+def compute_sinogram_plane_symmetries(
+    block_size: int,
+    num_blocks: int,
+    max_ring_diff: int | None = None,
+    n_edge: int = 0,
+) -> tuple[dict, dict, int]:
+    """Partition all span-1 sinogram planes into axial equivalence classes.
+
+    Iterates over all valid ring pairs ``(r1, r2)`` with
+    ``|r1 − r2| <= max_ring_diff``, groups them by orbit under the three axial
+    symmetries, and assigns a unique integer class index to each group.
+
+    Parameters
+    ----------
+    block_size : int
+        Number of axial crystals per detector block.
+    num_blocks : int
+        Number of axial detector blocks (total rings = block_size × num_blocks).
+    max_ring_diff : int or None, optional
+        Maximum ``|r1 − r2|`` included in the sinogram.  ``None`` includes all
+        planes (default).
+    n_edge : int, optional
+        Number of edge rings at each scanner end with different sensitivity
+        due to missing neighbouring blocks.  ``0`` disables edge correction
+        (default).
+
+    Returns
+    -------
+    plane_to_class : dict[(int, int), int]
+        Maps every valid sinogram plane to its equivalence-class index.
+    class_to_planes : dict[int, list[(int, int)]]
+        Reverse lookup: class index → sorted list of member planes.
+    num_classes : int
+        Total number of distinct equivalence classes.
+    """
+    num_rings = block_size * num_blocks
+    if max_ring_diff is None:
+        max_ring_diff = num_rings - 1
+
+    remaining: set[tuple[int, int]] = {
+        (r1, r2)
+        for r1 in range(num_rings)
+        for r2 in range(num_rings)
+        if abs(r1 - r2) <= max_ring_diff
+    }
+    plane_to_class: dict = {}
+    class_to_planes: dict = {}
+    class_idx = 0
+    while remaining:
+        seed = min(remaining)
+        members = sorted(
+            p
+            for p in plane_orbit(*seed, block_size, num_rings, n_edge)
+            if abs(p[0] - p[1]) <= max_ring_diff
+        )
+        class_to_planes[class_idx] = members
+        for plane in members:
+            plane_to_class[plane] = class_idx
+            remaining.discard(plane)
+        class_idx += 1
+    return plane_to_class, class_to_planes, class_idx
+
+
+# ── Index builders ────────────────────────────────────────────────────────────
+
+
+def build_plane_class_indices(
+    plane_for_ring_pair_table: np.ndarray,
+    class_to_planes: dict,
+    num_classes: int,
+) -> list[np.ndarray]:
+    """Build per-class sinogram plane index arrays from a Michelogram lookup table.
+
+    Requires a **span-1** LOR descriptor: each ring pair ``(r1, r2)`` must map
+    to a unique sinogram plane.  If any valid plane index appears more than once
+    in the table a :exc:`ValueError` is raised, because the symmetry reduction
+    is only well-defined for span-1 sinograms.
+
+    Returns a list of ``num_classes`` numpy integer arrays.  Element ``c``
+    contains the sinogram plane indices for equivalence class ``c``.  Ring
+    pairs whose ``plane_for_ring_pair_table`` entry is ``−1`` (outside
+    ``max_ring_diff``) are silently omitted.
+
+    Parameters
+    ----------
+    plane_for_ring_pair_table : np.ndarray, shape (num_rings, num_rings)
+        ``Michelogram.plane_for_ring_pair_table`` — entry ``[r1, r2]`` is the
+        sinogram plane index for ring pair ``(r1, r2)``, or ``−1`` if absent.
+        Only span-1 descriptors (one plane per ring pair) are supported.
+    class_to_planes : dict[int, list[(int, int)]]
+        Reverse lookup from :func:`compute_sinogram_plane_symmetries`.
+    num_classes : int
+        Third return value of :func:`compute_sinogram_plane_symmetries`.
+
+    Returns
+    -------
+    list of np.ndarray, length num_classes
+        Each element is a 1-D int64 array of sinogram plane indices.
+
+    Raises
+    ------
+    ValueError
+        If any sinogram plane index appears more than once in
+        *plane_for_ring_pair_table*, indicating a span > 1 descriptor.
+    """
+    # Span-1 check: each valid plane index must appear at most once.
+    valid_entries = plane_for_ring_pair_table[plane_for_ring_pair_table >= 0]
+    unique, counts = np.unique(valid_entries, return_counts=True)
+    duplicates = unique[counts > 1]
+    if duplicates.size > 0:
+        raise ValueError(
+            f"plane_for_ring_pair_table contains plane indices that appear more "
+            f"than once ({duplicates[:5].tolist()}{'...' if duplicates.size > 5 else ''}). "
+            "Only span-1 LOR descriptors (Michelogram with span=1) are supported."
+        )
+
+    indices = []
+    for cls_idx in range(num_classes):
+        plane_ids = [
+            int(plane_for_ring_pair_table[r1, r2])
+            for r1, r2 in class_to_planes[cls_idx]
+            if int(plane_for_ring_pair_table[r1, r2]) >= 0
+        ]
+        indices.append(np.asarray(plane_ids, dtype=np.int64))
+    return indices
+
+
+def build_view_class_indices(num_views: int, view_period: int) -> list[np.ndarray]:
+    """Per-class view index arrays under the scanner's rotational symmetry.
+
+    A regular-polygon scanner with ``num_sides`` sides maps view ``v`` to view
+    ``v + n`` (where ``n = num_lor_endpoints_per_side = view_period``), because
+    one scanner rotation step equals exactly ``n`` view steps.  Views
+    ``v, v + n, v + 2n, …`` therefore form one equivalence class.
+
+    Parameters
+    ----------
+    num_views : int
+        Total number of views
+        (``RegularPolygonPETLORDescriptor.num_views``).
+    view_period : int
+        Number of views per scanner rotation period, equal to
+        ``RegularPolygonPETScannerGeometry.num_lor_endpoints_per_side``.
+
+    Returns
+    -------
+    list of np.ndarray, length *view_period*
+        Element ``c`` is a 1-D int64 array of the view indices in class ``c``.
+        There are ``view_period`` distinct classes, each containing
+        ``num_views // view_period`` views.
+    """
+    return [
+        np.arange(v, num_views, view_period, dtype=np.int64)
+        for v in range(view_period)
+    ]
+
+
+def build_radial_class_indices(num_rad: int) -> list[np.ndarray]:
+    """Per-class radial-bin index arrays under the FOV mirror symmetry.
+
+    Radial bins ``r`` and ``num_rad − 1 − r`` subtend the same perpendicular
+    distance from the FOV centre and are therefore equivalent for a centred,
+    cylindrically-symmetric object.
+
+    For regular-polygon scanners ``num_rad`` is always odd
+    (``num_rad = N − 1 − 2 · radial_trim`` with N even), so the centre bin
+    ``(num_rad − 1) // 2`` maps to itself and forms a singleton class.
+
+    Parameters
+    ----------
+    num_rad : int
+        Number of radial bins (``RegularPolygonPETLORDescriptor.num_rad``).
+        Must be odd.
+
+    Returns
+    -------
+    list of np.ndarray, length ``(num_rad + 1) // 2``
+        Element ``c`` contains the one or two radial-bin indices in class ``c``.
+        Classes are ordered from the outermost pair inward; the last class is
+        the centre singleton when ``num_rad`` is odd.
+
+    Raises
+    ------
+    ValueError
+        If *num_rad* is even.
+    """
+    if num_rad % 2 == 0:
+        raise ValueError(
+            f"num_rad must be odd, got {num_rad}. "
+            "Regular-polygon PET scanners always produce an odd number of "
+            "radial bins (num_rad = N - 1 - 2*radial_trim with N even)."
+        )
+
+    num_classes = (num_rad + 1) // 2
+    return [
+        (
+            np.array([r, num_rad - 1 - r], dtype=np.int64)
+            if r != num_rad - 1 - r
+            else np.array([r], dtype=np.int64)
+        )
+        for r in range(num_classes)
+    ]
+
+
+def build_bin_to_class(
+    class_indices: list[np.ndarray],
+    num_bins: int,
+) -> np.ndarray:
+    """Build an inverse map from bin index to equivalence-class index.
+
+    For each bin ``i`` in ``[0, num_bins)``, ``bin_to_class[i]`` is the index
+    of the equivalence class that contains ``i``.
+
+    This is the companion of :func:`reduce_sinogram_by_symmetry_class` and is
+    used internally by :func:`expand_sinogram_by_symmetry_class`.
+
+    Parameters
+    ----------
+    class_indices : list of np.ndarray
+        Per-class bin index arrays as returned by
+        :func:`build_plane_class_indices`, :func:`build_view_class_indices`, or
+        :func:`build_radial_class_indices`.
+    num_bins : int
+        Total number of bins along the axis being described (e.g.
+        ``RegularPolygonPETLORDescriptor.num_planes``,
+        ``.num_views``, or ``.num_rad``).
+
+    Returns
+    -------
+    np.ndarray, shape (num_bins,), dtype int64
+        Inverse map: element ``i`` is the class index that contains bin ``i``.
+    """
+    bin_to_class = np.empty(num_bins, dtype=np.int64)
+    for cls_idx, indices in enumerate(class_indices):
+        bin_to_class[indices] = cls_idx
+    return bin_to_class
+
+
+# ── Array-API sinogram operations ─────────────────────────────────────────────
+
+
+def reduce_sinogram_by_symmetry_class(
+    sinogram,
+    class_indices: list,
+    axis: int,
+    reduction=None,
+):
+    """Contract one sinogram axis by symmetry-class aggregation.
+
+    For each equivalence class the bins belonging to that class are gathered
+    with ``xp.take`` and reduced along *axis*, so that axis shrinks from its
+    original size to ``len(class_indices)``.  The same function handles view,
+    radial, and plane reductions — just pass the appropriate index list and
+    axis number.
+
+    The function is array-API compliant and works with any backend that
+    implements ``xp.take``, ``xp.sum``, and ``xp.stack`` (numpy, PyTorch,
+    CuPy, …).
+
+    Parameters
+    ----------
+    sinogram : array
+        Any array-API-compatible array.
+    class_indices : list of 1-D integer arrays
+        One array per equivalence class containing the bin indices along
+        *axis* that belong to that class.  Outputs of
+        :func:`build_plane_class_indices`, :func:`build_view_class_indices`,
+        and :func:`build_radial_class_indices` all conform to this contract.
+    axis : int
+        The sinogram axis to reduce.  Use
+        ``RegularPolygonPETLORDescriptor.plane_axis_num``,
+        ``.view_axis_num``, or ``.radial_axis_num`` as appropriate.
+    reduction : callable or None, optional
+        Reduction function with signature ``f(x, axis=k) -> array``.
+        Defaults to ``xp.sum``.  Pass ``xp.mean`` to normalise by the number
+        of bins per class.
+
+    Returns
+    -------
+    reduced : array, same backend as *sinogram*
+        Shape identical to *sinogram* except ``sinogram.shape[axis]`` is
+        replaced by ``len(class_indices)``.
+    """
+    xp = array_api_compat.array_namespace(sinogram)
+    dev = array_api_compat.device(sinogram)
+
+    if reduction is None:
+        reduction = xp.sum
+
+    return xp.stack(
+        [
+            reduction(
+                xp.take(sinogram, xp.asarray(idx, device=dev), axis=axis),
+                axis=axis,
+            )
+            for idx in class_indices
+        ],
+        axis=axis,
+    )
+
+
+def expand_sinogram_by_symmetry_class(
+    reduced,
+    class_indices: list[np.ndarray],
+    num_original_bins: int,
+    axis: int,
+):
+    """Expand a reduced sinogram back to the full bin count along one axis.
+
+    This is the inverse of :func:`reduce_sinogram_by_symmetry_class`.  Each
+    bin in the full sinogram is assigned the value of the equivalence class it
+    belongs to, using :func:`build_bin_to_class` to build the mapping and
+    ``xp.take`` to broadcast.
+
+    The function is array-API compliant and works with any backend that
+    implements ``xp.take`` and ``xp.asarray`` (numpy, PyTorch, CuPy, …).
+
+    Parameters
+    ----------
+    reduced : array
+        Compact array as returned by
+        :func:`reduce_sinogram_by_symmetry_class`.  Its size along *axis*
+        must equal ``len(class_indices)``.
+    class_indices : list of 1-D np.ndarray
+        Per-class bin index arrays (same list that was passed to
+        :func:`reduce_sinogram_by_symmetry_class`).
+    num_original_bins : int
+        Number of bins in the original (unreduced) sinogram along *axis*
+        (e.g. ``RegularPolygonPETLORDescriptor.num_planes``,
+        ``.num_views``, or ``.num_rad``).
+    axis : int
+        The sinogram axis to expand.
+
+    Returns
+    -------
+    expanded : array, same backend as *reduced*
+        Shape identical to *reduced* except ``reduced.shape[axis]`` is
+        replaced by *num_original_bins*.
+    """
+    xp = array_api_compat.array_namespace(reduced)
+    dev = array_api_compat.device(reduced)
+
+    bin_to_class = build_bin_to_class(class_indices, num_original_bins)
+    return xp.take(reduced, xp.asarray(bin_to_class, device=dev), axis=axis)
