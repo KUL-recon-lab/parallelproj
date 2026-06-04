@@ -294,7 +294,7 @@ def detection_times_to_tof_bin(
         \\Delta x_{\\text{blue→red}} = \\frac{c}{2}\\,(t_{\\text{blue}} - t_{\\text{red}})
 
     where :math:`c` = :data:`C_MM_PER_NS` mm/ns.  Letting
-    :math:`\\sigma = \\text{sign}[d_{\\text{red}}, d_{\\text{blue}}]`
+    :math:`s = \\text{sign}[d_{\\text{red}}, d_{\\text{blue}}]`
     (``+1`` if ``d_red`` is the canonical xstart, ``-1`` otherwise) and
     :math:`W` = ``tofbin_width``, the bin index is
 
@@ -302,7 +302,7 @@ def detection_times_to_tof_bin(
 
         k = \\operatorname{round}\\!\\left(
               \\frac{N-1}{2}
-              - \\frac{\\sigma\\,\\Delta x_{\\text{blue→red}}
+              - \\frac{s\\,\\Delta x_{\\text{blue→red}}
                        + \\Delta_{\\text{center}}}{W}
             \\right)
 
