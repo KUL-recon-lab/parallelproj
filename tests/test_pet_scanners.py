@@ -164,6 +164,133 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     assert xp.all(scanner2.modules[0].phis == phis)
 
 
+def test_ring_endpoint_ordering(xp: ModuleType, dev: str) -> None:
+    """RingEndpointOrdering property, CCW branch, and reversal invariant."""
+    import numpy as np
+    from parallelproj import to_numpy_array
+
+    n_sides = 8
+    n_per_side = 2
+
+    for symmetry_axis in [0, 1, 2]:
+        s_cw = pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=1.0,
+            num_sides=n_sides,
+            num_lor_endpoints_per_side=n_per_side,
+            lor_spacing=0.1,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=symmetry_axis,
+            ring_endpoint_ordering=pps.RingEndpointOrdering.CLOCKWISE,
+        )
+        s_ccw = pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=1.0,
+            num_sides=n_sides,
+            num_lor_endpoints_per_side=n_per_side,
+            lor_spacing=0.1,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=symmetry_axis,
+            ring_endpoint_ordering=pps.RingEndpointOrdering.COUNTERCLOCKWISE,
+        )
+
+        # properties are readable and propagate to the module level
+        assert s_cw.ring_endpoint_ordering is pps.RingEndpointOrdering.CLOCKWISE
+        assert s_ccw.ring_endpoint_ordering is pps.RingEndpointOrdering.COUNTERCLOCKWISE
+        assert s_cw.modules[0].ring_endpoint_ordering is pps.RingEndpointOrdering.CLOCKWISE
+        assert s_ccw.modules[0].ring_endpoint_ordering is pps.RingEndpointOrdering.COUNTERCLOCKWISE
+
+        # CCW[i] maps to CW[j] where side order is reversed (keeping side 0
+        # fixed) and within-side order is also reversed:
+        #   j = ((n_sides - i//n_per_side) % n_sides) * n_per_side
+        #       + (n_per_side - 1 - i % n_per_side)
+        cw_pts  = to_numpy_array(s_cw.all_lor_endpoints)
+        ccw_pts = to_numpy_array(s_ccw.all_lor_endpoints)
+        n_total = n_sides * n_per_side
+        expected_indices = [
+            ((n_sides - i // n_per_side) % n_sides) * n_per_side
+            + (n_per_side - 1 - i % n_per_side)
+            for i in range(n_total)
+        ]
+        assert np.allclose(ccw_pts, cw_pts[expected_indices], atol=1e-5)
+
+
+def test_phi0(xp: ModuleType, dev: str) -> None:
+    """phi0 rotates side 0; ignored when phis is supplied explicitly."""
+    import math
+    import numpy as np
+    from parallelproj import to_numpy_array
+
+    n_sides = 8
+    n_per_side = 2
+    phi0_val = math.pi / n_sides  # half a polygon step
+
+    # --- scanner-level property propagates to module level ---
+    s = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=1.0,
+        num_sides=n_sides,
+        num_lor_endpoints_per_side=n_per_side,
+        lor_spacing=0.1,
+        ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+        symmetry_axis=2,
+        phi0=phi0_val,
+    )
+    assert s.phi0 == phi0_val
+    assert s.modules[0].phi0 == phi0_val
+
+    # --- phis are offset by phi0 relative to phi0=0 case ---
+    s0 = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=1.0,
+        num_sides=n_sides,
+        num_lor_endpoints_per_side=n_per_side,
+        lor_spacing=0.1,
+        ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+        symmetry_axis=2,
+        phi0=0.0,
+    )
+    phis_with = to_numpy_array(s.modules[0].phis)
+    phis_base = to_numpy_array(s0.modules[0].phis)
+    assert np.allclose(phis_with, phis_base + phi0_val, atol=1e-5)
+
+    # --- endpoint coordinates are consistent with the shifted phis ---
+    # phi0 rotates the ring in the (ax0, ax1) plane.
+    # For symmetry_axis=2: ax0=col1, ax1=col0.
+    # A shift phi → phi+phi0 acts as a rotation in (ax0, ax1) by phi0:
+    #   new[:, ax0] = cos(phi0)*old[:, ax0] - sin(phi0)*old[:, ax1]
+    #   new[:, ax1] = sin(phi0)*old[:, ax0] + cos(phi0)*old[:, ax1]
+    ax0, ax1 = 1, 0  # for symmetry_axis=2
+    pts_new = to_numpy_array(s.all_lor_endpoints)
+    pts_old = to_numpy_array(s0.all_lor_endpoints)
+    cos_a, sin_a = math.cos(phi0_val), math.sin(phi0_val)
+    pts_expected = pts_old.copy()
+    pts_expected[:, ax0] = cos_a * pts_old[:, ax0] - sin_a * pts_old[:, ax1]
+    pts_expected[:, ax1] = sin_a * pts_old[:, ax0] + cos_a * pts_old[:, ax1]
+    assert np.allclose(pts_new, pts_expected, atol=1e-5)
+
+    # --- phi0 is ignored when phis are supplied explicitly ---
+    phis_explicit = xp.asarray([0.0, math.pi / 2], dtype=xp.float32, device=dev)
+    s_explicit = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=1.0,
+        num_sides=2,
+        num_lor_endpoints_per_side=n_per_side,
+        lor_spacing=0.1,
+        ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+        symmetry_axis=2,
+        phis=phis_explicit,
+        phi0=99.0,  # should be ignored
+    )
+    # phis on the module should be the supplied array, unaffected by phi0
+    assert xp.all(s_explicit.modules[0].phis == phis_explicit)
+
+
 def test_regular_polygon_pet_scanner_invalid_symmetry_axis(
     xp: ModuleType, dev: str
 ) -> None:

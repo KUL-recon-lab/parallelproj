@@ -15,9 +15,12 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Circle
 
 
+from mpl_toolkits.mplot3d import Axes3D
+
 from ._backend import Array, to_numpy_array
 
 from .operators import LinearOperator
+from .tof import TOFParameters
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
@@ -39,6 +42,28 @@ class SinogramSpatialAxisOrder(enum.Enum):
     """[plane,radial,view]"""
     PVR = enum.auto()
     """[plane,view,radial]"""
+
+
+class SinogramZigZagOrder(enum.Enum):
+    """Zig-zag ordering of in-ring detector pairs for each sinogram view.
+
+    For a scanner with :math:`n` detector endpoints per ring and view index 0,
+    the two variants differ in which detector (start or end) steps first as the
+    radial bin index increases from the central LOR outward.
+
+    ``END_FIRST``
+        The *end* detector steps first for each new radial pair.
+        Pairs (start, end) at view 0: (0,n-1), (0,n-2), (1,n-2), (1,n-3), …
+
+    ``START_FIRST``
+        The *start* detector steps first for each new radial pair.
+        Pairs (start, end) at view 0: (0,n-1), (1,n-1), (1,n-2), (2,n-2), …
+    """
+
+    END_FIRST = enum.auto()
+    """End crystal steps first (default, historically used convention)."""
+    START_FIRST = enum.auto()
+    """Start crystal steps first."""
 
 
 class Michelogram:
@@ -633,9 +658,7 @@ class Michelogram:
                 # [1, 0]: Michelogram inset instead of the non-existent
                 # segment -0.
                 if row_idx == 1 and abs_seg == 0:
-                    self._draw_axes(
-                        ax, plane_index_fontsize=inset_plane_index_fontsize
-                    )
+                    self._draw_axes(ax, plane_index_fontsize=inset_plane_index_fontsize)
                     continue
 
                 seg_val = abs_seg if row_idx == 0 else -abs_seg
@@ -1012,6 +1035,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         michelogram: Michelogram | None = None,
         radial_trim: int = 3,
         sinogram_order: SinogramSpatialAxisOrder = SinogramSpatialAxisOrder.RVP,
+        zig_zag_order: SinogramZigZagOrder = SinogramZigZagOrder.END_FIRST,
     ) -> None:
         """
 
@@ -1032,6 +1056,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         sinogram_order : SinogramSpatialAxisOrder, optional
             the order of the sinogram axes.  Defaults to
             ``SinogramSpatialAxisOrder.RVP``.
+        zig_zag_order : SinogramZigZagOrder, optional
+            the zig-zag ordering convention for in-ring detector pairs.
+            Defaults to ``SinogramZigZagOrder.END_FIRST``.
         """
 
         super().__init__(scanner)
@@ -1054,10 +1081,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._max_ring_difference = self._michelogram.max_ring_difference
         self._span = self._michelogram.span
 
-        self._num_rad = (scanner.num_lor_endpoints_per_ring + 1) - 2 * self._radial_trim
+        self._num_rad = scanner.num_lor_endpoints_per_ring - 1 - 2 * self._radial_trim
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
         self._sinogram_order = sinogram_order
+        self._zig_zag_order = zig_zag_order
 
         # declare all attributes set by the setup methods so they are
         # visible in __init__
@@ -1179,6 +1207,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self._sinogram_order
 
     @property
+    def zig_zag_order(self) -> SinogramZigZagOrder:
+        """the zig-zag ordering convention for in-ring detector pairs"""
+        return self._zig_zag_order
+
+    @property
     def plane_axis_num(self) -> int:
         """the axis number of the plane axis"""
         return self.sinogram_order.name.find("P")
@@ -1250,12 +1283,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._end_plane_z = xp.asarray(end_z, device=dev)
 
         if self._span == 1:
-            self._start_plane_index = xp.asarray(
-                m.plane_start_rings[:, 0], device=dev
-            )
-            self._end_plane_index = xp.asarray(
-                m.plane_end_rings[:, 0], device=dev
-            )
+            self._start_plane_index = xp.asarray(m.plane_start_rings[:, 0], device=dev)
+            self._end_plane_index = xp.asarray(m.plane_end_rings[:, 0], device=dev)
         else:
             self._start_plane_index = None
             self._end_plane_index = None
@@ -1273,21 +1302,30 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             (self._num_views, self._num_rad), dtype=self.xp.int32, device=self.dev
         )
 
+        # slice for radial trimming; -0 == 0 in Python so guard explicitly
+        trim = self._radial_trim
+        rad_slc = slice(trim, -trim if trim > 0 else None)
+
         for view in np.arange(self._num_views):
+            if self._zig_zag_order is SinogramZigZagOrder.END_FIRST:
+                # end crystal steps first: (0,n-1),(0,n-2),(1,n-2),(1,n-3),...
+                start_seq = self.xp.arange(m - 1) // 2
+                end_seq = self.xp.concat(
+                    (self.xp.asarray([-1]), -((self.xp.arange(m - 2) + 4) // 2))
+                )
+            else:
+                # start crystal steps first: (0,n-1),(1,n-1),(1,n-2),(2,n-2),...
+                start_seq = (self.xp.arange(m - 1) + 1) // 2
+                end_seq = self.xp.concat(
+                    (self.xp.asarray([-1]), -((self.xp.arange(m - 2) + 3) // 2))
+                )
+
             self._start_in_ring_index[view, :] = self.xp.astype(
-                (
-                    self.xp.concat((self.xp.arange(m) // 2, self.xp.asarray([n // 2])))
-                    - int(view)
-                )[self._radial_trim : -self._radial_trim],
+                (start_seq - int(view))[rad_slc],
                 self.xp.int32,
             )
             self._end_in_ring_index[view, :] = self.xp.astype(
-                (
-                    self.xp.concat(
-                        (self.xp.asarray([-1]), -((self.xp.arange(m) + 4) // 2))
-                    )
-                    - int(view)
-                )[self._radial_trim : -self._radial_trim],
+                (end_seq - int(view))[rad_slc],
                 self.xp.int32,
             )
 
@@ -1403,6 +1441,162 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         ls = ls.reshape((-1, 2, 3))
         lc = Line3DCollection(ls, linewidths=lw, **kwargs)
         ax.add_collection(lc)
+
+    def show_tof_bins(
+        self,
+        ax: Axes3D,
+        tof_parameters: TOFParameters,
+        views: int | Array | None = None,
+        plane: int = 0,
+        show_endpoints: bool = True,
+        bin_cmap: str = "seismic",
+        show_bin_labels: bool = False,
+        label_fontsize: float = 8.0,
+        lw: float = 2.0,
+        show_colorbar: bool = False,
+    ) -> None:
+        """Visualise the TOF bin grid for the specified sinogram views and plane.
+
+        Each LOR is drawn as a sequence of coloured line segments — one per
+        TOF bin — directly along the LOR ("zebra" style).  Bin colour runs
+        from blue (bin 0, xstart side) to red (bin N−1, xend side) via
+        ``bin_cmap``.  Bins whose extent falls completely outside the physical
+        LOR (i.e. beyond the detector positions) are silently skipped, so
+        short edge LORs naturally show fewer coloured segments than central
+        ones.
+
+        Parameters
+        ----------
+        ax : Axes3D
+            3-D matplotlib axes to draw on.  The caller is responsible for
+            creating the figure and axes.
+        tof_parameters : TOFParameters
+            TOF bin geometry (number of bins, bin width, centre offset).
+        views : int, array-like, or None
+            Sinogram view index / indices to draw.
+
+            * ``int`` — draw only that view.
+            * array-like — draw those specific views.
+            * ``None`` (default) — draw the single middle view
+              (``num_views // 2``).
+
+        plane : int
+            Sinogram plane index (axial ring pair).  Default ``0``.
+        show_endpoints : bool
+            Call :meth:`~.RegularPolygonPETScannerGeometry.show_lor_endpoints`
+            to annotate detector positions.  Default ``True``.
+        bin_cmap : str
+            Matplotlib colourmap for the bin segments.  Default ``"seismic"``.
+        show_bin_labels : bool
+            Annotate the bin numbers on the central LOR of the drawn set.
+            Default ``False`` (useful only for scanners with few LORs).
+        label_fontsize : float
+            Font size for bin labels when ``show_bin_labels=True``.
+        lw : float
+            Line width of the coloured bin segments.  Default ``2.0``.
+        show_colorbar : bool
+            Add a colorbar mapping bin index to colour.  Default ``False``.
+        """
+        num_tof_bins = tof_parameters.num_tofbins
+        tofbin_width = tof_parameters.tofbin_width
+        tofcenter_off = tof_parameters.tofcenter_offset
+
+        fig = ax.get_figure()
+
+        if views is None:
+            views = self.xp.asarray([self.num_views // 2], device=self.dev)
+        elif isinstance(views, int):
+            views = self.xp.asarray([views], device=self.dev)
+        else:
+            views = self.xp.asarray(views, device=self.dev)
+
+        if show_endpoints:
+            self.scanner.show_lor_endpoints(ax, annotation_fontsize=8)
+
+        xstart_all, xend_all = self.get_lor_coordinates(views=views)
+        xs_np = to_numpy_array(xstart_all)
+        xe_np = to_numpy_array(xend_all)
+
+        p_ax = self.plane_axis_num
+        xs_plane = np.take(xs_np, [plane], axis=p_ax).squeeze(axis=p_ax)
+        xe_plane = np.take(xe_np, [plane], axis=p_ax).squeeze(axis=p_ax)
+        xs_flat = xs_plane.reshape(-1, 3)
+        xe_flat = xe_plane.reshape(-1, 3)
+
+        bin_colors = plt.get_cmap(bin_cmap)(np.linspace(0, 1, num_tof_bins))
+
+        sym_hat = np.zeros(3)
+        sym_hat[self.scanner.symmetry_axis] = 1.0
+
+        n_lors = xs_flat.shape[0]
+        label_idx = n_lors // 2
+
+        for idx in range(n_lors):
+            xs = xs_flat[idx]
+            xe = xe_flat[idx]
+            lor_vec = xe - xs
+            lor_len = np.linalg.norm(lor_vec)
+            lor_dir = lor_vec / lor_len
+            midpoint = (xs + xe) / 2
+            lor_half = lor_len / 2.0
+
+            for k in range(num_tof_bins):
+                t_a = (k - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_b = (k + 1 - num_tof_bins / 2) * tofbin_width + tofcenter_off
+                t_a = max(t_a, -lor_half)
+                t_b = min(t_b, lor_half)
+                if t_a >= t_b:
+                    continue
+                p1 = midpoint + t_a * lor_dir
+                p2 = midpoint + t_b * lor_dir
+                ax.plot(
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color=bin_colors[k],
+                    lw=lw,
+                    solid_capstyle="butt",
+                    zorder=3,
+                )
+
+            if show_bin_labels and idx == label_idx:
+                lor_proj = lor_dir - np.dot(lor_dir, sym_hat) * sym_hat
+                proj_len = np.linalg.norm(lor_proj)
+                if proj_len > 1e-6:
+                    lor_proj /= proj_len
+                perp = np.cross(sym_hat, lor_proj)
+                perp_len = np.linalg.norm(perp)
+                if perp_len > 1e-6:
+                    perp /= perp_len
+                label_off = perp * self.scanner.radius * 0.12
+
+                for k in range(num_tof_bins):
+                    t_c = (k - (num_tof_bins - 1) / 2) * tofbin_width + tofcenter_off
+                    if abs(t_c) > lor_half:
+                        continue
+                    lc = midpoint + t_c * lor_dir + label_off
+                    ax.text(
+                        lc[0],
+                        lc[1],
+                        lc[2],
+                        str(k),
+                        fontsize=label_fontsize,
+                        ha="center",
+                    )
+
+        ax.set_xlabel("x (mm)")
+        ax.set_ylabel("y (mm)")
+        ax.set_zlabel("z (mm)")
+
+        if show_colorbar:
+            from matplotlib.colors import Normalize
+            import matplotlib.cm as mpl_cm
+
+            norm = Normalize(vmin=0, vmax=num_tof_bins - 1)
+            sm = mpl_cm.ScalarMappable(cmap=bin_cmap, norm=norm)
+            sm.set_array([])
+            cbar = fig.colorbar(sm, ax=ax, shrink=0.4, pad=0.05, label="TOF bin")
+            cbar.set_ticks(range(num_tof_bins))
 
     def show_michelogram(
         self,
@@ -1601,9 +1795,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
             raise ValueError("target_span must be an odd positive integer")
         if mode not in ("sum", "average"):
-            raise ValueError(
-                f"mode must be 'sum' or 'average', got {mode!r}"
-            )
+            raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
         ):

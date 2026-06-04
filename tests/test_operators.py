@@ -433,6 +433,20 @@ def test_norm_verbose(xp: ModuleType, dev: str):
     A.norm(xp, dev, verbose=True, num_iter=2)
 
 
+def test_cupy_import_fallback(xp: ModuleType, dev: str) -> None:
+    """Lines 21-22 of operators.py: cp = None when cupy is unavailable."""
+    import sys
+    import importlib
+    import parallelproj.operators as ppo
+
+    with patch.dict(sys.modules, {"cupy": None}):
+        importlib.reload(ppo)
+        assert ppo.cp is None
+
+    # Restore normal state
+    importlib.reload(ppo)
+
+
 def test_gaussian_array_api_strict(xp: ModuleType, dev: str):
     """Covers the array_api_strict branch in GaussianFilterOperator._apply (line 502)."""
     if importlib.util.find_spec("array_api_strict") is None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import parallelproj.pet_scanners as pps
 import parallelproj.pet_lors as ppl
+import parallelproj.tof as tof
 import matplotlib.pyplot as plt
 
 from parallelproj import to_numpy_array
@@ -39,7 +40,7 @@ def test_pet_lors(xp: ModuleType, dev: str) -> None:
         assert lor_desc.radial_axis_num == sinogram_order.name.find("R")
         assert lor_desc.view_axis_num == sinogram_order.name.find("V")
 
-        lor_coords = lor_desc.get_lor_coordinates()
+        lor_desc.get_lor_coordinates()
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
@@ -345,6 +346,63 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     _check_plane(31, 1.5, 9.5, 4, 1)
     _check_plane(40, 5.0, 0.0, 1, -1)
     _check_plane(46, 9.5, 1.5, 4, -1)
+
+
+def test_zig_zag_order(xp: ModuleType, dev: str) -> None:
+    """zig_zag_order property and START_FIRST branch are exercised."""
+    import numpy as np
+
+    num_rings = 1
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=100.0,
+        num_sides=8,
+        num_lor_endpoints_per_side=1,
+        lor_spacing=1.0,
+        ring_positions=xp.asarray([0.0], device=dev),
+        symmetry_axis=2,
+    )
+
+    lor_ef = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        radial_trim=0,
+        zig_zag_order=ppl.SinogramZigZagOrder.END_FIRST,
+    )
+    lor_sf = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        radial_trim=0,
+        zig_zag_order=ppl.SinogramZigZagOrder.START_FIRST,
+    )
+
+    # property is readable and returns the correct enum value
+    assert lor_ef.zig_zag_order is ppl.SinogramZigZagOrder.END_FIRST
+    assert lor_sf.zig_zag_order is ppl.SinogramZigZagOrder.START_FIRST
+
+    # both share the same sinogram shape
+    assert lor_ef.spatial_sinogram_shape == lor_sf.spatial_sinogram_shape
+
+    # view 0: END_FIRST has end step first, START_FIRST has start step first
+    # n=8: END_FIRST pairs: (0,7),(0,6),(1,6),...  START_FIRST: (0,7),(1,7),(1,6),...
+    ef_start = to_numpy_array(lor_ef.start_in_ring_index[0, :])
+    ef_end = to_numpy_array(lor_ef.end_in_ring_index[0, :])
+    sf_start = to_numpy_array(lor_sf.start_in_ring_index[0, :])
+    sf_end = to_numpy_array(lor_sf.end_in_ring_index[0, :])
+
+    # first radial bin is the same for both (central LOR)
+    assert int(ef_start[0]) == int(sf_start[0])
+    assert int(ef_end[0]) == int(sf_end[0])
+
+    # second radial bin differs: END_FIRST keeps start, advances end;
+    # START_FIRST advances start, keeps end
+    assert int(ef_start[1]) == int(ef_start[0])  # start unchanged
+    assert int(sf_end[1]) == int(sf_end[0])       # end unchanged
+    assert int(ef_end[1]) != int(ef_end[0])        # end stepped
+    assert int(sf_start[1]) != int(sf_start[0])   # start stepped
+
+    # the two conventions produce different index arrays
+    assert not np.array_equal(ef_start, sf_start)
+    assert not np.array_equal(ef_end, sf_end)
 
 
 def test_show_michelogram(xp: ModuleType, dev: str) -> None:
@@ -1315,6 +1373,39 @@ def test_michelogram_show(xp: ModuleType, dev: str) -> None:
     m_patch._plane_axial_midpoint_int = _np.zeros(4, dtype=_np.int32)
 
     fig = m_patch.show_segment_lors(_np.asarray([0.0, 1.0, 2.0]))
+    plt.close(fig)
+
+
+def test_show_tof_bins(xp: ModuleType, dev: str) -> None:
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings=1, symmetry_axis=2)
+    lor_desc = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, max_ring_difference=0, span=1),
+        radial_trim=0,
+        sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    )
+    tof_params = tof.TOFParameters(num_tofbins=5, tofbin_width=40.0, sigma_tof=20.0)
+
+    # views=int, show_colorbar
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    lor_desc.show_tof_bins(ax, tof_params, views=0, plane=0, show_colorbar=True)
+    plt.close(fig)
+
+    # views as array-like (covers the else branch in views normalisation)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    lor_desc.show_tof_bins(ax, tof_params, views=xp.asarray([0, 1], device=dev))
+    plt.close(fig)
+
+    # show_bin_labels with bins wider than the LOR so some centres fall outside
+    # the physical LOR extent (covers the inner `continue` in the labels loop)
+    tof_wide = tof.TOFParameters(num_tofbins=3, tofbin_width=400.0, sigma_tof=20.0)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    lor_desc.show_tof_bins(
+        ax, tof_wide, show_bin_labels=True, show_endpoints=False
+    )
     plt.close(fig)
 
 

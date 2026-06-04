@@ -137,3 +137,53 @@ fig2 = plt.figure(figsize=(8, 8), tight_layout=True)
 ax2a = fig2.add_subplot(111, projection="3d")
 open_scanner.show_lor_endpoints(ax2a)
 fig2.show()
+
+# %%
+# Endpoint ordering and phi0: all four combinations
+# --------------------------------------------------
+#
+# By default, endpoint indices increase **clockwise** when the ring is viewed
+# from the positive symmetry-axis direction.
+# :class:`.RingEndpointOrdering` lets you switch to **counterclockwise** ordering.
+# The ``phi0`` parameter rotates the starting angle of side 0 (in radians); it
+# is ignored when ``phis`` is supplied explicitly.
+#
+# The 2×2 grid below shows all combinations of CW/CCW ordering with
+# ``phi0=0`` and ``phi0=π/8`` (half a polygon step for an 8-sided scanner).
+
+import math
+
+_RO = parallelproj.pet_scanners.RingEndpointOrdering
+
+configs = [
+    (_RO.CLOCKWISE, 0.0, "CW, phi0=0"),
+    (_RO.COUNTERCLOCKWISE, 0.0, "CCW, phi0=0"),
+    (_RO.CLOCKWISE, math.pi / 3, "CW, phi0=π/3"),
+    (_RO.COUNTERCLOCKWISE, math.pi / 3, "CCW, phi0=π/3"),
+]
+
+fig3, axes = plt.subplots(
+    2, 2, figsize=(10, 10), subplot_kw={"projection": "3d"}, layout="constrained"
+)
+
+for ax, (ordering, phi0, title) in zip(axes.flat, configs):
+    scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=8,
+        num_lor_endpoints_per_side=2,
+        lor_spacing=20.0,
+        ring_positions=xp.asarray([0.0], device=dev),
+        symmetry_axis=2,
+        ring_endpoint_ordering=ordering,
+        phi0=phi0,
+    )
+    scanner.show_lor_endpoints(ax, show_linear_index=True, annotation_fontsize=10)
+    ax.view_init(elev=90, azim=-90)
+    ax.set_title(title, fontsize="medium")
+
+fig3.suptitle(
+    "Endpoint ordering × phi0  (symmetry_axis=2, viewed from +z)", fontsize=12
+)
+fig3.show()

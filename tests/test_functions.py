@@ -327,6 +327,99 @@ def test_half_sq_l2_beta_scaling(xp: ModuleType, dev: str):
 
 
 # ---------------------------------------------------------------------------
+# LogCosh
+# ---------------------------------------------------------------------------
+
+_X_LC_NP = _np.asarray([1.0, -2.0, 0.5])
+_V_LC_NP = _np.asarray([1.0, -1.0, 2.0])
+_DELTA = 2.0
+
+
+def test_log_cosh_delta_property(xp: ModuleType, dev: str):
+    assert ppf.LogCosh().delta is None
+    assert ppf.LogCosh(delta=_DELTA).delta == _DELTA
+
+
+def test_log_cosh_call_at_zero(xp: ModuleType, dev: str):
+    """f(0) must be exactly (up to float rounding) zero for any delta."""
+    x = xp.asarray(_np.zeros(3), device=dev)
+    for f in (ppf.LogCosh(), ppf.LogCosh(delta=_DELTA)):
+        assert abs(f(x)) < 1e-6
+
+
+def test_log_cosh_call(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LC_NP, device=dev)
+
+    f = ppf.LogCosh()
+    expected = float(_np.sum(_np.log(_np.cosh(_X_LC_NP))))
+    assert abs(f(x) - expected) < 1e-5
+
+    f_d = ppf.LogCosh(delta=_DELTA)
+    expected_d = float(_DELTA * _np.sum(_np.log(_np.cosh(_X_LC_NP / _DELTA))))
+    assert abs(f_d(x) - expected_d) < 1e-5
+
+
+def test_log_cosh_gradient(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LC_NP, device=dev)
+
+    f = ppf.LogCosh()
+    assert allclose(f.gradient(x), finite_diff_gradient(f, _X_LC_NP, xp, dev), atol=1e-4, rtol=1e-4)
+
+    f_d = ppf.LogCosh(delta=_DELTA)
+    assert allclose(f_d.gradient(x), finite_diff_gradient(f_d, _X_LC_NP, xp, dev), atol=1e-4, rtol=1e-4)
+
+
+def test_log_cosh_call_and_gradient(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LC_NP, device=dev)
+
+    for f in (ppf.LogCosh(), ppf.LogCosh(delta=_DELTA)):
+        val, grad = f.call_and_gradient(x)
+        assert abs(val - f(x)) < 1e-8
+        assert allclose(grad, f.gradient(x))
+
+
+def test_log_cosh_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+    """Hessian diagonal is sech^2(x/delta)/delta^2 = (1 - tanh^2(x/delta))/delta^2."""
+    x = xp.asarray(_X_LC_NP, device=dev)
+    v = xp.asarray(_V_LC_NP, device=dev)
+
+    f = ppf.LogCosh()
+    expected = xp.asarray((1 - _np.tanh(_X_LC_NP) ** 2) * _V_LC_NP, device=dev)
+    assert allclose(f.hessian_diag_vec_prod(x, v), expected, atol=1e-5)
+
+    f_d = ppf.LogCosh(delta=_DELTA)
+    expected_d = xp.asarray(
+        (1 - _np.tanh(_X_LC_NP / _DELTA) ** 2) / _DELTA * _V_LC_NP, device=dev
+    )
+    assert allclose(f_d.hessian_diag_vec_prod(x, v), expected_d, atol=1e-5)
+
+
+def test_log_cosh_beta_scaling(xp: ModuleType, dev: str):
+    x = xp.asarray(_X_LC_NP, device=dev)
+    f1 = ppf.LogCosh(delta=_DELTA, beta=1.0)
+    f3 = ppf.LogCosh(delta=_DELTA, beta=3.0)
+    assert abs(f3(x) - 3.0 * f1(x)) < 1e-8
+    assert allclose(f3.gradient(x), 3.0 * f1.gradient(x))
+
+
+def test_log_cosh_overflow_safe(xp: ModuleType, dev: str):
+    """Naive cosh(100) overflows float32; our stable form must not."""
+    import math
+
+    x = xp.asarray(_np.asarray([100.0, -100.0]), dtype=xp.float32, device=dev)
+
+    f = ppf.LogCosh()
+    expected = 2 * (100.0 - math.log(2.0))
+    assert abs(f(x) - expected) < 1e-3
+    assert all(xp.isfinite(f.gradient(x)))
+
+    f_d = ppf.LogCosh(delta=0.5)
+    expected_d = 2 * (100.0 - 0.5 * math.log(2.0))
+    assert abs(f_d(x) - expected_d) < 1e-1
+    assert all(xp.isfinite(f_d.gradient(x)))
+
+
+# ---------------------------------------------------------------------------
 # SumC1Function / SumC2Function  (via __add__)
 # ---------------------------------------------------------------------------
 

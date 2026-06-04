@@ -1,6 +1,6 @@
 """
-Convergence comparison: SGD vs SVRG with quadratic regularization
-=================================================================
+Convergence comparison: SGD vs SVRG with logcosh regularization
+================================================================
 
 This example compares the convergence speed (per epoch) of two algorithms
 for minimising the regularised negative Poisson log-likelihood
@@ -10,12 +10,25 @@ for minimising the regularised negative Poisson log-likelihood
            + \\beta \\, R(x),
     \\qquad \\bar{y}(x) = A x + s
 
-where the quadratic penalty is
+where the edge-preserving logcosh penalty is
 
 .. math::
-    R(x) = \\frac{1}{2} \\| G x \\|_2^2
+    R(x) = \\delta \\sum_i \\log\\!\\cosh\\!\\left(\\frac{(Gx)_i}{\\delta}\\right)
 
-and :math:`G` is the finite forward-difference operator.
+and :math:`G` is the finite forward-difference operator.  The :math:`\\delta`
+prefactor ensures the asymptotic gradient magnitude equals 1 regardless of
+:math:`\\delta`, so the regularisation strength :math:`\\beta` retains the
+same meaning across different choices of :math:`\\delta`.  The scale
+:math:`\\delta` itself controls the transition between two regimes:
+
+* **Quadratic** for :math:`|(Gx)_i| \\ll \\delta`:
+  :math:`R(x) \\approx \\tfrac{1}{2\\delta}\\|Gx\\|_2^2`.
+* **Linear** for :math:`|(Gx)_i| \\gg \\delta`:
+  :math:`R(x) \\approx \\|Gx\\|_1 - n\\,\\delta\\log 2 \\approx \\|Gx\\|_1`.
+
+Setting :math:`\\delta` well below the typical edge gradient places true
+edges in the linear regime (edge-preserving) while penalising smooth-region
+deviations quadratically.
 The objective is decomposed into :math:`m` subset functions
 
 .. math::
@@ -56,7 +69,7 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 from parallelproj.functions import (
     NegPoissonLogL,
-    HalfSquaredL2Deviation,
+    LogCosh,
     C2AffineObjective,
     C1Function,
 )
@@ -74,16 +87,21 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # %%
 
 # number of subsets for SGD and SVRG
-num_subsets = 24
+num_subsets = 12
 
 # if run on a CPU limit the number of epochs
-num_epochs = (120 if dev == "cpu" else 1200) // num_subsets
+num_epochs = (120 if dev == "cpu" else 240) // num_subsets
 
 # regularisation weight beta
-beta = 3.0
+beta = 1.0
+# delta value relative to max of ground truth image for logcosh prior
+delta_rel = 0.1
 
 # step size for SGD and SVRG updates
 step_size = 1.0
+
+# factor that scales the ground truth image (also reconstruction) and the number of counts
+count_factor = 1.0
 
 # %%
 # Setup of the forward model :math:`\bar{y}(x) = A x + s`
@@ -122,7 +140,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
 )
 
 # setup a simple test image containing a few "hot rods"
-x_true = elliptic_cylinder_phantom(
+x_true = count_factor * elliptic_cylinder_phantom(
     xp, dev, image_shape=img_shape, voxel_size=voxel_size
 )
 
@@ -240,20 +258,30 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # Regularisation and subset objective functions
 # ---------------------------------------------
 #
-# The quadratic penalty :math:`R(x) = \frac{1}{2} \| G x \|_2^2` is built
-# from the :class:`.FiniteForwardDifference` operator :math:`G`.
+# The logcosh penalty
+# :math:`R(x) = \delta \sum_i \log\cosh\!\left((Gx)_i/\delta\right)` is
+# built from the :class:`.FiniteForwardDifference` operator :math:`G` and
+# :class:`.LogCosh`.
 # The full regulariser ``reg`` (weight :math:`\beta`) is used only for
 # the total objective evaluation.  Each subset function
 #
 # .. math::
 #     f_k(x) = \sum_{i \in S_k} \left( \bar{y}_i(x) - y_i \log \bar{y}_i(x) \right) + \frac{\beta}{m} R(x)
 #
-# is formed by adding a :class:`.HalfSquaredL2Deviation` scaled by
-# :math:`\beta / m` to the subset data fidelity, so that
-# :math:`\sum_k f_k(x) = F(x)`.
+# is formed by adding a :class:`.LogCosh` scaled by :math:`\beta / m` to
+# the subset data fidelity, so that :math:`\sum_k f_k(x) = F(x)`.
+#
+# ``delta`` is set to ``delta_rel`` times the maximum of the ground truth
+# image.  With ``delta_rel = 0.1`` edges with gradient equal to the image
+# maximum have :math:`|(Gx)|/\delta = 10`, placing them firmly in the
+# linear regime (:math:`\tanh(10) \approx 1`), while smooth-region
+# gradients near zero remain quadratic.
 
 G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
-reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta), G)
+
+delta = float(xp.max(x_true)) * delta_rel
+
+reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
 
 # %%
 # Setup of objective functions and sensitivity image
@@ -268,7 +296,7 @@ adjoint_ones = pet_lin_op.adjoint(
 )
 
 # reg/m term shared by all subset objectives
-reg_per_subset = C2AffineObjective(HalfSquaredL2Deviation(beta=beta / num_subsets), G)
+reg_per_subset = C2AffineObjective(LogCosh(delta=delta, beta=beta / num_subsets), G)
 
 # f_k = data_fidelity_k + (beta/m) * R(x)
 subset_objectives = [
@@ -318,8 +346,11 @@ print()
 # .. math::
 #     x^+ = \left(x - D\, m\,\nabla f_k(x)\right)_+.
 
-df_sgd = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
+df_sgd = xp.zeros(num_epochs + 1, dtype=xp.float32, device=dev)
 x_sgd = xp.asarray(x_init, copy=True)
+df_sgd[0] = total_objective(x_sgd)
+sgd_recons = xp.zeros((num_epochs + 1,) + img_shape)
+sgd_recons[0, ...] = x_sgd
 
 for i in range(num_epochs):
     if i % 2 == 0 and i <= 4:
@@ -334,7 +365,8 @@ for i in range(num_epochs):
         approx_grad = num_subsets * subset_objectives[k].gradient(x_sgd)
         x_sgd = xp.clip(x_sgd - step_size * sgd_precond * approx_grad, 0, None)
 
-    df_sgd[i] = total_objective(x_sgd)
+    df_sgd[i + 1] = total_objective(x_sgd)
+    sgd_recons[i + 1, ...] = x_sgd
 print()
 
 # %%
@@ -389,8 +421,11 @@ def svrg_update(
 
 
 x_svrg = xp.asarray(x_init, copy=True)
+svrg_recons = xp.zeros((num_epochs + 1,) + img_shape)
+svrg_recons[0, ...] = x_svrg
 
-df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
+df_svrg = xp.zeros(num_epochs + 1, dtype=xp.float32, device=dev)
+df_svrg[0] = total_objective(x_svrg)
 
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
@@ -419,7 +454,8 @@ for epoch in range(num_epochs):
             step_size=step_size,
         )
 
-    df_svrg[epoch] = total_objective(x_svrg)
+    df_svrg[epoch + 1] = total_objective(x_svrg)
+    svrg_recons[epoch + 1, ...] = x_svrg
 
 # %%
 # Convergence comparison
@@ -431,10 +467,12 @@ for epoch in range(num_epochs):
 # an anchor phase costs two full data passes (snapshot + subset updates),
 # and one full pass otherwise.
 
-epochs = np.arange(1, num_epochs + 1)
+epochs = np.arange(num_epochs + 1)
 osem_passes = epochs.copy()
 
-svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
+svrg_passes_per_epoch = np.concatenate(
+    [[0], np.where(np.arange(num_epochs) % 2 == 0, 2, 1)]
+)
 svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
 
 df_min = min(float(xp.min(df_sgd)), float(xp.min(df_svrg)))
@@ -471,12 +509,12 @@ fig.show()
 
 # %%
 fig, axs, widgets = show_vol_cuts(
-    to_numpy_array(x_sgd), voxel_size=voxel_size, fig_title="SGD result"
+    to_numpy_array(sgd_recons), voxel_size=voxel_size, fig_title="SGD result"
 )
 fig.show()
 
 # %%
 fig2, axs2, widgets = show_vol_cuts(
-    to_numpy_array(x_svrg), voxel_size=voxel_size, fig_title="SVRG result"
+    to_numpy_array(svrg_recons), voxel_size=voxel_size, fig_title="SVRG result"
 )
 fig2.show()

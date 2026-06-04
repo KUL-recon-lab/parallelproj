@@ -61,7 +61,10 @@ testpaths = ["tests"]
 #                -> conda package -> installed into the pixi env
 #
 # Quick start:
-#   pixi install                 # default env (runtime-only, Python 3.12)
+#   pixi install                 # default env (runtime-only + IPython, Python 3.12)
+#   pixi run ipython-examples    # IPython with docs/examples/ on PYTHONPATH
+#   pixi run -e cuda12 ipython-examples
+#                                # same, but with the CUDA 12 stack
 #   pixi run test                # run the test suite (Python 3.12)
 #   pixi run -e test-py-latest test
 #                                # run the test suite (newest Python)
@@ -195,6 +198,21 @@ pytorch = "*"       # docs/examples/05_torch/01_run_projection_layer.py uses tor
 docs = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"] }
 docs-clean = "rm -rf docs/_build docs/auto_examples"
 
+# ---- examples feature ----
+#
+# Adds IPython and a convenience task for running the docs/examples
+# interactively.  The task pre-sets PYTHONPATH so that the shared helpers
+# in docs/examples/ (array_utils.py, img.py, vis.py) are importable.
+# This feature is included in every environment so that
+# ``pixi run ipython-examples`` and
+# ``pixi run -e cuda12 ipython-examples`` both work out of the box.
+
+[tool.pixi.feature.examples.dependencies]
+ipython = "*"
+
+[tool.pixi.feature.examples.tasks]
+ipython-examples = { cmd = "ipython", env = { PYTHONPATH = "docs/examples" }, description = "Start IPython with docs/examples/ on PYTHONPATH for interactive example exploration." }
+
 # ---- CUDA 12 stack ----
 #
 # GPU environments only make sense on linux-64 (where conda-forge ships
@@ -227,10 +245,13 @@ cupy = "*"
 # exactly one Python-version feature (``py312`` or ``py-latest``) so its
 # Python version is unambiguous.
 #
+# The ``examples`` feature is included in every environment so that
+# ``pixi run ipython-examples`` works regardless of which env is active,
+# including CUDA ones (``pixi run -e cuda12 ipython-examples``).
+#
 #   default        - minimal "runtime only" env -- just parallelproj + its
-#                    run-dependencies on Python 3.12.  Useful for
-#                    ``pixi shell``-based interactive use, notebooks, or
-#                    downstream consumers who don't need the test stack.
+#                    run-dependencies + IPython on Python 3.12.  The go-to
+#                    env for interactive example exploration.
 #   test           - default + pytest / array-api-strict / pytorch on
 #                    Python 3.12 (CPU).
 #   test-py-latest - same as ``test`` but on the newest available Python.
@@ -245,9 +266,9 @@ cupy = "*"
 # env, which is what we want for local development.
 
 [tool.pixi.environments]
-default = { features = ["py312"] }
-test = { features = ["test", "py312"] }
-test-py-latest = { features = ["test", "py-latest"] }
-docs = { features = ["docs", "py312"] }
-cuda12 = { features = ["test", "cuda12", "py312"] }
-cuda13 = { features = ["test", "cuda13", "py312"] }
+default = { features = ["py312", "examples"] }
+test = { features = ["test", "py312", "examples"] }
+test-py-latest = { features = ["test", "py-latest", "examples"] }
+docs = { features = ["docs", "py312", "examples"] }
+cuda12 = { features = ["test", "cuda12", "py312", "examples"] }
+cuda13 = { features = ["test", "cuda13", "py312", "examples"] }

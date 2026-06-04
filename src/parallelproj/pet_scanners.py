@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import enum
 from collections.abc import Sequence
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -13,6 +14,29 @@ from ._backend import Array, to_numpy_array
 
 if TYPE_CHECKING:
     from mpl_toolkits.mplot3d import Axes3D
+
+
+class RingEndpointOrdering(enum.Enum):
+    """Direction in which endpoint indices increase around a ring.
+
+    For any symmetry axis, when the ring is viewed from the **positive**
+    symmetry-axis direction using the natural right-handed camera frame
+    (right = next cyclic axis, up = next-next cyclic axis), the two
+    conventions are:
+
+    ``CLOCKWISE``
+        Index 0 is at the top (12 o'clock) and subsequent indices advance
+        clockwise.  This is the default and matches the original behaviour.
+
+    ``COUNTERCLOCKWISE``
+        Index 0 is at the top (12 o'clock) and subsequent indices advance
+        counterclockwise.
+    """
+
+    CLOCKWISE = enum.auto()
+    """Indices increase clockwise (default)."""
+    COUNTERCLOCKWISE = enum.auto()
+    """Indices increase counterclockwise."""
 
 
 class PETScannerModule(abc.ABC):
@@ -305,6 +329,8 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         ax1: int = 1,
         affine_transformation_matrix: Array | None = None,
         phis: None | Array = None,
+        ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
+        phi0: float = 0.0,
     ) -> None:
         """
 
@@ -332,6 +358,13 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         phis : None | Array, optional
             angle of each side, by default None
             means that the sides are equally spaced around a circle
+        ring_endpoint_ordering : RingEndpointOrdering, optional
+            direction in which endpoint indices increase around the ring, by
+            default ``RingEndpointOrdering.CLOCKWISE``.
+        phi0 : float, optional
+            azimuthal offset of side 0 in radians, by default 0.
+            Only applied when ``phis`` is ``None``; ignored when ``phis`` is
+            provided explicitly.
         """
 
         self._radius = radius
@@ -340,6 +373,8 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         self._ax0 = ax0
         self._ax1 = ax1
         self._lor_spacing = lor_spacing
+        self._ring_endpoint_ordering = ring_endpoint_ordering
+        self._phi0 = phi0
         super().__init__(
             xp,
             dev,
@@ -350,7 +385,8 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         # angle of each "side"
         if phis is None:
             self._phis = (
-                2
+                phi0
+                + 2
                 * self.xp.pi
                 * self.xp.arange(self._num_sides, dtype=xp.float32, device=dev)
                 / self.num_sides
@@ -428,10 +464,31 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         """
         return self._phis
 
+    @property
+    def ring_endpoint_ordering(self) -> RingEndpointOrdering:
+        """direction in which endpoint indices increase around the ring"""
+        return self._ring_endpoint_ordering
+
+    @property
+    def phi0(self) -> float:
+        """azimuthal offset of side 0 in radians (only applied when phis=None)"""
+        return self._phi0
+
     # abstract method from base class to be implemented
     def get_raw_lor_endpoints(self, inds: Array | None = None) -> Array:
         if inds is None:
             inds = self.lor_endpoint_numbers
+
+        if self._ring_endpoint_ordering is RingEndpointOrdering.COUNTERCLOCKWISE:
+            side = inds // self._num_lor_endpoints_per_side
+            within = inds - side * self._num_lor_endpoints_per_side
+            new_side = self.xp.astype(
+                (self._num_sides - side) % self._num_sides, self.xp.int32
+            )
+            new_within = self.xp.astype(
+                self._num_lor_endpoints_per_side - 1 - within, self.xp.int32
+            )
+            inds = new_side * self._num_lor_endpoints_per_side + new_within
 
         side = inds // self.num_lor_endpoints_per_side
         tmp = inds - side * self.num_lor_endpoints_per_side
@@ -649,6 +706,8 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         ring_positions: Array,
         symmetry_axis: int,
         phis: None | Array = None,
+        ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
+        phi0: float = 0.0,
     ) -> None:
         """
         Parameters
@@ -672,6 +731,13 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         phis : None | Array, optional
             angle of each side, by default None
             means that the sides are equally spaced around a circle
+        ring_endpoint_ordering : RingEndpointOrdering, optional
+            direction in which endpoint indices increase around the ring, by
+            default ``RingEndpointOrdering.CLOCKWISE``.
+        phi0 : float, optional
+            azimuthal offset of side 0 in radians, by default 0.
+            Only applied when ``phis`` is ``None``; ignored when ``phis`` is
+            provided explicitly.
         """
 
         self._radius = radius
@@ -680,6 +746,8 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         self._lor_spacing = lor_spacing
         self._symmetry_axis = symmetry_axis
         self._ring_positions = ring_positions
+        self._ring_endpoint_ordering = ring_endpoint_ordering
+        self._phi0 = phi0
 
         if symmetry_axis == 0:
             self._ax0 = 2
@@ -711,6 +779,8 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
                     ax0=self._ax0,
                     ax1=self._ax1,
                     phis=phis,
+                    ring_endpoint_ordering=ring_endpoint_ordering,
+                    phi0=phi0,
                 )
             )
 
@@ -750,6 +820,16 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
     def symmetry_axis(self) -> int:
         """The symmetry axis. Also called axial (or ring) direction."""
         return self._symmetry_axis
+
+    @property
+    def ring_endpoint_ordering(self) -> RingEndpointOrdering:
+        """direction in which endpoint indices increase around the ring"""
+        return self._ring_endpoint_ordering
+
+    @property
+    def phi0(self) -> float:
+        """azimuthal offset of side 0 in radians (only applied when phis=None)"""
+        return self._phi0
 
     @property
     def all_lor_endpoints_ring_number(self) -> Array:
