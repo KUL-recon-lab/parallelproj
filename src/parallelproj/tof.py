@@ -18,19 +18,8 @@ class TOFParameters:
     """TOF kernel parameters for a PET scanner.
 
     Defaults correspond to a scanner with 385 ps FWHM TOF resolution.
-
-    Attributes
-    ----------
-    num_tofbins : int
-        Number of TOF bins.
-    tofbin_width : float
-        Width of each TOF bin in mm.
-    sigma_tof : float
-        Standard deviation of the Gaussian TOF kernel in mm.
-    num_sigmas : float
-        Number of sigmas at which the TOF kernel is truncated.
-    tofcenter_offset : float
-        Offset of the centre of the central TOF bin from the LOR midpoint in mm.
+    Fields: ``num_tofbins`` (int), ``tofbin_width`` (mm), ``sigma_tof`` (mm),
+    ``num_sigmas``, ``tofcenter_offset`` (mm).
     """
 
     num_tofbins: int = 29

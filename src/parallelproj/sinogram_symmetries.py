@@ -268,7 +268,7 @@ def build_plane_class_indices(
 
     Parameters
     ----------
-    plane_for_ring_pair_table : np.ndarray, shape (num_rings, num_rings)
+    plane_for_ring_pair_table : np.ndarray, shape (R, R)
         ``Michelogram.plane_for_ring_pair_table`` -- entry ``[r1, r2]`` is the
         sinogram plane index for ring pair ``(r1, r2)``, or ``-1`` if absent.
         Only span-1 descriptors (one plane per ring pair) are supported.
