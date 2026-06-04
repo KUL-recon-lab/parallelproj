@@ -122,8 +122,7 @@ def axial_block_shifted_planes(
     shifted = [
         (r1 + k * block_size, r2 + k * block_size)
         for k in range(-num_blocks, num_blocks + 1)
-        if 0 <= r1 + k * block_size < num_rings
-        and 0 <= r2 + k * block_size < num_rings
+        if 0 <= r1 + k * block_size < num_rings and 0 <= r2 + k * block_size < num_rings
     ]
     if n_edge <= 0:
         return shifted
@@ -336,8 +335,7 @@ def build_view_class_indices(num_views: int, view_period: int) -> list[np.ndarra
         ``num_views // view_period`` views.
     """
     return [
-        np.arange(v, num_views, view_period, dtype=np.int64)
-        for v in range(view_period)
+        np.arange(v, num_views, view_period, dtype=np.int64) for v in range(view_period)
     ]
 
 
