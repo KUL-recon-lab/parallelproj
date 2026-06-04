@@ -80,6 +80,33 @@ New Features
   parameter to randomly permute the returned event list.
 - **``VstackOperator``** now raises ``ValueError`` on inconsistent ``in_shape`` across
   stacked operators (previously silent).
+- **``parallelproj.sinogram_symmetries`` submodule**: new module for exploiting
+  the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
+  sensitivity calculations. Provides:
+
+  - ``compute_sinogram_plane_symmetries`` -- partition all axial ring pairs into
+    equivalence classes under axial block-shift, midplane reflection, and endpoint-swap
+    symmetries (with optional edge-ring correction)
+  - ``build_plane_class_indices``, ``build_view_class_indices``,
+    ``build_radial_class_indices`` -- per-class index arrays for the three sinogram axes
+  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` --
+    array-API-compatible reduce/expand operations for the typical
+    reduce -> compute -> expand sensitivity workflow
+
+  The key functions are also exported from the top-level ``parallelproj`` namespace.
+
+- **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
+  data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
+  Provides:
+
+  - ``regular_polygon_events_to_sinogram`` -- histogram per-event crystal and ring
+    indices into a non-TOF or TOF sinogram array; supports numpy, cupy, and torch
+  - ``detection_times_to_tof_bin`` -- convert raw detection-time differences
+    (nanoseconds) to projector-convention unsigned TOF bin indices ready for
+    histogramming
+
+  Both functions are also exported from the top-level ``parallelproj`` namespace.
+
 - **``parallelproj.__version__``** is now exposed at the top level.
 
 1.10.2 (Aug 20, 2025)
