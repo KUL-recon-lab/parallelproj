@@ -1,4 +1,10 @@
-"""Listmode-to-sinogram histogrammer for RegularPolygonPETScannerGeometry."""
+"""Listmode-to-sinogram histogramming for regular-polygon PET scanners.
+
+Converts per-event crystal and ring indices into a binned sinogram array,
+for both non-TOF and TOF acquisitions.  A companion function converts raw
+detection-time differences (in nanoseconds) to projector-convention TOF bin
+indices ready for histogramming.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +15,10 @@ import array_api_compat
 
 from ._backend import Array, to_numpy_array
 from .pet_lors import RegularPolygonPETLORDescriptor
+from .tof import C_MM_PER_NS
 
 if TYPE_CHECKING:
     from .projectors import RegularPolygonPETProjector
-
-#: Speed of light in mm per nanosecond.
-C_MM_PER_NS: float = 299.792458
 
 
 def _build_inring_luts(

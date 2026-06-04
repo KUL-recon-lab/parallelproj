@@ -1,4 +1,12 @@
-"""basic linear operators"""
+"""Array-API-compatible linear operator abstractions and concrete implementations.
+
+Provides the :class:`LinearOperator` abstract base class — with forward and
+adjoint application, norm estimation via power iteration, and an adjointness
+test — together with concrete operators: dense matrix multiplication,
+element-wise multiplication, Gaussian filtering, forward finite differences,
+operator composition, and vertical stacking.  All implementations dispatch
+correctly across NumPy, CuPy, and PyTorch.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +33,15 @@ from parallelproj import Array
 
 
 class LinearOperator(abc.ABC):
-    """abstract base class for linear operators"""
+    """Abstract base class for array-API-compatible linear operators.
+
+    Subclasses implement :meth:`_apply` (:math:`y = Ax`) and
+    :meth:`_adjoint` (:math:`x = A^H y`).  The public :meth:`apply` and
+    :meth:`adjoint` methods apply an optional scalar :attr:`scale` factor
+    (:math:`\\alpha A` and :math:`\\overline{\\alpha} A^H`).  Utility methods
+    :meth:`adjointness_test` and :meth:`norm` are provided for validation and
+    step-size estimation.
+    """
 
     def __init__(self) -> None:
         self._scale: float | complex = 1.0
@@ -426,7 +442,15 @@ class ElementwiseMultiplicationOperator(LinearOperator):
 
 
 class GaussianFilterOperator(LinearOperator):
-    """Gaussian filter operator"""
+    """Isotropic Gaussian smoothing operator (self-adjoint).
+
+    Wraps ``scipy.ndimage.gaussian_filter`` and dispatches via the array API
+    so it works with NumPy, CuPy, and PyTorch CPU arrays.  PyTorch CUDA
+    tensors are round-tripped through CuPy via DLPack.  All keyword arguments
+    accepted by ``scipy.ndimage.gaussian_filter`` (e.g. ``sigma``, ``mode``,
+    ``truncate``) are forwarded through ``**kwargs``.  Because the Gaussian
+    kernel is symmetric, the adjoint equals the forward application.
+    """
 
     def __init__(self, in_shape: tuple[int, ...], **kwargs):
         """init method
@@ -617,7 +641,15 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
 
 
 class FiniteForwardDifference(LinearOperator):
-    """finite difference gradient operator"""
+    """Forward finite-difference gradient operator for 1-D to 4-D images.
+
+    Maps an image of shape ``in_shape`` to a gradient field of shape
+    ``(ndim, *in_shape)`` where axis 0 enumerates the spatial directions.
+    Boundary conditions are Neumann (zero-padding): the last slice along each
+    axis is set to zero in the forward pass.  The adjoint is the negative
+    discrete divergence, consistent with the standard TV regularisation
+    convention.  Self-adjointness is verified by :meth:`adjointness_test`.
+    """
 
     def __init__(self, in_shape: tuple[int, ...]) -> None:
         if len(in_shape) > 4:

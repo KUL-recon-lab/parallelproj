@@ -1,4 +1,10 @@
-"""high-level geometrical forward and back projectors"""
+"""Forward and back projectors for PET sinograms, histograms and listmode.
+
+Array-API-compatible :class:`~parallelproj.operators.LinearOperator` subclasses
+that call the compiled ``parallelproj_core`` backend for Joseph-based ray
+tracing.  Covers 2-D parallel-view projection, regular-polygon PET in sinogram
+and listmode mode (non-TOF and TOF), and equal-block PET geometries.
+"""
 
 from __future__ import annotations
 

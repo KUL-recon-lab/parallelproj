@@ -1,4 +1,11 @@
-"""description of PET scanner geometries (detector coordinates)"""
+"""PET scanner geometry classes describing detector module layouts and endpoint coordinates.
+
+Covers both modular scanners (:class:`ModularizedPETScannerGeometry`, where
+modules can be placed arbitrarily) and the regular-polygon scanner
+(:class:`RegularPolygonPETScannerGeometry`), which is the primary geometry
+used throughout parallelproj.  Provides methods for computing LOR endpoint
+world coordinates and visualising the detector arrangement.
+"""
 
 from __future__ import annotations
 

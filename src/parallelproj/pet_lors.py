@@ -1,4 +1,14 @@
-"""description of PET LORs (and sinograms bins) consisting of two detector endpoints"""
+"""PET line-of-response (LOR) descriptors - definition of PET sinograms / histograms
+
+Defines how detector endpoint pairs map to sinogram bins (plane, view, radial
+bin) through the :class:`Michelogram` axial layout and the
+:class:`RegularPolygonPETLORDescriptor` class.  Also covers sinogram axis
+ordering conventions, zig-zag crystal pairing, and utilities for computing
+LOR start/end coordinates and visualising the scanner geometry.
+Moreover, also implements :class:`EqualBlockPETLORDescriptor` that allows to
+define PET data histograms for scanners consisting of equal Block without cylindrical
+symmetry.
+"""
 
 from __future__ import annotations
 
