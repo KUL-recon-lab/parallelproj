@@ -18,7 +18,7 @@ Breaking Changes
   (e.g. ``joseph3d_fwd_tof_sino`` → ``joseph3d_tof_sino_fwd``).
 - **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``,
   ``to_numpy_array``, and ``count_event_multiplicity`` are exported from ``parallelproj``
-  directly. All other classes must now be imported from their submodules:
+  directly. Everything else must be imported from the relevant submodule:
 
   .. code-block:: python
 
@@ -93,8 +93,6 @@ New Features
     array-API-compatible reduce/expand operations for the typical
     reduce -> compute -> expand sensitivity workflow
 
-  The key functions are also exported from the top-level ``parallelproj`` namespace.
-
 - **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
   data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
   Provides:
@@ -104,8 +102,6 @@ New Features
   - ``detection_times_to_tof_bin`` -- convert raw detection-time differences
     (nanoseconds) to projector-convention unsigned TOF bin indices ready for
     histogramming
-
-  Both functions are also exported from the top-level ``parallelproj`` namespace.
 
 - **``parallelproj.__version__``** is now exposed at the top level.
 
