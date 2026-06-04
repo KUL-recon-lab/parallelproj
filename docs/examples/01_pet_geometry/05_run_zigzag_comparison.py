@@ -69,7 +69,7 @@ lor_start_first = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 # Print the (start, end) detector index pairs for each view
 # ---------------------------------------------------------
 
-print("END_FIRST — (start, end) detector pairs per view:")
+print("END_FIRST -- (start, end) detector pairs per view:")
 for view in range(lor_end_first.num_views):
     s = lor_end_first.start_in_ring_index[view, :].tolist()
     e = lor_end_first.end_in_ring_index[view, :].tolist()
@@ -77,7 +77,7 @@ for view in range(lor_end_first.num_views):
     print(f"  view {view}: {pairs}")
 
 print()
-print("START_FIRST — (start, end) detector pairs per view:")
+print("START_FIRST -- (start, end) detector pairs per view:")
 for view in range(lor_start_first.num_views):
     s = lor_start_first.start_in_ring_index[view, :].tolist()
     e = lor_start_first.end_in_ring_index[view, :].tolist()
@@ -136,7 +136,7 @@ for ax, lor_desc, title in zip(
     ax.set_ylim(-1.35, 1.35)
     ax.set_aspect("equal")
     ax.legend(fontsize=7, loc="lower right")
-    ax.set_title(f"View 0 — {title}")
+    ax.set_title(f"View 0 -- {title}")
     ax.axis("off")
 
 fig.suptitle(

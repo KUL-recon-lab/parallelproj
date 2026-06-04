@@ -1,8 +1,8 @@
 """Array-API-compatible linear operator abstractions and concrete implementations.
 
-Provides the :class:`LinearOperator` abstract base class — with forward and
+Provides the :class:`LinearOperator` abstract base class -- with forward and
 adjoint application, norm estimation via power iteration, and an adjointness
-test — together with concrete operators: dense matrix multiplication,
+test -- together with concrete operators: dense matrix multiplication,
 element-wise multiplication, Gaussian filtering, forward finite differences,
 operator composition, and vertical stacking.  All implementations dispatch
 correctly across NumPy, CuPy, and PyTorch.

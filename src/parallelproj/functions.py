@@ -1,8 +1,8 @@
 """Functions and proximal operators.
 
 Provides a hierarchy of differentiable and non-differentiable scalar functions
-— including the negative Poisson log-likelihood, quadratic penalties, and the
-mixed L2-L1 norm — together with their gradients, Hessian-diagonal-vector
+-- including the negative Poisson log-likelihood, quadratic penalties, and the
+mixed L2-L1 norm -- together with their gradients, Hessian-diagonal-vector
 products, and closed-form proximal operators where available.  All classes are
 array-API compatible and work with NumPy, CuPy, and PyTorch.
 """

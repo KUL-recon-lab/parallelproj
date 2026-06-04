@@ -89,9 +89,9 @@ def regular_polygon_events_to_sinogram(
         determines the TOF axis size.
     d_red : array-like, shape (N,), dtype int32
         In-ring crystal indices for the **red** detector
-        (0 … num_lor_endpoints_per_ring - 1).
+        (0 ... num_lor_endpoints_per_ring - 1).
     r_red : array-like, shape (N,), dtype int32
-        Ring indices for the **red** detector (0 … num_rings - 1).
+        Ring indices for the **red** detector (0 ... num_rings - 1).
     d_blue : array-like, shape (N,), dtype int32
         In-ring crystal indices for the **blue** detector.
     r_blue : array-like, shape (N,), dtype int32
@@ -194,8 +194,8 @@ def regular_polygon_events_to_sinogram(
     valid = valid & (inring_flat >= 0)
 
     # Canonical ring ordering from the sinogram definition.
-    # tof_sign_vals = +1  →  d_red is xstart  →  r_red  is r_start
-    # tof_sign_vals = -1  →  d_blue is xstart →  r_blue is r_start
+    # tof_sign_vals = +1  ->  d_red is xstart  ->  r_red  is r_start
+    # tof_sign_vals = -1  ->  d_blue is xstart ->  r_blue is r_start
     r_red_s = xp.where(valid, r_red_xp, zero)
     r_blue_s = xp.where(valid, r_blue_xp, zero)
     is_red_start = tof_sign_vals == 1
@@ -207,8 +207,8 @@ def regular_polygon_events_to_sinogram(
 
     if tof_mode:
         # unsigned_sinogram_tof_bin is already in the projector convention
-        # (bin 0 = closest to xstart) — no flip required.  Negative values
-        # signal invalid events (e.g. detection_times_to_tof_bin returning −1).
+        # (bin 0 = closest to xstart) -- no flip required.  Negative values
+        # signal invalid events (e.g. detection_times_to_tof_bin returning -1).
         valid = valid & (tof_bin_xp >= 0) & (tof_bin_xp < num_tof_bins)
         tof_bin_safe = xp.where(valid, tof_bin_xp, zero)
 
@@ -254,7 +254,7 @@ def detection_times_to_tof_bin(
     """Convert raw detection-time differences to projector-convention TOF bins.
 
     Each coincidence event is characterised by two crystal hits and the
-    **signed arrival-time difference** ``t_blue − t_red`` (in nanoseconds).
+    **signed arrival-time difference** ``t_blue - t_red`` (in nanoseconds).
     This function maps that physical timing to the **unsigned integer TOF bin**
     used by :func:`regular_polygon_events_to_sinogram`, taking into account
     whether the projector's canonical ray direction runs from *red* to *blue*
@@ -267,7 +267,7 @@ def detection_times_to_tof_bin(
     d_blue : array-like, shape (N,), dtype int32
         In-ring crystal indices for the **blue** detector.
     dt_blue_minus_red : array-like, shape (N,), dtype float
-        ``t_blue − t_red`` in **nanoseconds**.
+        ``t_blue - t_red`` in **nanoseconds**.
         Positive = blue photon arrived later = emission closer to the red side.
     projector : RegularPolygonPETProjector
         TOF projector that defines the bin grid.  Must have
@@ -295,7 +295,7 @@ def detection_times_to_tof_bin(
 
     .. math::
 
-        \\Delta x_{\\text{blue→red}} = \\frac{c}{2}\\,(t_{\\text{blue}} - t_{\\text{red}})
+        \\Delta x_{\\text{blue->red}} = \\frac{c}{2}\\,(t_{\\text{blue}} - t_{\\text{red}})
 
     where :math:`c` = :data:`C_MM_PER_NS` mm/ns.  Letting
     :math:`s = \\text{sign}[d_{\\text{red}}, d_{\\text{blue}}]`
@@ -306,7 +306,7 @@ def detection_times_to_tof_bin(
 
         k = \\operatorname{round}\\!\\left(
               \\frac{N-1}{2}
-              - \\frac{s\\,\\Delta x_{\\text{blue→red}}
+              - \\frac{s\\,\\Delta x_{\\text{blue->red}}
                        + \\Delta_{\\text{center}}}{W}
             \\right)
 

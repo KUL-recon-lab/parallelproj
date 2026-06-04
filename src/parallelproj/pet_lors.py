@@ -63,11 +63,11 @@ class SinogramZigZagOrder(enum.Enum):
 
     ``END_FIRST``
         The *end* detector steps first for each new radial pair.
-        Pairs (start, end) at view 0: (0,n-1), (0,n-2), (1,n-2), (1,n-3), …
+        Pairs (start, end) at view 0: (0,n-1), (0,n-2), (1,n-2), (1,n-3), ...
 
     ``START_FIRST``
         The *start* detector steps first for each new radial pair.
-        Pairs (start, end) at view 0: (0,n-1), (1,n-1), (1,n-2), (2,n-2), …
+        Pairs (start, end) at view 0: (0,n-1), (1,n-1), (1,n-2), (2,n-2), ...
     """
 
     END_FIRST = enum.auto()
@@ -92,7 +92,7 @@ class Michelogram:
     :math:`s + e` (equivalently in z for equispaced rings).
 
     The class knows nothing about ring z-positions, scanner radius, or
-    sinogram axis ordering — it operates on pure integer indices.  Consumers
+    sinogram axis ordering -- it operates on pure integer indices.  Consumers
     (e.g. :class:`RegularPolygonPETLORDescriptor`,
     :class:`SinogramAxialCompressionOperator`) combine it with the geometry-
     and array-API-specific information they need.
@@ -110,7 +110,7 @@ class Michelogram:
         Maximum ring difference :math:`|e - s|` considered (:math:`\\ge 0`).
         Values larger than ``num_rings - 1`` have no extra effect.
     span : int, optional
-        Axial compression factor — must be odd and :math:`\\ge 1`.
+        Axial compression factor -- must be odd and :math:`\\ge 1`.
         Default ``1`` (no compression).
 
     Examples
@@ -173,7 +173,7 @@ class Michelogram:
         D = self._max_ring_difference
 
         # Group every valid ring pair (s, e) by (segment, s + e).  Iteration
-        # order here does not matter — we sort the result.
+        # order here does not matter -- we sort the result.
         plane_groups: dict[tuple[int, int], list[tuple[int, int]]] = {}
         for s in range(R):
             for e in range(R):
@@ -389,7 +389,7 @@ class Michelogram:
         be an integer multiple of ``self.span``.  Because both spans are
         odd by construction, the ratio ``target.span / self.span`` is then
         automatically odd, which guarantees that every ring pair of any
-        input plane shares the same target plane — so the operation is a
+        input plane shares the same target plane -- so the operation is a
         single-valued gather.
 
         The target's ``max_ring_difference`` must be at least
@@ -1054,7 +1054,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         scanner : RegularPolygonPETScannerGeometry
             a regular polygon PET scanner.
         michelogram : Michelogram, optional
-            the axial plane layout — the single source of truth for the
+            the axial plane layout -- the single source of truth for the
             spanning combinatorics (segments, axial midpoints, ring-pair
             grouping, ordering).  If ``None`` (default), a span-1 layout with
             no constraint on the ring difference is used, i.e.
@@ -1467,9 +1467,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     ) -> None:
         """Visualise the TOF bin grid for the specified sinogram views and plane.
 
-        Each LOR is drawn as a sequence of coloured line segments — one per
-        TOF bin — directly along the LOR ("zebra" style).  Bin colour runs
-        from blue (bin 0, xstart side) to red (bin N−1, xend side) via
+        Each LOR is drawn as a sequence of coloured line segments -- one per
+        TOF bin -- directly along the LOR ("zebra" style).  Bin colour runs
+        from blue (bin 0, xstart side) to red (bin N-1, xend side) via
         ``bin_cmap``.  Bins whose extent falls completely outside the physical
         LOR (i.e. beyond the detector positions) are silently skipped, so
         short edge LORs naturally show fewer coloured segments than central
@@ -1485,9 +1485,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         views : int, array-like, or None
             Sinogram view index / indices to draw.
 
-            * ``int`` — draw only that view.
-            * array-like — draw those specific views.
-            * ``None`` (default) — draw the single middle view
+            * ``int`` -- draw only that view.
+            * array-like -- draw those specific views.
+            * ``None`` (default) -- draw the single middle view
               (``num_views // 2``).
 
         plane : int
@@ -1709,8 +1709,8 @@ class SinogramAxialCompressionOperator(LinearOperator):
           \\qquad
           \\left(G^T y\\right)_{p_1} \\;=\\; y_{\\,\\tau(p_1)}\\,.
 
-      This is the natural reduction for **counts-like** sinograms — emission
-      data, measured counts, randoms, etc. — which add when ring pairs are
+      This is the natural reduction for **counts-like** sinograms -- emission
+      data, measured counts, randoms, etc. -- which add when ring pairs are
       grouped together.
 
     * ``mode="average"``.  The output plane is the **mean** of the
@@ -1723,9 +1723,9 @@ class SinogramAxialCompressionOperator(LinearOperator):
           \\left(G_{\\rm avg}^T y\\right)_{p_1}
               \\;=\\; \\frac{y_{\\,\\tau(p_1)}}{m_{\\,\\tau(p_1)}}\\,.
 
-      This is the natural reduction for **multiplicative-factor** sinograms —
+      This is the natural reduction for **multiplicative-factor** sinograms --
       attenuation factors, sensitivity / normalisation factors, geometric
-      efficiency — which should *average* rather than *sum* when ring pairs
+      efficiency -- which should *average* rather than *sum* when ring pairs
       are grouped together.
 
     In both expressions, :math:`\\mathcal{G}(n)` is the set of input plane
@@ -1852,8 +1852,8 @@ class SinogramAxialCompressionOperator(LinearOperator):
     def _build_index_maps(self, target_michelogram: Michelogram) -> None:
         """Build the gather/scatter index structures from the Michelogram.
 
-        All the combinatorial work — segment assignment, ring-pair grouping,
-        STIR-standard plane ordering, padded index construction — lives on
+        All the combinatorial work -- segment assignment, ring-pair grouping,
+        STIR-standard plane ordering, padded index construction -- lives on
         :class:`Michelogram`.  This method just converts those numpy arrays
         to the descriptor's ``xp`` and ``dev`` and stores them.
 
@@ -1966,7 +1966,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
     def _adjoint(self, y: Array) -> Array:
         """Expand the compressed sinogram back along the plane axis.
 
-        For ``mode="sum"``: ``x_{p1} = y_{tau(p1)}`` — each input plane gets
+        For ``mode="sum"``: ``x_{p1} = y_{tau(p1)}`` -- each input plane gets
         the value of its target output plane.
         For ``mode="average"``: the broadcast value is additionally divided
         by the multiplicity of the target output plane.

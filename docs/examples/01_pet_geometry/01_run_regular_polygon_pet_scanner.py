@@ -148,8 +148,8 @@ fig2.show()
 # The ``phi0`` parameter rotates the starting angle of side 0 (in radians); it
 # is ignored when ``phis`` is supplied explicitly.
 #
-# The 2×2 grid below shows all combinations of CW/CCW ordering with
-# ``phi0=0`` and ``phi0=π/8`` (half a polygon step for an 8-sided scanner).
+# The 2x2 grid below shows all combinations of CW/CCW ordering with
+# ``phi0=0`` and ``phi0=pi/8`` (half a polygon step for an 8-sided scanner).
 
 import math
 
@@ -158,8 +158,8 @@ _RO = parallelproj.pet_scanners.RingEndpointOrdering
 configs = [
     (_RO.CLOCKWISE, 0.0, "CW, phi0=0"),
     (_RO.COUNTERCLOCKWISE, 0.0, "CCW, phi0=0"),
-    (_RO.CLOCKWISE, math.pi / 3, "CW, phi0=π/3"),
-    (_RO.COUNTERCLOCKWISE, math.pi / 3, "CCW, phi0=π/3"),
+    (_RO.CLOCKWISE, math.pi / 3, "CW, phi0=pi/3"),
+    (_RO.COUNTERCLOCKWISE, math.pi / 3, "CCW, phi0=pi/3"),
 ]
 
 fig3, axes = plt.subplots(
@@ -184,6 +184,6 @@ for ax, (ordering, phi0, title) in zip(axes.flat, configs):
     ax.set_title(title, fontsize="medium")
 
 fig3.suptitle(
-    "Endpoint ordering × phi0  (symmetry_axis=2, viewed from +z)", fontsize=12
+    "Endpoint ordering x phi0  (symmetry_axis=2, viewed from +z)", fontsize=12
 )
 fig3.show()

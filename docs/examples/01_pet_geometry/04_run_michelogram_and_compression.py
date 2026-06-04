@@ -72,7 +72,7 @@ fig.show()
 #
 # Increasing the **span** merges ring pairs that share both a segment and
 # an axial midpoint into one sinogram plane.  In the Michelogram plot,
-# merged ring pairs are connected by thin grey *merge lines* — visually,
+# merged ring pairs are connected by thin grey *merge lines* -- visually,
 # each grey line collapses into one plane index.
 #
 # Restricting the **max_ring_difference** removes the outer segments
@@ -259,7 +259,7 @@ fig.show()
 # span-:math:`S` projection.
 #
 # **Practical consequence.**  In a real reconstruction with spanned data
-# one typically uses the (much faster) span-:math:`S` projector — but the
+# one typically uses the (much faster) span-:math:`S` projector -- but the
 # per-plane multiplicities must then be folded into the multiplicative
 # **sensitivity / normalisation sinogram** so that the data model stays
 # consistent.
