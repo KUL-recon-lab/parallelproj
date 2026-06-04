@@ -1,54 +1,9 @@
 """
-Sinogram symmetries for a regular-polygon PET scanner with cylindrical symmetry.
+Sinogram symmetry utilities for cylindrically-symmetric regular-polygon PET scanners.
 
-For a cylindrically-symmetric imaged object (e.g. a uniform cylinder or a
-rotating line source) the expected counts on a sinogram bin depend only on
-the LOR geometry — not on the azimuthal orientation.  Five families of
-symmetry each reduce the number of geometrically distinct bins that need to
-be measured or calculated.
-
-Axial (plane) symmetries — acting on the ring-pair axis
---------------------------------------------------------
-1. **Axial block shift**: shifting both ring indices by one full block width
-   maps every crystal to the crystal at the same position in the adjacent block.
-   Geometry is therefore preserved.
-
-2. **Scanner midplane reflection**: reflecting the scanner about its axial
-   centre maps ring r to ring N−1−r.  For a z-symmetric imaged object this
-   maps each plane (r1, r2) to an equivalent plane.
-
-3. **Endpoint swap**: exchanging (r1, r2) with (r2, r1) describes the same
-   physical LOR traversed in the opposite direction; expected counts are equal.
-
-Edge correction (``n_edge > 0``): the outermost ``n_edge`` rings of the first
-and last detector block are missing a neighbouring block on one side.  Their
-sensitivity differs from the same intra-block position in interior blocks, so
-the axial block-shift equivalence is restricted to ring pairs that stay within
-the same interior / edge category after the shift.
-
-In-plane symmetries — acting on the view and radial-bin axes
-------------------------------------------------------------
-4. **Scanner rotational symmetry**: a regular polygon with ``num_sides`` sides
-   has ``num_sides``-fold rotational symmetry.  This maps view ``v`` to view
-   ``v + n`` where ``n = num_lor_endpoints_per_side`` is the transaxial block
-   width in view space.  Within ``[0, num_views)`` there are therefore only
-   ``n`` distinct view types, each repeated ``num_sides / 2`` times.
-
-5. **Radial mirror symmetry**: for a centred object, LORs at radial bins ``r``
-   and ``num_rad − 1 − r`` have the same perpendicular distance from the FOV
-   centre and are therefore equivalent.  Because ``num_rad`` is always odd for
-   regular-polygon scanners (``num_rad = N − 1 − 2 · radial_trim`` with N
-   even), there is a unique centre bin that maps to itself.
-
-Typical workflow for geometric sensitivity
-------------------------------------------
-1. **Reduce**: call :func:`reduce_sinogram_by_symmetry_class` on each axis
-   (planes, views, radial bins) to obtain a compact sinogram with one entry
-   per equivalence class.
-2. **Compute**: run the forward projection / sensitivity calculation on the
-   compact sinogram.
-3. **Expand**: call :func:`expand_sinogram_by_symmetry_class` to broadcast the
-   computed values back to the full sinogram shape.
+Provides tools to partition sinogram bins into geometric equivalence classes and to
+reduce a full sinogram to one representative value per class or expand it back — the
+basis for efficient geometric sensitivity calculation.
 """
 
 from __future__ import annotations
@@ -487,6 +442,18 @@ def reduce_sinogram_by_symmetry_class(
     The function is array-API compliant and works with any backend that
     implements ``xp.take``, ``xp.sum``, and ``xp.stack`` (numpy, PyTorch,
     CuPy, …).
+
+    Notes
+    -----
+    Typical workflow for geometric sensitivity:
+
+    1. **Reduce** — call this function on each sinogram axis (planes, views,
+       radial bins) to obtain a compact sinogram with one entry per equivalence
+       class.
+    2. **Compute** — run the forward projection or sensitivity calculation on
+       the compact sinogram.
+    3. **Expand** — call :func:`expand_sinogram_by_symmetry_class` to broadcast
+       the computed values back to the full sinogram shape.
 
     Parameters
     ----------
