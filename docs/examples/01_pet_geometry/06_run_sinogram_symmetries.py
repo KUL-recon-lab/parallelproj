@@ -48,13 +48,13 @@ from parallelproj.sinogram_symmetries import (
     build_view_class_indices,
     build_radial_class_indices,
     reduce_sinogram_by_symmetry_class,
+    expand_sinogram_by_symmetry_class,
 )
 
 # %%
 from array_utils import suggest_array_backend_and_device
 
 xp, dev = suggest_array_backend_and_device(None, None)
-
 
 # %%
 # Drawing helpers
@@ -630,3 +630,62 @@ print(
     f"Total counts after  : {float(xp.sum(sino_red)):.0f}"
     f"  (preserved — xp.sum reduction conserves total)"
 )
+
+# %%
+# Upsampling the reduced sinogram back to the original shape
+# ----------------------------------------------------------
+#
+# After reducing with ``xp.mean`` every bin in the reduced sinogram holds the
+# *average* count across all original bins that belong to the same equivalence
+# class.  :func:`.expand_sinogram_by_symmetry_class` broadcasts those class
+# values back to the original sinogram shape by assigning every original bin
+# the mean value of its class.  The result is a *denoised* sinogram in which
+# symmetry-equivalent LORs carry identical values.
+#
+
+# ── Mean reduction ────────────────────────────────────────────────────────────
+sino_mean = reduce_sinogram_by_symmetry_class(
+    sino, view_classes, lor_desc.view_axis_num, xp.mean
+)
+sino_mean = reduce_sinogram_by_symmetry_class(
+    sino_mean, rad_classes, lor_desc.radial_axis_num, xp.mean
+)
+sino_mean = reduce_sinogram_by_symmetry_class(
+    sino_mean, plane_class_idx, lor_desc.plane_axis_num, xp.mean
+)
+print(f"Reduced (mean) shape : {tuple(sino_mean.shape)}")
+
+# ── Expand back to full sinogram shape ────────────────────────────────────────
+sino_expanded = expand_sinogram_by_symmetry_class(
+    sino_mean, plane_class_idx, lor_desc.num_planes, lor_desc.plane_axis_num
+)
+sino_expanded = expand_sinogram_by_symmetry_class(
+    sino_expanded, rad_classes, lor_desc.num_rad, lor_desc.radial_axis_num
+)
+sino_expanded = expand_sinogram_by_symmetry_class(
+    sino_expanded, view_classes, lor_desc.num_views, lor_desc.view_axis_num
+)
+print(f"Expanded shape       : {tuple(sino_expanded.shape)}  (== original)")
+
+# ── Verify: all bins in the same class carry the same value ───────────────────
+
+sample_class_view = view_classes[3]  # e.g. class 3 of the view axis
+sample_class_rad = rad_classes[0]  # outermost radial pair
+sample_class_planes = xp.asarray(
+    [lor_desc.michelogram.plane_for_ring_pair(*x) for x in class_to_planes[4]],
+    device=dev,
+)
+
+r_idx, v_idx, p_idx = 0, 0, 0  # fix one radial and plane bin
+
+vals_view = sino_expanded[r_idx, sample_class_view, p_idx]
+print("")
+print(f"View class 3 — values at (rad={r_idx}, plane={p_idx})     : " f"{vals_view}")
+
+vals_rad = sino_expanded[sample_class_rad, v_idx, p_idx]
+print(f"Radial class 0   — values at (view={v_idx}, plane={p_idx}): " f"{vals_rad}")
+
+
+vals_planes = sino_expanded[r_idx, v_idx, sample_class_planes]
+
+print(f"Plane class 4  — values at (rad={r_idx}, view={v_idx})    : " f"{vals_planes}")
