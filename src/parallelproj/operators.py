@@ -466,10 +466,12 @@ class ElementwiseMultiplicationOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Shape of the diagonal values array (operator is square)."""
         return self._values.shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Shape of the diagonal values array (operator is square)."""
         return self._values.shape
 
     @property
@@ -518,7 +520,8 @@ class GaussianFilterOperator(LinearOperator):
         in_shape : tuple[int, ...]
             shape of the input array
         **kwargs : dict
-            passed to scipy.ndimage.gaussian_filter (e.g. ``mode``, ``truncate``)
+            passed to scipy.ndimage.gaussian_filter; most commonly ``sigma``
+            (standard deviation in pixels), plus optional ``mode``, ``truncate``, etc.
         """
         super().__init__()
         self._in_shape = in_shape
@@ -526,10 +529,12 @@ class GaussianFilterOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Shape of the input (and output) array (operator is square)."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Shape of the output (and input) array (operator is square)."""
         return self._in_shape
 
     def _apply(self, x: Array) -> Array:
