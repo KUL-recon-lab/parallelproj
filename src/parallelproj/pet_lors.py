@@ -1221,7 +1221,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     @property
     def plane_segment(self) -> Array:
-        """segment number for each plane (equals abs(rd) for span=1)"""
+        """Signed segment number for each plane (equals the ring difference ``rd`` for span=1)."""
         return self._plane_segment
 
     @property

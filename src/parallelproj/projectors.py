@@ -57,9 +57,11 @@ class ParallelViewProjector2D(LinearOperator):
         radius : float
             Scanner radius in mm (distance from centre to detector).
         image_origin : tuple[float, float]
-            World coordinates of the ``[0, 0]`` voxel centre in mm.
+            World coordinates of the ``[0, 0]`` voxel centre in mm ``(o1, o2)``.
+            Internally promoted to ``(0, o1, o2)`` so the 3D backend can be used.
         voxel_size : tuple[float, float]
             Voxel size ``(d1, d2)`` in mm.
+            Internally promoted to ``(1, d1, d2)`` with a unit axial dimension.
         """
         super().__init__()
         self._xp = array_api_compat.get_namespace(radial_positions)
