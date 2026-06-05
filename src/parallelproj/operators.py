@@ -224,15 +224,18 @@ class LinearOperator(abc.ABC):
                 np.random.rand(*self.in_shape), device=dev, dtype=dtype
             )
 
+        # Power iteration: x converges to the dominant eigenvector of A^H A.
+        # After each step x_prev is unit-norm, so ||A^H A x_prev|| = ||A||^2.
+        # norm_squared holds ||x|| = ||A||^2; sqrt gives ||A||.
         for i in range(num_iter):
             x = self.adjoint(self.apply(x))
-            norm_squared = xp.sqrt(xp.sum(xp.abs(x) ** 2))
+            norm_squared = xp.sqrt(xp.sum(xp.abs(x) ** 2))  # = ||A||^2 at convergence
             x /= float(norm_squared)
 
             if verbose:
                 print(f"{(i+1):03} {float(xp.sqrt(norm_squared)):.2E}")
 
-        return float(xp.sqrt(norm_squared))
+        return float(xp.sqrt(norm_squared))  # sqrt(||A||^2) = ||A||
 
     @property
     def H(self) -> AdjointLinearOperator:
