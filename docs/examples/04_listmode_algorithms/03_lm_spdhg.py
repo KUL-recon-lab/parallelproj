@@ -1,6 +1,6 @@
 """
 PDHG and LM-SPDHG to optimize the Poisson logL and total variation
-=================================================================
+==================================================================
 
 This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm,
 the listmode stochastic PDHG (LM-SPDHG) to minimize the negative
