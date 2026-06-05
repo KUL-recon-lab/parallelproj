@@ -269,8 +269,7 @@ def detection_times_to_tof_bin(
     dt_blue_minus_red : array-like, shape (N,), dtype float
         ``t_blue - t_red`` in **nanoseconds**.
         Positive = blue photon arrived later = emission closer to the red side.
-        Internally cast to ``float32``; values outside the ``float32`` range
-        will silently lose precision.
+        Internally cast to ``float32``.
     projector : RegularPolygonPETProjector
         TOF projector that defines the bin grid.  Must have
         ``tof_parameters`` set.
