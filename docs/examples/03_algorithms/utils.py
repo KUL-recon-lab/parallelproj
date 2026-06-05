@@ -216,7 +216,7 @@ class RadonSquare(RadonObject):
         # triangle mask
         t_mask = mask1 * mask2 * mask3
 
-        # plateau aprt
+        # plateau apart
         p1 = self.xp.where(abs_r < r2, h * self.xp.ones_like(r), self.xp.zeros_like(r))
 
         # triangle part avoiding division by zero

@@ -188,7 +188,7 @@ pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_m
 # simulated noise-free data
 noise_free_data = pet_lin_op(x_true)
 
-# generate a contant contamination sinogram
+# generate a constant contamination sinogram
 contamination = xp.full(
     noise_free_data.shape,
     0.5 * float(xp.mean(noise_free_data)),

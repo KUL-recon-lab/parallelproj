@@ -39,7 +39,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # --------------------------------------------------------
 #
 # We setup a minimal linear forward operator :math:`A` respresented by a 5x4 matrix
-# and an arbritrary contamination vector :math:`s` of length 5.
+# and an arbitrary contamination vector :math:`s` of length 5.
 #
 # .. note::
 #     The DePierro implementation below works with all linear operators that

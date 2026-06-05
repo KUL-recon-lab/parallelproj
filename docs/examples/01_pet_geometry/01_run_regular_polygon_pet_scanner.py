@@ -78,7 +78,7 @@ scanner4 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 # :meth:`.RegularPolygonPETScannerGeometry.get_lor_endpoints` can be used
 # to obtain the world coordinates of the LOR endpoints
 
-# get the word coordinates of the 4th LOR endpoint in the 1st "ring" (polygon)
+# get the world coordinates of the 4th LOR endpoint in the 1st "ring" (polygon)
 # and the 5th LOR endpoint in the 2nd "ring" (polygon)
 print("scanner1")
 print(

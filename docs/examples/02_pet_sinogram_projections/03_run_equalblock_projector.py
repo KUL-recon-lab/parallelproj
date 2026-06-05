@@ -27,7 +27,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
-# input paraters
+# input parameters
 
 # grid shape of LOR endpoints forming a block module
 block_shape = (3, 2, 2)

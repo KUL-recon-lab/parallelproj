@@ -51,7 +51,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # %%
 # **Input Parameters**
 
-# image scale (can be used to simulated more or less counts)
+# image scale (can be used to simulate more or less counts)
 img_scale = 0.1
 # number of MLEM iterations to init. PDHG and LM-SPDHG
 num_iter_mlem = 10
@@ -179,7 +179,7 @@ pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_m
 # simulated noise-free data
 noise_free_data = pet_lin_op(x_true)
 
-# generate a contant contamination sinogram
+# generate a constant contamination sinogram
 contamination = xp.full(
     noise_free_data.shape,
     contam * float(xp.mean(noise_free_data)),
@@ -277,7 +277,7 @@ zbar = 1.0 * z
 
 # %%
 
-# calculate PHDG step sizes
+# calculate PDHG step sizes
 tmp = pet_lin_op(xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev))
 tmp = xp.where(tmp == 0, xp.min(tmp[tmp > 0]), tmp)
 S_A = gamma * rho / tmp

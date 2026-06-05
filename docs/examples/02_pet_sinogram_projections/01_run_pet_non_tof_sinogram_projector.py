@@ -94,7 +94,7 @@ fig.show()
 #
 # :meth:`.RegularPolygonPETProjector.__call__` allows us to calculate
 # the geometrical forward projection (line integrals by Joseph's method)
-# though a voxelize image.
+# through a voxelized image.
 
 # setup a simple test image containing a few "hot rods"
 x = xp.zeros(proj.in_shape, device=dev, dtype=xp.float32)
