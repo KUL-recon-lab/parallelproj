@@ -91,7 +91,7 @@ class RadonObject(abc.ABC):
     def rotation(self, value: float) -> None:
         self._rotation = value
 
-    def radon_transform(self, s, phi) -> float:
+    def radon_transform(self, s, phi) -> Array:
 
         phi_rotated = (phi + self.rotation) % (2 * self.xp.pi)
 
