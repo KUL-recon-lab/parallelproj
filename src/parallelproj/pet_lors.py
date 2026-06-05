@@ -867,14 +867,21 @@ class PETLORDescriptor(abc.ABC):
     def get_lor_coordinates(self) -> tuple[Array, Array]:
         """Return the start and end world coordinates of all (or a subset of) LORs.
 
+        Subclasses may accept optional keyword arguments to restrict which LORs
+        are returned (e.g. ``views=`` for sinogram descriptors,
+        ``block_pair_nums=`` for block descriptors).  Calling with no arguments
+        always returns all LORs.
+
         Returns
         -------
         xstart : Array
-            Float array of shape ``(N, 3)`` with the world coordinates of the
-            LOR start points.
+            Float array of shape ``(..., 3)`` with the world coordinates of the
+            LOR start points.  The leading dimensions depend on the concrete
+            subclass: ``(N, 3)`` for block-based descriptors,
+            ``(*spatial_sinogram_shape, 3)`` for sinogram-based descriptors.
         xend : Array
-            Float array of shape ``(N, 3)`` with the world coordinates of the
-            LOR end points.
+            Float array with the same shape as ``xstart`` containing the LOR
+            end points.
         """
         raise NotImplementedError
 
@@ -1387,8 +1394,12 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         Returns
         -------
-        xstart, xend : Array
-           2 dimensional floating point arrays containing the start and end coordinates of all LORs
+        xstart : Array
+            Float array of shape ``(*spatial_sinogram_shape, 3)`` containing
+            the LOR start coordinates for the selected views.
+        xend : Array
+            Float array of the same shape as ``xstart`` containing the LOR
+            end coordinates.
         """
 
         if views is None:
