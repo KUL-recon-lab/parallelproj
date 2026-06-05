@@ -15,12 +15,13 @@ Both ``libparallelproj`` and ``parallelproj-core`` are available on **conda-forg
 .. tip::
 
    You can get **miniforge** (a minimal conda installer configured for conda-forge) `here <https://github.com/conda-forge/miniforge>`_.
-   We recommend installing into a **dedicated virtual environment**.
+   Alternatively, `pixi <https://pixi.sh>`_ is a modern, cross-platform package manager built on conda-forge that handles environments automatically.
+   We recommend installing into a **dedicated virtual environment** regardless of the tool you choose.
 
 Default install (auto CUDA detection)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The following commands create a new environment named ``parallelproj`` and install the package along with all required compiled libraries.
+The following commands create a new environment and install the package along with all required compiled libraries.
 
 .. tab-set::
 
@@ -35,6 +36,16 @@ The following commands create a new environment named ``parallelproj`` and insta
         .. code-block:: console
 
            $ conda create -n parallelproj -c conda-forge parallelproj
+
+    .. tab-item:: pixi
+
+        Run the following from your project directory.  ``pixi`` ties the
+        environment to the directory rather than a global name.
+
+        .. code-block:: console
+
+           $ pixi init -c conda-forge
+           $ pixi add parallelproj
 
 After creation, activate the environment:
 
@@ -52,17 +63,37 @@ After creation, activate the environment:
 
            $ conda activate parallelproj
 
+    .. tab-item:: pixi
+
+        .. code-block:: console
+
+           $ pixi shell
+
 .. tip::
 
-   To use ``parallelproj`` with **PyTorch** or **CuPy**, add them as extra dependencies directly in the environment creation call, e.g.:
+   To use ``parallelproj`` with **PyTorch** or **CuPy**, add them as extra dependencies:
 
-   .. code-block:: console
+   .. tab-set::
 
-      $ mamba create -n parallelproj -c conda-forge parallelproj pytorch
+       .. tab-item:: mamba
 
-   .. code-block:: console
+           .. code-block:: console
 
-      $ mamba create -n parallelproj -c conda-forge parallelproj cupy
+              $ mamba create -n parallelproj -c conda-forge parallelproj pytorch
+
+           .. code-block:: console
+
+              $ mamba create -n parallelproj -c conda-forge parallelproj cupy
+
+       .. tab-item:: pixi
+
+           .. code-block:: console
+
+              $ pixi add pytorch
+
+           .. code-block:: console
+
+              $ pixi add cupy
 
 Force a specific CUDA build
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -84,6 +115,12 @@ Replace ``cuda129`` below with the CUDA version matching your system (e.g. ``cud
 
            $ conda create -n parallelproj-cuda129 -c conda-forge cuda-version=13.0 parallelproj
 
+    .. tab-item:: pixi
+
+        .. code-block:: console
+
+           $ pixi add 'cuda-version=12.9' parallelproj
+
 Force a CPU-only build
 ^^^^^^^^^^^^^^^^^^^^^^
 
@@ -102,6 +139,12 @@ To explicitly install the CPU-only variant of ``libparallelproj`` (e.g. on a mac
         .. code-block:: console
 
            $ conda create -n parallelproj-cpu -c conda-forge parallelproj "libparallelproj=*=cpu*"
+
+    .. tab-item:: pixi
+
+        .. code-block:: console
+
+           $ pixi add 'libparallelproj=*=cpu*' parallelproj
 
 Verifying the installation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
