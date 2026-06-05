@@ -24,20 +24,25 @@ if TYPE_CHECKING:
 
 
 class RingEndpointOrdering(enum.Enum):
-    """Direction in which endpoint indices increase around a ring.
+    """Direction in which endpoint indices increase around a detector ring.
 
-    For any symmetry axis, when the ring is viewed from the **positive**
-    symmetry-axis direction using the natural right-handed camera frame
-    (right = next cyclic axis, up = next-next cyclic axis), the two
-    conventions are:
+    The ordering is defined relative to the scanner's symmetry axis
+    (set via the ``symmetry_axis`` parameter of
+    :class:`RegularPolygonPETScannerGeometry`).  When the ring is viewed
+    from the **positive** symmetry-axis direction, the two conventions are:
 
     ``CLOCKWISE``
-        Index 0 is at the top (12 o'clock) and subsequent indices advance
+        Index 0 is at the 12 o'clock position and subsequent indices advance
         clockwise.  This is the default and matches the original behaviour.
 
     ``COUNTERCLOCKWISE``
-        Index 0 is at the top (12 o'clock) and subsequent indices advance
+        Index 0 is at the 12 o'clock position and subsequent indices advance
         counterclockwise.
+
+    For the common case ``symmetry_axis=2`` (axial = z), the ring lies in
+    the x-y plane and is viewed from above (+z).  Index 0 is at the top
+    (+y direction) and advances clockwise (toward +x) or counterclockwise
+    (toward -x) depending on the chosen convention.
     """
 
     CLOCKWISE = enum.auto()
