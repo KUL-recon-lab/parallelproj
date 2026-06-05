@@ -187,3 +187,91 @@ fig3.suptitle(
     "Endpoint ordering x phi0  (symmetry_axis=2, viewed from +z)", fontsize=12
 )
 fig3.show()
+
+# %%
+# Non-uniform crystal spacing: subblock detector modules
+# ------------------------------------------------------
+#
+# The ``lor_endpoint_positions`` argument accepts a 1-D array of crystal
+# positions (in mm, centred at 0) along each polygon side.  This allows
+# non-uniform layouts such as **subblock detectors** where crystals are
+# grouped with a small intra-block pitch and a larger gap between blocks.
+#
+# Here we build a 6-sided scanner with **16 crystals per side** arranged in
+# **4 subblocks of 4 crystals**:
+#
+# - intra-subblock pitch: 4 mm
+# - extra gap between adjacent subblocks: 2 mm
+#   (so the inter-subblock crystal distance is 4 + 2 = 6 mm)
+#
+# For radial sinogram symmetry the position array must be **anti-symmetric
+# about 0** (``pos[i] == -pos[N-1-i]``), which is the case here.
+#
+# Positions along each side (mm):
+#
+# .. code-block:: text
+#
+#   subblock 1       subblock 2       subblock 3       subblock 4
+#   -33 -29 -25 -21  -15 -11  -7  -3  +3  +7 +11 +15  +21 +25 +29 +33
+
+import numpy as np
+
+num_subblocks = 4
+n_per_subblock = 4
+pitch = 4.0  # mm within a subblock
+extra_gap = 2.0  # mm added between adjacent subblocks
+
+# Within-subblock offsets centred at 0
+sub_offsets = pitch * (np.arange(n_per_subblock) - (n_per_subblock - 1) / 2.0)
+# = [-6, -2, +2, +6] mm
+
+# Subblock centres: adjacent subblock centres are separated by
+# (subblock span) + (intra-subblock pitch + extra gap)
+subblock_span = (n_per_subblock - 1) * pitch  # 12 mm
+centre_to_centre = subblock_span + pitch + extra_gap  # 18 mm
+
+sub_centers = centre_to_centre * (np.arange(num_subblocks) - (num_subblocks - 1) / 2.0)
+# = [-27, -9, +9, +27] mm
+
+lor_endpoint_positions = (sub_centers[:, None] + sub_offsets[None, :]).ravel()
+# = [-33, -29, -25, -21, -15, -11, -7, -3, +3, +7, +11, +15, +21, +25, +29, +33]
+
+scanner5 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=70.0,
+    num_sides=6,
+    ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+    symmetry_axis=2,
+    lor_endpoint_positions=lor_endpoint_positions,
+)
+
+# %%
+# Visualize the subblock scanner and compare endpoint positions with uniform spacing
+
+fig5, (ax5a, ax5b) = plt.subplots(
+    1, 2, figsize=(12, 5), subplot_kw={"projection": "3d"}, layout="constrained"
+)
+
+# uniform reference (same N and pitch — no gap)
+scanner5_uniform = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=70.0,
+    num_sides=6,
+    num_lor_endpoints_per_side=16,
+    lor_spacing=pitch,
+    ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+    symmetry_axis=2,
+)
+
+scanner5_uniform.show_lor_endpoints(ax5a)
+ax5a.set_title("Uniform spacing (4 mm)", fontsize="medium")
+
+scanner5.show_lor_endpoints(ax5b)
+ax5b.set_title(
+    "Subblock layout (4x4 crystals, 4 mm intra / 6 mm inter)", fontsize="medium"
+)
+
+fig5.suptitle("28-sided scanner, 16 crystals per side", fontsize=12)
+fig5.show()

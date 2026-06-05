@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import abc
 import enum
+import warnings
 from collections.abc import Sequence
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -365,14 +366,15 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         dev: str,
         radius: float,
         num_sides: int,
-        num_lor_endpoints_per_side: int,
-        lor_spacing: float,
+        num_lor_endpoints_per_side: int | None = None,
+        lor_spacing: float | None = None,
         ax0: int = 2,
         ax1: int = 1,
         affine_transformation_matrix: Array | None = None,
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
         phi0: float = 0.0,
+        lor_endpoint_positions: np.ndarray | None = None,
     ) -> None:
         """
 
@@ -386,10 +388,12 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             inner radius of the regular polygon
         num_sides: int
             number of sides of the regular polygon
-        num_lor_endpoints_per_side: int
-            number of LOR endpoints per side
-        lor_spacing : float
-            spacing between the LOR endpoints in the polygon direction
+        num_lor_endpoints_per_side: int or None, optional
+            number of LOR endpoints per side.  Required when
+            ``lor_endpoint_positions`` is not given; ignored otherwise.
+        lor_spacing : float or None, optional
+            uniform spacing between LOR endpoints in mm.  Required when
+            ``lor_endpoint_positions`` is not given; ignored otherwise.
         ax0 : int, optional
             axis number for the first direction, by default 2
         ax1 : int, optional
@@ -407,20 +411,67 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             azimuthal offset of side 0 in radians, by default 0.
             Only applied when ``phis`` is ``None``; ignored when ``phis`` is
             provided explicitly.
+        lor_endpoint_positions : np.ndarray or None, optional
+            1-D array of crystal positions (in mm) along each polygon side,
+            with 0 at the centre of the side.  When given, overrides
+            ``num_lor_endpoints_per_side`` and ``lor_spacing``.
+
+            For radial sinogram symmetry to hold (see
+            :func:`~parallelproj.sinogram_symmetries.build_radial_class_indices`),
+            the array must be **anti-symmetric about 0**:
+            ``pos[i] == -pos[N-1-i]`` for all ``i``.  A ``UserWarning`` is
+            issued if this condition is not met.
+
+            Examples for a side with **even** N=6 (3 crystals each half,
+            uniform 2 mm pitch, 1 mm gap)::
+
+                lor_endpoint_positions = np.array([-3.5, -1.5, -0.5,
+                                                    0.5,  1.5,  3.5])
+
+            Examples for **odd** N=5 (2 crystals each half + one centre
+            crystal, uniform 2 mm pitch)::
+
+                lor_endpoint_positions = np.array([-4.0, -2.0,  0.0,
+                                                    2.0,  4.0])
         """
 
         self._radius = radius
         self._num_sides = num_sides
-        self._num_lor_endpoints_per_side = num_lor_endpoints_per_side
         self._ax0 = ax0
         self._ax1 = ax1
-        self._lor_spacing = lor_spacing
         self._ring_endpoint_ordering = ring_endpoint_ordering
         self._phi0 = phi0
+
+        if lor_endpoint_positions is not None:
+            pos = np.asarray(lor_endpoint_positions, dtype=np.float32)
+            # warn if not anti-symmetric about 0
+            if not np.allclose(pos + pos[::-1], 0, atol=1e-4 * max(float(np.max(np.abs(pos))), 1.0)):
+                warnings.warn(
+                    "lor_endpoint_positions is not anti-symmetric about 0 "
+                    "(pos[i] != -pos[N-1-i]). Radial sinogram symmetry "
+                    "(build_radial_class_indices) may not be physically valid.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            self._lor_endpoint_positions = xp.asarray(pos, device=dev, dtype=xp.float32)
+            self._num_lor_endpoints_per_side = len(pos)
+            self._lor_spacing = None
+        elif num_lor_endpoints_per_side is not None and lor_spacing is not None:
+            N = num_lor_endpoints_per_side
+            pos_np = lor_spacing * (np.arange(N, dtype=np.float32) - (N - 1) / 2.0)
+            self._lor_endpoint_positions = xp.asarray(pos_np, device=dev, dtype=xp.float32)
+            self._num_lor_endpoints_per_side = N
+            self._lor_spacing = lor_spacing
+        else:
+            raise ValueError(
+                "Provide either lor_endpoint_positions or both "
+                "num_lor_endpoints_per_side and lor_spacing."
+            )
+
         super().__init__(
             xp,
             dev,
-            num_sides * num_lor_endpoints_per_side,
+            num_sides * self._num_lor_endpoints_per_side,
             affine_transformation_matrix,
         )
 
@@ -487,14 +538,19 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         return self._ax1
 
     @property
-    def lor_spacing(self) -> float:
-        """spacing between the LOR endpoints in a module along the polygon
-
-        Returns
-        -------
-        float
-        """
+    def lor_spacing(self) -> float | None:
+        """Uniform spacing between LOR endpoints in mm, or ``None`` when
+        custom ``lor_endpoint_positions`` were supplied."""
         return self._lor_spacing
+
+    @property
+    def lor_endpoint_positions(self) -> Array:
+        """1-D float32 Array of crystal positions along each polygon side (mm),
+        on the same device as the scanner.
+
+        Anti-symmetric about 0 for standard scanners (uniform or gap layout).
+        """
+        return self._lor_endpoint_positions
 
     @property
     def phis(self) -> Array:
@@ -550,10 +606,12 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             inds = new_side * self._num_lor_endpoints_per_side + new_within
 
         side = inds // self.num_lor_endpoints_per_side
-        tmp = inds - side * self.num_lor_endpoints_per_side
-        tmp = self.xp.astype(tmp, self.xp.float32) - (
-            self.num_lor_endpoints_per_side / 2 - 0.5
-        )
+        within_side = inds - side * self.num_lor_endpoints_per_side
+
+        # Look up the physical position along the side for each endpoint.
+        # For uniform spacing this is lor_spacing*(i - (N-1)/2); for custom
+        # positions it is whatever the user supplied.
+        pos = self.xp.take(self._lor_endpoint_positions, within_side)
 
         phi = self.xp.take(self._phis, side)
 
@@ -564,12 +622,8 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         cosphi = self.xp.cos(phi)
         sinphi = self.xp.sin(phi)
 
-        lor_endpoints[:, self.ax0] = (
-            cosphi * self.radius - sinphi * self.lor_spacing * tmp
-        )
-        lor_endpoints[:, self.ax1] = (
-            sinphi * self.radius + cosphi * self.lor_spacing * tmp
-        )
+        lor_endpoints[:, self.ax0] = cosphi * self.radius - sinphi * pos
+        lor_endpoints[:, self.ax1] = sinphi * self.radius + cosphi * pos
 
         return lor_endpoints
 
@@ -787,13 +841,14 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         dev: str,
         radius: float,
         num_sides: int,
-        num_lor_endpoints_per_side: int,
-        lor_spacing: float,
-        ring_positions: Array,
-        symmetry_axis: int,
+        num_lor_endpoints_per_side: int | None = None,
+        lor_spacing: float | None = None,
+        ring_positions: Array = None,
+        symmetry_axis: int = None,
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
         phi0: float = 0.0,
+        lor_endpoint_positions: np.ndarray | None = None,
     ) -> None:
         """
         Parameters
@@ -806,10 +861,12 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             inner radius of the regular polygon (distance from centre to detector face) in mm
         num_sides : int
             number of sides (faces) of each regular polygon
-        num_lor_endpoints_per_side : int
-            number of LOR endpoints in each side (face) of each polygon
-        lor_spacing : float
-            spacing between the LOR endpoints in each side
+        num_lor_endpoints_per_side : int or None, optional
+            number of LOR endpoints in each side.  Required when
+            ``lor_endpoint_positions`` is not given; ignored otherwise.
+        lor_spacing : float or None, optional
+            uniform spacing between LOR endpoints in mm.  Required when
+            ``lor_endpoint_positions`` is not given; ignored otherwise.
         ring_positions : Array
             1D array with the coordinate of the rings along the ring axis
         symmetry_axis : int
@@ -824,16 +881,37 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             azimuthal offset of side 0 in radians, by default 0.
             Only applied when ``phis`` is ``None``; ignored when ``phis`` is
             provided explicitly.
+        lor_endpoint_positions : np.ndarray or None, optional
+            Custom 1-D array of crystal positions along each polygon side in mm.
+            When given, overrides ``num_lor_endpoints_per_side`` and
+            ``lor_spacing``.  See :class:`RegularPolygonPETScannerModule` for
+            details and anti-symmetry requirements.
         """
 
         self._radius = radius
         self._num_sides = num_sides
-        self._num_lor_endpoints_per_side = num_lor_endpoints_per_side
-        self._lor_spacing = lor_spacing
         self._symmetry_axis = symmetry_axis
         self._ring_positions = ring_positions
         self._ring_endpoint_ordering = ring_endpoint_ordering
         self._phi0 = phi0
+
+        # Resolve positions: custom or uniform
+        if lor_endpoint_positions is not None:
+            _positions = np.asarray(lor_endpoint_positions, dtype=np.float32)
+            self._num_lor_endpoints_per_side = len(_positions)
+            self._lor_spacing = None
+        elif num_lor_endpoints_per_side is not None and lor_spacing is not None:
+            N = num_lor_endpoints_per_side
+            _positions = lor_spacing * (
+                np.arange(N, dtype=np.float32) - (N - 1) / 2.0
+            )
+            self._num_lor_endpoints_per_side = N
+            self._lor_spacing = lor_spacing
+        else:
+            raise ValueError(
+                "Provide either lor_endpoint_positions or both "
+                "num_lor_endpoints_per_side and lor_spacing."
+            )
 
         if symmetry_axis == 0:
             self._ax0 = 2
@@ -859,14 +937,13 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
                     dev,
                     radius,
                     num_sides,
-                    num_lor_endpoints_per_side=num_lor_endpoints_per_side,
-                    lor_spacing=lor_spacing,
                     affine_transformation_matrix=aff_mat,
                     ax0=self._ax0,
                     ax1=self._ax1,
                     phis=phis,
                     ring_endpoint_ordering=ring_endpoint_ordering,
                     phi0=phi0,
+                    lor_endpoint_positions=_positions,
                 )
             )
 
@@ -898,9 +975,16 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         return self._ring_positions.shape[0]
 
     @property
-    def lor_spacing(self) -> float:
-        """the spacing between the LOR endpoints in every side (face) of each polygon"""
+    def lor_spacing(self) -> float | None:
+        """Uniform spacing between LOR endpoints in mm, or ``None`` when
+        custom ``lor_endpoint_positions`` were supplied."""
         return self._lor_spacing
+
+    @property
+    def lor_endpoint_positions(self) -> Array:
+        """1-D float32 Array of crystal positions along each polygon side (mm),
+        on the same device as the scanner."""
+        return self.modules[0].lor_endpoint_positions
 
     @property
     def symmetry_axis(self) -> int:

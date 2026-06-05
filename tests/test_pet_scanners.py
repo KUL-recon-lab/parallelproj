@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+import numpy as np
 import pytest
 import parallelproj.pet_scanners as pps
 import matplotlib.pyplot as plt
@@ -81,6 +83,75 @@ def test_regular_polygon_pet_module(xp: ModuleType, dev: str) -> None:
     aff_mat2[-1, -1] = 1
 
     assert xp.all(mod2.affine_transformation_matrix == aff_mat2)
+
+
+def test_regular_polygon_pet_module_custom_positions(xp: ModuleType, dev: str) -> None:
+    """lor_endpoint_positions overrides uniform spacing and gives same result for uniform case."""
+    radius = 700.0
+    num_sides = 28
+    N = 8
+    d = 4.0
+
+    # anti-symmetric uniform positions — should match the uniform constructor
+    positions = d * (np.arange(N, dtype=np.float32) - (N - 1) / 2.0)
+
+    mod_uniform = pps.RegularPolygonPETScannerModule(
+        xp, dev, radius=radius, num_sides=num_sides,
+        num_lor_endpoints_per_side=N, lor_spacing=d,
+    )
+    mod_custom = pps.RegularPolygonPETScannerModule(
+        xp, dev, radius=radius, num_sides=num_sides,
+        lor_endpoint_positions=positions,
+    )
+
+    # shapes and counts must match
+    assert mod_custom.num_lor_endpoints_per_side == N
+    assert mod_custom.lor_spacing is None
+    assert mod_custom.lor_endpoint_positions.shape == (N,)
+
+    # endpoints must be numerically identical
+    import array_api_compat
+    xp_ = array_api_compat.array_namespace(mod_uniform.get_raw_lor_endpoints())
+    assert bool(xp_.all(xp_.abs(
+        mod_custom.get_raw_lor_endpoints() - mod_uniform.get_raw_lor_endpoints()
+    ) < 1e-4))
+
+    # missing both args raises ValueError
+    with pytest.raises(ValueError):
+        pps.RegularPolygonPETScannerModule(xp, dev, radius=radius, num_sides=num_sides)
+
+    # asymmetric positions raise UserWarning
+    asymmetric = np.array([-3.0, -1.0, 0.5, 2.0], dtype=np.float32)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        pps.RegularPolygonPETScannerModule(
+            xp, dev, radius=radius, num_sides=num_sides,
+            lor_endpoint_positions=asymmetric,
+        )
+        assert len(w) == 1
+        assert issubclass(w[0].category, UserWarning)
+        assert "anti-symmetric" in str(w[0].message)
+
+    # geometry raises ValueError when neither uniform nor custom positions given
+    with pytest.raises(ValueError):
+        pps.RegularPolygonPETScannerGeometry(
+            xp, dev, radius=radius, num_sides=num_sides,
+            ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
+            symmetry_axis=2,
+        )
+
+    # geometry also supports lor_endpoint_positions
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev,
+        radius=radius,
+        num_sides=num_sides,
+        ring_positions=xp.asarray([0.0, 10.0], dtype=xp.float32, device=dev),
+        symmetry_axis=2,
+        lor_endpoint_positions=positions,
+    )
+    assert scanner.num_lor_endpoints_per_side == N
+    assert scanner.lor_spacing is None
+    assert scanner.lor_endpoint_positions.shape == (N,)
 
 
 def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
