@@ -265,10 +265,12 @@ class AdjointLinearOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Output shape of the wrapped operator (adjoint swaps in/out)."""
         return self._operator.out_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Input shape of the wrapped operator (adjoint swaps in/out)."""
         return self._operator.in_shape
 
     @property
@@ -304,10 +306,12 @@ class MatrixOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """``(ncols,)`` — number of columns of the matrix."""
         return (self._A.shape[1],)
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(nrows,)`` — number of rows of the matrix."""
         return (self._A.shape[0],)
 
     @property
@@ -364,10 +368,12 @@ class CompositeLinearOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Input shape of the innermost (last) operator."""
         return self._operators[-1].in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Output shape of the outermost (first) operator."""
         return self._operators[0].out_shape
 
     @property
@@ -534,10 +540,12 @@ class VstackOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Common input shape shared by all stacked operators."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(N,)`` — total size of all operator outputs ravelled and concatenated."""
         return self._out_shape
 
     def _apply(self, x: Array) -> Array:
@@ -842,10 +850,12 @@ class GradientFieldProjectionOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Shape of the gradient field ``(ndim, *spatial_shape)``."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Shape of the gradient field ``(ndim, *spatial_shape)`` (same as ``in_shape``)."""
         return self._out_shape
 
     @property
