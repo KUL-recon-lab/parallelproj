@@ -54,7 +54,7 @@ What this example shows
 ------------------------
 
 * A single-ring 2-D scanner with a uniform circular phantom.
-* **SVRG** (:func:`00_run_mlem_osem_svrg`) with ``num_subsets=28``
+* **SVRG** (:func:`00_run_mlem_osem_svrg`) with ``num_subsets=14``
   subsets run for ``num_epochs=10`` epochs (warm-started by a single
   OSEM epoch), applied independently to the non-TOF and TOF forward
   models.  10 SVRG epochs are sufficient for both to reach their
@@ -112,9 +112,10 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # Key simulation parameters
 # -------------------------
 #
-# ``num_epochs`` controls how many MLEM iterations are stored.  700 is
-# enough for both non-TOF and TOF to be well past their respective
-# convergence knees, so the asymptotic noise levels are clearly visible.
+# ``num_epochs`` controls how many SVRG epochs are run after the OSEM
+# warm start.  10 epochs are enough for both non-TOF and TOF to be well
+# past their respective convergence knees, so the asymptotic noise levels
+# are clearly visible.
 #
 # ``fwhm_tof_mm = 30 mm`` corresponds to a coincidence timing resolution
 # of approximately 200 ps -- representative of state-of-the-art clinical
