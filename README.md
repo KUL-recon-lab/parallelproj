@@ -1,4 +1,4 @@
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/gschramm/parallelproj/master?labpath=examples)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/KUL-recon-lab/parallelproj/main?labpath=examples)
 
 <p align="center">
 <img src="./docs/_static/parallelproj-logo.png" width="350">
