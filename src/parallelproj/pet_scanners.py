@@ -263,8 +263,11 @@ class BlockPETScannerModule(PETScannerModule):
         spacing : tuple[float, float, float]
             spacing between the LOR endpoints in each direction
         affine_transformation_matrix : Array | None, optional
-            4x4 affine transformation matrix applied to the LOR endpoint coordinates, default None
-            if None, the 4x4 identity matrix is used
+            4x4 affine transformation matrix applied eagerly to the LOR endpoint
+            coordinates at construction time.  The transformed positions are
+            stored directly; the matrix itself is not retained, so subsequent
+            calls to :meth:`get_lor_endpoints` apply no further transform.
+            ``None`` (default) leaves the endpoints in their local frame.
         """
 
         self._shape = shape
@@ -787,7 +790,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         dev: str
             device to use for storing the LOR endpoints
         radius : float
-            radius of the scanner
+            inner radius of the regular polygon (distance from centre to detector face) in mm
         num_sides : int
             number of sides (faces) of each regular polygon
         num_lor_endpoints_per_side : int
@@ -863,7 +866,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
 
     @property
     def radius(self) -> float:
-        """radius of the scanner"""
+        """Inner radius of the regular polygon (distance from centre to detector face) in mm."""
         return self._radius
 
     @property
