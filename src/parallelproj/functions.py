@@ -820,6 +820,14 @@ class LogCosh(C2Function):
         equivalent to :math:`\\delta = 1` but skips the division entirely.
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+
+    Notes
+    -----
+    The function value computation uses ``math.prod(x.shape)`` to subtract
+    the normalisation constant :math:`n \\log 2`.  This requires that
+    ``x.shape`` is a concrete tuple of integers at call time, which holds
+    for all supported backends (NumPy, CuPy, PyTorch) but would fail for
+    frameworks with symbolic or lazy shapes.
     """
 
     def __init__(self, delta: float | None = None, beta: float = 1.0):
@@ -885,10 +893,19 @@ class SumC1Function(C1Function):
     two :class:`C1Function` objects, but can also be constructed directly
     to sum more than two terms at once.
 
+    .. note::
+
+        This class inherits a ``beta`` attribute (default ``1.0``) that acts
+        as an **outer** scale factor applied on top of the individual
+        ``beta_k`` of each component.  Setting ``h.beta = c`` evaluates the
+        sum as :math:`c \\sum_k \\beta_k f_k(x)`.  In most cases you should
+        leave ``h.beta = 1.0`` and control scaling through the components.
+
     Parameters
     ----------
     functions : Sequence[C1Function]
-        The functions :math:`f_k` to sum.  Must contain at least one element.
+        The functions :math:`f_k` to sum.  Must contain at least one element;
+        an empty sequence will raise an ``IndexError`` when evaluated.
     """
 
     def __init__(self, functions: Sequence[C1Function]):

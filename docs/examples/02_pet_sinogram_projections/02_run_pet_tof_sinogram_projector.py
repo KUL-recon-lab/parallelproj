@@ -106,7 +106,12 @@ att_sino = xp.exp(-x_att_fwd)
 # Adding time-of-flight to the projector
 # --------------------------------------
 
-proj.tof_parameters = parallelproj.tof.TOFParameters(num_tofbins=9)
+proj.tof_parameters = parallelproj.tof.TOFParameters(
+    num_tofbins=9,
+    tofbin_width=78.0,   # 9 bins x 78 mm covers the ~700 mm scanner diameter
+    sigma_tof=24.4,      # 385 ps FWHM: (385e-3 / 2.355) * (C_MM_PER_NS / 2)
+    num_sigmas=3.0,
+)
 
 # %%
 # Combining resolution model, TOF projector and attenuation model

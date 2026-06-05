@@ -106,7 +106,7 @@ def test_polygon_projector(xp: ModuleType, dev: str) -> None:
     assert xp.all(event_end_coords[2, :] == xend[1, 0, 0, :])
     assert xp.all(event_end_coords[3, :] == xend[0, 1, 1, :])
 
-    tof_params = ppt.TOFParameters(num_tofbins=7, tofbin_width=30.6)
+    tof_params = ppt.TOFParameters(num_tofbins=7, tofbin_width=30.6, sigma_tof=15.0, num_sigmas=3.0)
     proj.tof_parameters = tof_params
     assert proj.out_shape == (
         lor_desc.num_rad,

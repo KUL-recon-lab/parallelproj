@@ -228,7 +228,7 @@ def test_lmprojector(
     assert isclose
 
     # TOF LM tests
-    tof_params = ppt.TOFParameters()
+    tof_params = ppt.TOFParameters(num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0, num_sigmas=3.0)
     with pytest.raises(Exception) as e_info:
         # raises an exception because TOFParameters and event_tofbins are not
         # set
