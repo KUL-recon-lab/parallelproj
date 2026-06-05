@@ -42,7 +42,7 @@ def _last_plane_highest_seg(
 
 
 # %%
-# setup a small regular polygon PET scanner with 5 rings (polygons)
+# setup a small regular polygon PET scanner with 11 rings (polygons)
 
 num_rings = 11
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(

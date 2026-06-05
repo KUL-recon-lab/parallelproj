@@ -201,7 +201,7 @@ class ParallelViewProjector2D(LinearOperator):
         image: None | Array = None,
         **kwargs: Any,
     ) -> Figure:
-        """visualize the geometry of certrain projection views
+        """Visualize the geometry of selected projection views.
 
         Parameters
         ----------
@@ -332,6 +332,8 @@ class ParallelViewProjector3D(LinearOperator):
             Axial positions of the detector rings in world coordinates (mm).
         span : int, optional
             Sinogram span (axial compression factor), default 1.
+            Currently only ``span=1`` is supported; any other value raises
+            ``ValueError``.
         max_ring_diff : int or None, optional
             Maximum ring difference included; ``None`` means no limit (default).
         """
@@ -1037,7 +1039,20 @@ class RegularPolygonPETProjector(LinearOperator):
 
 
 class ListmodePETProjector(LinearOperator):
-    """non-TOF and TOF listmode projector for regular polygon PET scanners"""
+    """Non-TOF and TOF listmode projector for regular-polygon PET scanners.
+
+    To enable TOF mode after construction, set the properties in this order:
+
+    1. ``projector.tof_parameters = TOFParameters(...)`` — sets the TOF kernel
+       and implicitly disables TOF until ``event_tofbins`` is provided.
+    2. ``projector.event_tofbins = <Array>`` — per-event TOF bin indices.
+    3. ``projector.tof = True`` — activates TOF projection.
+
+    Setting ``tof = True`` before both ``tof_parameters`` and
+    ``event_tofbins`` are assigned raises ``ValueError``.  Setting
+    ``event_tofbins = None`` or ``tof_parameters = None`` automatically
+    resets ``tof`` to ``False``.
+    """
 
     def __init__(
         self,
