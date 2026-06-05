@@ -1,3 +1,12 @@
+"""Functions and proximal operators.
+
+Provides a hierarchy of differentiable and non-differentiable scalar functions
+-- including the negative Poisson log-likelihood, quadratic penalties, and the
+mixed L2-L1 norm -- together with their gradients, Hessian-diagonal-vector
+products, and closed-form proximal operators where available.  All classes are
+array-API compatible and work with NumPy, CuPy, and PyTorch.
+"""
+
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -39,7 +48,7 @@ class FunctionWithConjProx(ABC):
 
     @property
     def beta(self) -> float:
-        """Multiplicative scale factor :math:`\\beta`."""
+        """Multiplicative scale factor :math:`\\beta` (should be > 0)."""
         return self._beta
 
     @beta.setter
@@ -120,7 +129,9 @@ class FunctionWithConjProx(ABC):
         .. math::
 
             \\text{prox}_{\\sigma (\\beta f)}(x)
-            = x - \\sigma \\, \\text{prox}_{(\\beta f)^* / \\sigma}(x / \\sigma)
+            = x - \\sigma \\, \\text{prox}_{(1/\\sigma)(\\beta f)^*}(x / \\sigma)
+
+        where the inner prox uses step-size :math:`1/\\sigma`.
 
         Subclasses with a cheaper closed-form direct prox may override this.
 
@@ -166,7 +177,7 @@ class FunctionWithProx(ABC):
 
     @property
     def beta(self) -> float:
-        """Multiplicative scale factor :math:`\\beta`."""
+        """Multiplicative scale factor :math:`\\beta` (should be > 0)."""
         return self._beta
 
     @beta.setter
@@ -247,7 +258,9 @@ class FunctionWithProx(ABC):
         .. math::
 
             \\text{prox}_{\\sigma (\\beta f)^*}(y)
-            = y - \\sigma \\, \\text{prox}_{(\\beta f) / \\sigma}(y / \\sigma)
+            = y - \\sigma \\, \\text{prox}_{(1/\\sigma)(\\beta f)}(y / \\sigma)
+
+        where the inner prox uses step-size :math:`1/\\sigma`.
 
         Subclasses with a cheaper closed-form dual prox may override this.
 
@@ -291,7 +304,7 @@ class C1Function(ABC):
 
     @property
     def beta(self) -> float:
-        """Multiplicative scale factor :math:`\\beta`."""
+        """Multiplicative scale factor :math:`\\beta` (should be > 0)."""
         return self._beta
 
     @beta.setter
@@ -371,7 +384,7 @@ class C1Function(ABC):
         return (v, g) if self._beta == 1.0 else (self._beta * v, self._beta * g)
 
     def __add__(self, other: "C1Function") -> "SumC1Function":
-        """Return a :class:`SumC2Function` or :class:`SumC1Function` for ``self + other``.
+        """Return the sum ``self + other`` as a new function object.
 
         Parameters
         ----------
@@ -380,10 +393,10 @@ class C1Function(ABC):
 
         Returns
         -------
-        SumC2Function
-            If both operands are :class:`C2Function` instances.
         SumC1Function
-            Otherwise.
+            A :class:`SumC2Function` (subclass of :class:`SumC1Function`) when
+            both operands are :class:`C2Function` instances; a plain
+            :class:`SumC1Function` otherwise.
         """
         if isinstance(self, C2Function) and isinstance(other, C2Function):
             return SumC2Function([self, other])
@@ -430,16 +443,14 @@ class C1FunctionWithConjProx(C1Function, FunctionWithConjProx):
     """Abstract base class for C1 functions that also admit a closed-form
     proximal operator of their convex conjugate.
 
-    Combines :class:`C1Function` (gradient, call) with
-    :class:`FunctionWithConjProx` (:meth:`prox_convex_conj`).
+    Use this as the base class when your function is differentiable **and**
+    has a cheap closed-form :math:`\\operatorname{prox}_{\\sigma f^*}`.
     Subclasses must implement :meth:`_call`, :meth:`_gradient`, and
-    :meth:`_prox_convex_conj`.
+    :meth:`_prox_convex_conj`.  The :math:`\\beta` scaling and the public
+    :meth:`prox_convex_conj` wrapper are inherited and require no override.
 
-    MRO: ``C1FunctionWithConjProx -> C1Function -> FunctionWithConjProx -> ABC``
-
-    The ``beta`` property and ``__call__`` are resolved from :class:`C1Function`.
-    The :meth:`prox_convex_conj` public method is resolved from
-    :class:`FunctionWithConjProx`.
+    See :class:`NegPoissonLogL` and :class:`HalfSquaredL2Deviation` for
+    concrete examples.
     """
 
 
@@ -452,8 +463,7 @@ class C2FunctionWithConjProx(C2Function, C1FunctionWithConjProx):
     Subclasses must implement :meth:`_call`, :meth:`_gradient`,
     :meth:`_hessian_diag_vec_prod`, and :meth:`_prox_convex_conj`.
 
-    MRO: ``C2FunctionWithConjProx -> C2Function -> C1FunctionWithConjProx``
-    ``-> C1Function -> FunctionWithConjProx -> ABC``
+    MRO: ``C2FunctionWithConjProx -> C2Function -> C1FunctionWithConjProx -> C1Function -> FunctionWithConjProx -> ABC``
     """
 
 
@@ -472,7 +482,8 @@ class NegPoissonLogL(C2FunctionWithConjProx):
 
         \\nabla_{\\bar{y}} f = 1 - \\frac{y}{\\bar{y}}.
 
-    This class operates directly on the predicted counts :math:`\\bar{y}`,
+    This class operates directly on the predicted counts :math:`\\bar{y}`
+    (passed as the argument ``x`` to the callable interface),
     independently of how they were computed. Use :class:`C2AffineObjective` to
     compose with a forward model :math:`\\bar{y}(x) = A x + s`.
 
@@ -808,6 +819,14 @@ class LogCosh(C2Function):
         equivalent to :math:`\\delta = 1` but skips the division entirely.
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+
+    Notes
+    -----
+    The function value computation uses ``math.prod(x.shape)`` to subtract
+    the normalisation constant :math:`n \\log 2`.  This requires that
+    ``x.shape`` is a concrete tuple of integers at call time, which holds
+    for all supported backends (NumPy, CuPy, PyTorch) but would fail for
+    frameworks with symbolic or lazy shapes.
     """
 
     def __init__(self, delta: float | None = None, beta: float = 1.0):
@@ -873,10 +892,19 @@ class SumC1Function(C1Function):
     two :class:`C1Function` objects, but can also be constructed directly
     to sum more than two terms at once.
 
+    .. note::
+
+        This class inherits a ``beta`` attribute (default ``1.0``) that acts
+        as an **outer** scale factor applied on top of the individual
+        ``beta_k`` of each component.  Setting ``h.beta = c`` evaluates the
+        sum as :math:`c \\sum_k \\beta_k f_k(x)`.  In most cases you should
+        leave ``h.beta = 1.0`` and control scaling through the components.
+
     Parameters
     ----------
     functions : Sequence[C1Function]
-        The functions :math:`f_k` to sum.  Must contain at least one element.
+        The functions :math:`f_k` to sum.  Must contain at least one element;
+        an empty sequence will raise an ``IndexError`` when evaluated.
     """
 
     def __init__(self, functions: Sequence[C1Function]):
@@ -972,10 +1000,19 @@ class NegPoissonLogLListmode(C2Function):
 
     .. note::
 
-        Unlike :class:`NegPoissonLogL`, this class operates directly in
-        **image space** (it takes :math:`x` as input, not the predicted counts
-        :math:`\\bar{y}`).  It therefore cannot be composed with
-        :class:`C2AffineObjective`; the forward model is built in internally.
+        Unlike :class:`NegPoissonLogL`, the forward model
+        :math:`A_{\\text{LM}}` is built into this class rather than being
+        supplied externally.  Wrapping it with :class:`C2AffineObjective`
+        would double-compose the forward model and is therefore not supported.
+
+    .. note::
+
+        Every call to :meth:`__call__`, :meth:`gradient`, or
+        :meth:`hessian_diag_vec_prod` requires that all per-event predicted
+        counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly positive**.
+        A :exc:`ValueError` is raised otherwise, so ensure that
+        ``contamination_list`` is positive whenever the image :math:`x` may
+        have zero-valued voxels.
 
     Parameters
     ----------
@@ -1217,8 +1254,10 @@ class NonNegativeIndicator(FunctionWithProx):
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
         For an indicator function the value is 0 or :math:`+\\infty`
-        regardless of :math:`\\beta > 0`, but :math:`\\beta` affects the
-        effective step size passed to :meth:`prox`.
+        regardless of :math:`\\beta > 0`.  The :meth:`prox` output is also
+        unaffected by :math:`\\beta`, because the projection onto the
+        non-negative orthant (:math:`\\max(x, 0)`) is independent of the
+        step size.
     """
 
     def _call(self, x: Array) -> float:

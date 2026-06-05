@@ -1,4 +1,12 @@
-"""basic linear operators"""
+"""Array-API-compatible linear operator abstractions and concrete implementations.
+
+Provides the :class:`LinearOperator` abstract base class -- with forward and
+adjoint application, norm estimation via power iteration, and an adjointness
+test -- together with concrete operators: dense matrix multiplication,
+element-wise multiplication, Gaussian filtering, forward finite differences,
+operator composition, and vertical stacking.  All implementations dispatch
+correctly across NumPy, CuPy, and PyTorch.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +33,15 @@ from parallelproj import Array
 
 
 class LinearOperator(abc.ABC):
-    """abstract base class for linear operators"""
+    """Abstract base class for array-API-compatible linear operators.
+
+    Subclasses implement :meth:`_apply` (:math:`y = Ax`) and
+    :meth:`_adjoint` (:math:`x = A^H y`).  The public :meth:`apply` and
+    :meth:`adjoint` methods apply an optional scalar :attr:`scale` factor
+    (:math:`\\alpha A` and :math:`\\overline{\\alpha} A^H`).  Utility methods
+    :meth:`adjointness_test` and :meth:`norm` are provided for validation and
+    step-size estimation.
+    """
 
     def __init__(self) -> None:
         self._scale: float | complex = 1.0
@@ -208,15 +224,18 @@ class LinearOperator(abc.ABC):
                 np.random.rand(*self.in_shape), device=dev, dtype=dtype
             )
 
+        # Power iteration: x converges to the dominant eigenvector of A^H A.
+        # After each step x_prev is unit-norm, so ||A^H A x_prev|| = ||A||^2.
+        # norm_squared holds ||x|| = ||A||^2; sqrt gives ||A||.
         for i in range(num_iter):
             x = self.adjoint(self.apply(x))
-            norm_squared = xp.sqrt(xp.sum(xp.abs(x) ** 2))
+            norm_squared = xp.sqrt(xp.sum(xp.abs(x) ** 2))  # = ||A||^2 at convergence
             x /= float(norm_squared)
 
             if verbose:
                 print(f"{(i+1):03} {float(xp.sqrt(norm_squared)):.2E}")
 
-        return float(xp.sqrt(norm_squared))
+        return float(xp.sqrt(norm_squared))  # sqrt(||A||^2) = ||A||
 
     @property
     def H(self) -> AdjointLinearOperator:
@@ -249,15 +268,30 @@ class AdjointLinearOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Output shape of the wrapped operator (adjoint swaps in/out)."""
         return self._operator.out_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Input shape of the wrapped operator (adjoint swaps in/out)."""
         return self._operator.in_shape
 
     @property
     def scale(self) -> float | complex:
-        """conjugate of the wrapped operator's scale"""
+        """Complex conjugate of the wrapped operator's scale.
+
+        Both ``A.H.scale`` and ``A.scale`` read from and write to the same
+        underlying value on the wrapped operator, so they are always
+        consistent:
+
+        - ``A.H.scale`` returns ``conj(A.scale)``
+        - ``A.H.scale = c`` sets ``A.scale = conj(c)``
+        - Setting ``A.scale = c`` is automatically reflected in ``A.H.scale``
+
+        The :meth:`apply` and :meth:`adjoint` methods on ``A.H`` read this
+        property (not the instance variable ``_scale``) so the coupling is
+        always active.
+        """
         return self._operator.scale.conjugate()
 
     @scale.setter
@@ -270,6 +304,42 @@ class AdjointLinearOperator(LinearOperator):
 
     def _adjoint(self, y: Array) -> Array:
         return self._operator._apply(y)
+
+    def apply(self, x: Array) -> Array:
+        """(scaled) forward step :math:`y = \\overline{\\alpha} A^H x`.
+
+        Uses the property :attr:`scale` (= ``conj(A.scale)``) rather than the
+        instance variable so that scale changes on either ``A`` or ``A.H``
+        are always reflected.
+
+        Parameters
+        ----------
+        x : Array
+
+        Returns
+        -------
+        Array
+        """
+        s = self.scale
+        if s == 1.0:
+            return self._apply(x)
+        return s * self._apply(x)
+
+    def adjoint(self, y: Array) -> Array:
+        """(scaled) adjoint step :math:`x = \\alpha A y`.
+
+        Parameters
+        ----------
+        y : Array
+
+        Returns
+        -------
+        Array
+        """
+        s = self.scale.conjugate()
+        if s == 1.0:
+            return self._adjoint(y)
+        return s * self._adjoint(y)
 
 
 class MatrixOperator(LinearOperator):
@@ -288,10 +358,12 @@ class MatrixOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """``(ncols,)`` — number of columns of the matrix."""
         return (self._A.shape[1],)
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(nrows,)`` — number of rows of the matrix."""
         return (self._A.shape[0],)
 
     @property
@@ -348,10 +420,12 @@ class CompositeLinearOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Input shape of the innermost (last) operator."""
         return self._operators[-1].in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Output shape of the outermost (first) operator."""
         return self._operators[0].out_shape
 
     @property
@@ -392,10 +466,12 @@ class ElementwiseMultiplicationOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Shape of the diagonal values array (operator is square)."""
         return self._values.shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Shape of the diagonal values array (operator is square)."""
         return self._values.shape
 
     @property
@@ -426,7 +502,15 @@ class ElementwiseMultiplicationOperator(LinearOperator):
 
 
 class GaussianFilterOperator(LinearOperator):
-    """Gaussian filter operator"""
+    """Isotropic Gaussian smoothing operator (self-adjoint).
+
+    Wraps ``scipy.ndimage.gaussian_filter`` and dispatches via the array API
+    so it works with NumPy, CuPy, and PyTorch CPU arrays.  PyTorch CUDA
+    tensors are round-tripped through CuPy via DLPack.  All keyword arguments
+    accepted by ``scipy.ndimage.gaussian_filter`` (e.g. ``sigma``, ``mode``,
+    ``truncate``) are forwarded through ``**kwargs``.  Because the Gaussian
+    kernel is symmetric, the adjoint equals the forward application.
+    """
 
     def __init__(self, in_shape: tuple[int, ...], **kwargs):
         """init method
@@ -436,7 +520,8 @@ class GaussianFilterOperator(LinearOperator):
         in_shape : tuple[int, ...]
             shape of the input array
         **kwargs : dict
-            passed to scipy.ndimage.gaussian_filter (e.g. ``mode``, ``truncate``)
+            passed to scipy.ndimage.gaussian_filter; most commonly ``sigma``
+            (standard deviation in pixels), plus optional ``mode``, ``truncate``, etc.
         """
         super().__init__()
         self._in_shape = in_shape
@@ -444,10 +529,12 @@ class GaussianFilterOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Shape of the input (and output) array (operator is square)."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Shape of the output (and input) array (operator is square)."""
         return self._in_shape
 
     def _apply(self, x: Array) -> Array:
@@ -478,7 +565,14 @@ class GaussianFilterOperator(LinearOperator):
 
 
 class VstackOperator(LinearOperator):
-    """Stacking operator for stacking multiple linear operators vertically"""
+    """Stack multiple linear operators vertically into a single operator.
+
+    All operators must share the same ``in_shape``.  Each operator's output
+    is ravelled to a 1-D vector before concatenation, so ``out_shape`` is
+    always ``(sum of all output sizes,)`` regardless of the individual output
+    shapes.  The adjoint sums the individual adjoint outputs over all stacked
+    operators.
+    """
 
     def __init__(self, operators: tuple[LinearOperator, ...]) -> None:
         """init method
@@ -510,10 +604,12 @@ class VstackOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Common input shape shared by all stacked operators."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(N,)`` — total size of all operator outputs ravelled and concatenated."""
         return self._out_shape
 
     def _apply(self, x: Array) -> Array:
@@ -581,18 +677,40 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
         return self._operators[i]
 
     def apply(self, x: Array) -> list[Array]:
-        """:math:`(A^0(x), A^1(x), \\ldots, A^{n-1}(x))`"""
+        """Apply each operator independently: :math:`(A^0(x), A^1(x), \\ldots, A^{n-1}(x))`.
 
+        Parameters
+        ----------
+        x : Array
+            Input array of shape ``in_shape``.
+
+        Returns
+        -------
+        list[Array]
+            List of ``n`` output arrays, one per operator.
+        """
         y = [op(x) for op in self]
 
         return y
 
     def __call__(self, x: Array) -> list[Array]:
+        """Alias for :meth:`apply`."""
         return self.apply(x)
 
     def adjoint(self, y: list[Array]) -> Array:
-        """:math:`\\sum_i (A^i)^H y^i` for all :math:`i`"""
+        """Sum of adjoint outputs: :math:`\\sum_i (A^i)^H y^i`.
 
+        Parameters
+        ----------
+        y : list[Array]
+            List of ``n`` arrays, one per operator, each matching the
+            corresponding operator's ``out_shape``.
+
+        Returns
+        -------
+        Array
+            Sum of all adjoint outputs, shape ``in_shape``.
+        """
         result = self._operators[0].adjoint(y[0])
         for i, op in enumerate(self._operators[1:], start=1):
             result = result + op.adjoint(y[i])
@@ -617,9 +735,26 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
 
 
 class FiniteForwardDifference(LinearOperator):
-    """finite difference gradient operator"""
+    """Forward finite-difference gradient operator for 1-D to 4-D images.
+
+    Maps an image of shape ``in_shape`` to a gradient field of shape
+    ``(ndim, *in_shape)`` where axis 0 enumerates the spatial directions.
+    At each boundary the difference wraps to zero: the last difference along
+    each axis is forced to zero in the forward pass (as if the image is padded
+    with a copy of the border value, so the difference there vanishes).  The
+    adjoint is the negative discrete divergence, consistent with the standard
+    TV regularisation convention.  Self-adjointness is verified by
+    :meth:`adjointness_test`.
+    """
 
     def __init__(self, in_shape: tuple[int, ...]) -> None:
+        """
+        Parameters
+        ----------
+        in_shape : tuple[int, ...]
+            Shape of the input image.  Must have 1 to 4 dimensions;
+            raises ``ValueError`` for higher-dimensional inputs.
+        """
         if len(in_shape) > 4:
             raise ValueError("only up to 4 dimensions supported")
 
@@ -750,18 +885,22 @@ class FiniteForwardDifference(LinearOperator):
 
 
 class GradientFieldProjectionOperator(LinearOperator):
-    """Gradient Field Projection Operator
+    """Gradient field projection operator (self-adjoint).
 
-    See Ehrhardt and Betcke: "Multicontrast MRI Reconstruction with Structure-Guided Total Variation"
-    https://doi.org/10.1137/15M1047325
-
-    .. math::
-       P_{\\xi_n}x = x - \\langle \\xi_n, x \\rangle \\xi_n
+    Projects a gradient field onto the subspace orthogonal to a normalised
+    structural prior gradient :math:`\\xi_n`:
 
     .. math::
+       P_{\\xi_n}x = x - \\langle \\xi_n, x \\rangle \\xi_n, \\qquad
        \\xi_n = g_n / \\| g_n \\|_{\\eta}
 
-    for the joint gradient field :math:`g_n`
+    where :math:`g_n` is the joint gradient field and :math:`\\eta` is a
+    smoothing parameter for the pointwise gradient norm.  The operator is
+    self-adjoint (its own adjoint) because orthogonal projection operators
+    are symmetric.
+
+    See Ehrhardt and Betcke, "Multicontrast MRI Reconstruction with
+    Structure-Guided Total Variation" (doi: 10.1137/15M1047325).
     """
 
     def __init__(self, gradient_field: Array, eta: float = 0.0):
@@ -810,10 +949,12 @@ class GradientFieldProjectionOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Shape of the gradient field ``(ndim, *spatial_shape)``."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Shape of the gradient field ``(ndim, *spatial_shape)`` (same as ``in_shape``)."""
         return self._out_shape
 
     @property

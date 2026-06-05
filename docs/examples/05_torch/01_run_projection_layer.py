@@ -55,13 +55,13 @@ class LinearSingleChannelOperator(torch.autograd.Function):
             that can be used to store information for the backward pass
         x : torch.Tensor
             mini batch of 3D images with dimension (batch_size, 1, num_voxels_x, num_voxels_y, num_voxels_z)
-        operator : parallelproj.LinearOperator
+        operator : parallelproj.operators.LinearOperator
             linear operator that can act on a single 3D image
 
         Returns
         -------
         torch.Tensor
-            mini batch of 3D images with dimension (batch_size, opertor.out_shape)
+            mini batch of 3D images with dimension (batch_size, *operator.out_shape)
         """
 
         # https://pytorch.org/docs/stable/notes/extending.html#how-to-use
@@ -89,12 +89,12 @@ class LinearSingleChannelOperator(torch.autograd.Function):
         ctx : context object
             that can be used to obtain information from the forward pass
         grad_output : torch.Tensor
-            mini batch of dimension (batch_size, operator.out_shape)
+            mini batch of dimension (batch_size, *operator.out_shape)
 
         Returns
         -------
         torch.Tensor, None
-            mini batch of 3D images with dimension (batch_size, 1, opertor.in_shape)
+            mini batch of 3D images with dimension (batch_size, 1, *operator.in_shape)
         """
 
         # For details on how to implement the backward pass, see
@@ -147,14 +147,14 @@ class AdjointLinearSingleChannelOperator(torch.autograd.Function):
         ctx : context object
             that can be used to store information for the backward pass
         x : torch.Tensor
-            mini batch of 3D images with dimension (batch_size, 1, operator.out_shape)
-        operator : parallelproj.LinearOperator
+            mini batch of 3D images with dimension (batch_size, *operator.out_shape)
+        operator : parallelproj.operators.LinearOperator
             linear operator that can act on a single 3D image
 
         Returns
         -------
         torch.Tensor
-            mini batch of 3D images with dimension (batch_size, 1, opertor.in_shape)
+            mini batch of 3D images with dimension (batch_size, 1, *operator.in_shape)
         """
 
         ctx.set_materialize_grads(False)
@@ -181,12 +181,12 @@ class AdjointLinearSingleChannelOperator(torch.autograd.Function):
         ctx : context object
             that can be used to obtain information from the forward pass
         grad_output : torch.Tensor
-            mini batch of dimension (batch_size, 1, operator.in_shape)
+            mini batch of dimension (batch_size, 1, *operator.in_shape)
 
         Returns
         -------
         torch.Tensor, None
-            mini batch of 3D images with dimension (batch_size, 1, opertor.out_shape)
+            mini batch of 3D images with dimension (batch_size, *operator.out_shape)
         """
 
         # For details on how to implement the backward pass, see

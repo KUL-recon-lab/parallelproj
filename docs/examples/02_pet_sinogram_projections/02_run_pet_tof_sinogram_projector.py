@@ -27,7 +27,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
-# setup a small regular polygon PET scanner with 5 rings (polygons)
+# setup a small regular polygon PET scanner with 3 rings (polygons)
 
 num_rings = 3
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -52,12 +52,13 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 )
 
 # %%
-# Defining a non-TOF projector
-# ----------------------------
+# Setting up the base projector (non-TOF initially)
+# -------------------------------------------------
 #
-# :class:`.RegularPolygonPETProjector` can be used to define a non-TOF projector
-# that combines the scanner, LOR and image geometry. The latter is defined by
-# the image shape, the voxel size, and the image origin.
+# :class:`.RegularPolygonPETProjector` combines the scanner, LOR and image
+# geometry.  It starts in non-TOF mode; TOF is enabled in the next step by
+# assigning ``tof_parameters``.  The image geometry is defined by the image
+# shape, the voxel size, and the image origin.
 
 # define a first projector using an image with 40x8x40 voxels of size 2x2x2 mm
 # where the image center is at world coordinate (0, 0, 0)
@@ -106,14 +107,19 @@ att_sino = xp.exp(-x_att_fwd)
 # Adding time-of-flight to the projector
 # --------------------------------------
 
-proj.tof_parameters = parallelproj.tof.TOFParameters(num_tofbins=9)
+proj.tof_parameters = parallelproj.tof.TOFParameters(
+    num_tofbins=9,
+    tofbin_width=78.0,  # 9 bins x 78 mm covers the ~700 mm scanner diameter
+    sigma_tof=24.4,  # 385 ps FWHM: (385e-3 / 2.355) * (C_MM_PER_NS / 2)
+    num_sigmas=3.0,
+)
 
 # %%
 # Combining resolution model, TOF projector and attenuation model
 # ---------------------------------------------------------------
 #
-# The attenuation sinogram is non-TOF with shape = (161, 90, 7) while the projector
-# output is a TOF sinogram with shape = (161, 90, 7, num_tofbins).
+# The attenuation sinogram is non-TOF with shape = (159, 90, 7) while the projector
+# output is a TOF sinogram with shape = (159, 90, 7, num_tofbins).
 # We use broadcast_to to add a trailing singleton dimension to att_sino and broadcast
 # it over the TOF-bins axis without copying data (zero-stride view).
 

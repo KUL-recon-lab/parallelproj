@@ -42,7 +42,7 @@ def _last_plane_highest_seg(
 
 
 # %%
-# setup a small regular polygon PET scanner with 5 rings (polygons)
+# setup a small regular polygon PET scanner with 11 rings (polygons)
 
 num_rings = 11
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -63,8 +63,9 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 # :class:`.RegularPolygonPETLORDescriptor` can be used to order all possible
 # combinations of LOR endpoints into a sinogram with a radial, view and plane dimension.
 #
-# `max_ring_difference` defines the maximum ring (polygon) difference between of a valid LOR
-# and `radial_trim` defines the number of radial bins to be trimmed from the sinogram edges.
+# The maximum ring difference (passed via a :class:`.Michelogram`) defines which
+# ring pairs form valid LORs, and `radial_trim` defines the number of radial bins
+# to be trimmed from the sinogram edges.
 #
 # `sinogram_order` of type :class:`.SinogramSpatialAxisOrder` defines the order of the sinogram dimensions
 # (e.g. RVP -> [radial, view, plane], PRV -> [plane, radial, view])
@@ -190,7 +191,8 @@ fig_seg0.show()
 # :class:`.RegularPolygonPETLORDescriptor` supports axial compression via the ``span``
 # parameter.  With ``span=5`` ring pairs whose ring difference falls in the same segment
 # and share the same axial midpoint are merged into a single sinogram plane.
-# Setting ``max_ring_difference=None`` (the default) includes all ring pairs.
+# Passing ``max_ring_difference=scanner.num_rings - 1`` to the :class:`.Michelogram`
+# includes all ring pairs.
 
 span = 5
 

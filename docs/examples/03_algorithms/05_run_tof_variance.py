@@ -23,7 +23,7 @@ localise the annihilation along the LOR to a Gaussian probability kernel:
 where :math:`\\ell` is the distance from the LOR midpoint and
 :math:`\\Delta t_\\text{FWHM}` is the scanner's coincidence timing
 resolution (CTR).  A CTR of 200 ps corresponds to a spatial FWHM of
-≈ 30 mm.
+~ 30 mm.
 
 It is known that TOF reduces the variance in the center of a 2D cylinder
 with diameter :math:`D`, where the SNR gain is approximately
@@ -42,7 +42,7 @@ The convergence-speed trap
 TOF reconstruction also **converges faster** than non-TOF reconstruction.
 This creates a common pitfall: if both reconstructions are stopped at the
 *same* (small) number of epochs, the TOF image may appear *noisier*
-than the non-TOF image — not because TOF is worse, but because TOF has
+than the non-TOF image -- not because TOF is worse, but because TOF has
 already converged past its low-noise plateau while non-TOF is still
 climbing.  Conversely, at very early epochs non-TOF may look
 smoother simply because it has not yet amplified the noise.
@@ -54,20 +54,20 @@ What this example shows
 ------------------------
 
 * A single-ring 2-D scanner with a uniform circular phantom.
-* **SVRG** (:func:`00_run_mlem_osem_svrg`) with ``num_subsets=28``
+* **SVRG** (:func:`00_run_mlem_osem_svrg`) with ``num_subsets=14``
   subsets run for ``num_epochs=10`` epochs (warm-started by a single
   OSEM epoch), applied independently to the non-TOF and TOF forward
   models.  10 SVRG epochs are sufficient for both to reach their
   respective noise plateaux.
 * The standard deviation inside a small (25 mm-radius) central ROI is
-  tracked after every epoch — this is a fast single-realisation proxy
+  tracked after every epoch -- this is a fast single-realisation proxy
   for the true noise level that avoids the need for Monte Carlo repeats.
 * Eight-panel figure:
 
   - **Top-left**: std.dev curves vs. SVRG epoch (epoch 0 = OSEM warm
-    start) — shows faster TOF convergence *and* the lower asymptotic
+    start) -- shows faster TOF convergence *and* the lower asymptotic
     noise level.
-  - **Bottom-left**: ratio non-TOF / TOF std.dev — values > 1 confirm
+  - **Bottom-left**: ratio non-TOF / TOF std.dev -- values > 1 confirm
     that non-TOF is noisier; the ratio stabilises above 1 once both
     algorithms have converged.
   - **2nd column**: smoothed images after the OSEM warm start (epoch 0).
@@ -112,12 +112,13 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # Key simulation parameters
 # -------------------------
 #
-# ``num_epochs`` controls how many MLEM iterations are stored.  700 is
-# enough for both non-TOF and TOF to be well past their respective
-# convergence knees, so the asymptotic noise levels are clearly visible.
+# ``num_epochs`` controls how many SVRG epochs are run after the OSEM
+# warm start.  10 epochs are enough for both non-TOF and TOF to be well
+# past their respective convergence knees, so the asymptotic noise levels
+# are clearly visible.
 #
 # ``fwhm_tof_mm = 30 mm`` corresponds to a coincidence timing resolution
-# of approximately 200 ps — representative of state-of-the-art clinical
+# of approximately 200 ps -- representative of state-of-the-art clinical
 # scanners as of 2025.
 #
 # ``sm_fwhm_mm`` is the FWHM of the Gaussian post-filter applied after
@@ -148,9 +149,9 @@ step_size = 2.0
 # reconstruction is effectively 2-D.  This keeps computation fast and
 # isolates the transaxial TOF effect without axial compression artefacts.
 #
-# The scanner radius of 300 mm and 28 × 16 = 448 detector elements give a
+# The scanner radius of 300 mm and 28 x 16 = 448 detector elements give a
 # realistic clinical-scale geometry.  The single image plane has
-# 151 × 151 × 1 voxels of 2 mm side length, yielding a 302 mm transaxial
+# 151 x 151 x 1 voxels of 2 mm side length, yielding a 302 mm transaxial
 # field of view.
 
 num_rings = 1
@@ -271,7 +272,7 @@ pet_lin_op_non_tof = parallelproj.operators.CompositeLinearOperator(
 # The non-TOF sinogram is obtained by **summing the noisy TOF sinogram over
 # its TOF-bin axis**.  This marginalisation is mathematically equivalent to
 # discarding the timing information in a real scanner, and it ensures that
-# both reconstructions see exactly the same Poisson noise realisation —
+# both reconstructions see exactly the same Poisson noise realisation --
 # they differ only in how much of the timing information they exploit.
 
 noise_free_data_tof = pet_lin_op_tof(x_true)
@@ -304,7 +305,7 @@ contamination_non_tof = xp.sum(contamination_tof, axis=-1)
 # stored image matches the typical clinical workflow.
 #
 # The sinogram views are split into ``num_subsets`` disjoint groups.
-# Non-TOF data and the attenuation sinogram are 3-D (R × V × P); TOF data
+# Non-TOF data and the attenuation sinogram are 3-D (R x V x P); TOF data
 # adds a fourth TOF-bin axis.  We therefore request 3-D slices for
 # attenuation / non-TOF data indexing and 4-D slices for TOF data indexing.
 
@@ -458,8 +459,8 @@ print()
 #   TOF-bin axis (zero-copy via :func:`xp.broadcast_to`).
 # * Data and contamination are sliced with 4-D ``subset_slices_tof``.
 #
-# Because the TOF forward model localises each event to ≈ 30 mm along the
-# LOR rather than the full ≈ 600 mm chord, every gradient step is more
+# Because the TOF forward model localises each event to ~ 30 mm along the
+# LOR rather than the full ~ 600 mm chord, every gradient step is more
 # informative and the algorithm reaches its noise floor in fewer epochs.
 
 proj_tof.clear_cached_lor_endpoints()
@@ -546,7 +547,7 @@ print()
 #
 # 1. **Faster convergence of TOF**: the TOF std.dev curve rises steeply and
 #    then falls to its asymptote in far fewer iterations than non-TOF.
-#    At early iteration counts TOF can therefore appear *noisier* — not
+#    At early iteration counts TOF can therefore appear *noisier* -- not
 #    because TOF is worse, but because it has already amplified noise while
 #    non-TOF is still initialisation-smooth.
 #
@@ -645,7 +646,7 @@ for a in ax[:, 1:].flat:
     a.set_axis_off()
 
 fig.suptitle(
-    f"TOF variance reduction - uniform cylinder Ø {2*cylinder_radius_mm:.0f} mm - 9mm post filter",
+    f"TOF variance reduction - uniform cylinder diameter {2*cylinder_radius_mm:.0f} mm - 9mm post filter",
     fontsize=9,
 )
 fig.show()

@@ -1,3 +1,5 @@
+"""Internal array-API utilities, the Array protocol type, and backend helpers."""
+
 from __future__ import annotations
 
 from types import ModuleType
@@ -133,6 +135,21 @@ class Array(Protocol):
 
 
 def to_numpy_array(x: Array) -> np.ndarray:
+    """Convert any Array-API-compatible array to a NumPy ndarray.
+
+    Handles CuPy, PyTorch (CPU and CUDA), and anything ``np.asarray`` can
+    digest.  For CUDA arrays a device-to-host copy is performed.
+
+    Parameters
+    ----------
+    x : Array
+        Any Array-API-compatible array.
+
+    Returns
+    -------
+    np.ndarray
+        NumPy ndarray with the same data and dtype as *x*.
+    """
     if array_api_compat.is_cupy_array(x):
         cp = array_api_compat.get_namespace(x)
 
@@ -148,7 +165,15 @@ def to_numpy_array(x: Array) -> np.ndarray:
 def empty_cuda_cache(xp: ModuleType) -> None:
     """Empty cached CUDA memory for supported backends.
 
-    For unsupported or non-CUDA namespaces (e.g. NumPy), do nothing.
+    For CuPy, frees all blocks in both the default memory pool and the pinned
+    memory pool.  For PyTorch, calls ``torch.cuda.empty_cache()`` when a CUDA
+    device is available.  For all other namespaces (e.g. NumPy) this is a
+    no-op.
+
+    Parameters
+    ----------
+    xp : ModuleType
+        Array namespace as returned by ``array_api_compat.get_namespace()``.
     """
     if array_api_compat.is_cupy_namespace(xp):
         xp.get_default_memory_pool().free_all_blocks()
@@ -160,7 +185,25 @@ def empty_cuda_cache(xp: ModuleType) -> None:
 
 
 def count_event_multiplicity(events: Array) -> Array:
-    """Count the multiplicity of each event row."""
+    """Count how many times each row appears in a 2-D event array.
+
+    Parameters
+    ----------
+    events : Array
+        2-D integer array of shape ``(N, M)`` where each row represents one
+        event and the columns are event attributes (e.g. crystal indices).
+
+    Returns
+    -------
+    Array
+        1-D integer array of length ``N``.  Element ``i`` is the number of
+        rows in *events* that are identical to row ``i``.
+
+    Raises
+    ------
+    ValueError
+        If *events* is not a 2-D array.
+    """
     xp = array_api_compat.get_namespace(events)
 
     if events.ndim != 2:

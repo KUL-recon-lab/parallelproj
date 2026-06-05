@@ -279,7 +279,7 @@ def draw_michelogram(
         f"Michelogram  (B={B}, {num_blocks} blocks, "
         + r"$|\Delta|\leq$"
         + f"{max_ring_diff})\n"
-        + f"{n_classes} equivalence classes  —  red = selected class"
+        + f"{n_classes} equivalence classes  --  red = selected class"
     )
 
 
@@ -390,7 +390,7 @@ print(f"Highlighted plane : ({r1_sel}, {r2_sel})")
 # becomes one *equivalence class* identified by an integer index.
 #
 # * ``plane_to_class`` maps every ``(r1, r2)`` pair to its class index.
-# * ``class_to_planes`` is the reverse: class index → list of member planes.
+# * ``class_to_planes`` is the reverse: class index -> list of member planes.
 # * ``num_classes`` is the total number of distinct classes.
 #
 # Only one representative sinogram plane per class needs to be forward-projected
@@ -427,7 +427,7 @@ print(
 # ``|r1 - r2| <= max_ring_diff`` are masked (shown in light grey).
 #
 # Each colour corresponds to one equivalence class.  Cells sharing a colour
-# carry the same expected count for any cylindrically-symmetric object — only
+# carry the same expected count for any cylindrically-symmetric object -- only
 # one of them needs to be computed.  Thin black lines mark the boundaries
 # between axial detector blocks.
 #
@@ -477,7 +477,7 @@ fig_mich.show()
 #    The annotation box shows the intra-block crystal positions
 #    ``k = (r1 % B, r2 % B)`` together with the product of their sensitivity
 #    weights ``epsilon * epsilon``.  This product is the same for every plane
-#    in the class — it is the quantity that the block-shift symmetry preserves.
+#    in the class -- it is the quantity that the block-shift symmetry preserves.
 
 fig_panel, ax_panel = plt.subplots(figsize=(10, 5), tight_layout=True)
 draw_panel(
@@ -584,13 +584,13 @@ print(
 #
 # .. note::
 #
-#    * ``reduction=xp.sum`` (**default**) — accumulates all counts within a
+#    * ``reduction=xp.sum`` (**default**) -- accumulates all counts within a
 #      class into a single bin.  The total count across the whole sinogram is
 #      preserved.  This is the right choice when reducing noisy Monte-Carlo
 #      data before dividing by a forward projection to obtain a per-class
 #      sensitivity estimate.
 #
-#    * ``reduction=xp.mean`` — normalises by class size, so every reduced bin
+#    * ``reduction=xp.mean`` -- normalises by class size, so every reduced bin
 #      holds the *average* count per original bin.  Useful when you want the
 #      result to be directly comparable to a single unreduced bin value.
 #
@@ -613,7 +613,7 @@ plane_class_idx = build_plane_class_indices(
 
 print(f"Sinogram shape before reduction : {tuple(sino.shape)}")
 
-# Apply the three reductions in sequence: view → radial → plane
+# Apply the three reductions in sequence: view -> radial -> plane
 sino_red = reduce_sinogram_by_symmetry_class(
     sino, view_classes, lor_desc.view_axis_num, xp.sum
 )
@@ -628,7 +628,7 @@ print(f"Sinogram shape after  reduction : {tuple(sino_red.shape)}")
 print(f"Total counts before : {float(xp.sum(sino)):.0f}")
 print(
     f"Total counts after  : {float(xp.sum(sino_red)):.0f}"
-    f"  (preserved — xp.sum reduction conserves total)"
+    f"  (preserved -- xp.sum reduction conserves total)"
 )
 
 # %%
@@ -643,7 +643,7 @@ print(
 # symmetry-equivalent LORs carry identical values.
 #
 
-# ── Mean reduction ────────────────────────────────────────────────────────────
+# -- Mean reduction ------------------------------------------------------------
 sino_mean = reduce_sinogram_by_symmetry_class(
     sino, view_classes, lor_desc.view_axis_num, xp.mean
 )
@@ -655,7 +655,7 @@ sino_mean = reduce_sinogram_by_symmetry_class(
 )
 print(f"Reduced (mean) shape : {tuple(sino_mean.shape)}")
 
-# ── Expand back to full sinogram shape ────────────────────────────────────────
+# -- Expand back to full sinogram shape ----------------------------------------
 sino_expanded = expand_sinogram_by_symmetry_class(
     sino_mean, plane_class_idx, lor_desc.num_planes, lor_desc.plane_axis_num
 )
@@ -667,7 +667,7 @@ sino_expanded = expand_sinogram_by_symmetry_class(
 )
 print(f"Expanded shape       : {tuple(sino_expanded.shape)}  (== original)")
 
-# ── Verify: all bins in the same class carry the same value ───────────────────
+# -- Verify: all bins in the same class carry the same value -------------------
 
 sample_class_view = view_classes[3]  # e.g. class 3 of the view axis
 sample_class_rad = rad_classes[0]  # outermost radial pair
@@ -680,12 +680,12 @@ r_idx, v_idx, p_idx = 0, 0, 0  # fix one radial and plane bin
 
 vals_view = sino_expanded[r_idx, sample_class_view, p_idx]
 print("")
-print(f"View class 3 — values at (rad={r_idx}, plane={p_idx})     : " f"{vals_view}")
+print(f"View class 3 -- values at (rad={r_idx}, plane={p_idx})     : " f"{vals_view}")
 
 vals_rad = sino_expanded[sample_class_rad, v_idx, p_idx]
-print(f"Radial class 0   — values at (view={v_idx}, plane={p_idx}): " f"{vals_rad}")
+print(f"Radial class 0   -- values at (view={v_idx}, plane={p_idx}): " f"{vals_rad}")
 
 
 vals_planes = sino_expanded[r_idx, v_idx, sample_class_planes]
 
-print(f"Plane class 4  — values at (rad={r_idx}, view={v_idx})    : " f"{vals_planes}")
+print(f"Plane class 4  -- values at (rad={r_idx}, view={v_idx})    : " f"{vals_planes}")

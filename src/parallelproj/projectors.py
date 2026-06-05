@@ -1,4 +1,10 @@
-"""high-level geometrical forward and back projectors"""
+"""Forward and back projectors for PET sinograms, histograms and listmode.
+
+Array-API-compatible :class:`~parallelproj.operators.LinearOperator` subclasses
+that call the compiled ``parallelproj_core`` backend for Joseph-based ray
+tracing.  Covers 2-D parallel-view projection, regular-polygon PET in sinogram
+and listmode mode (non-TOF and TOF), and equal-block PET geometries.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +23,7 @@ import parallelproj_core
 
 from ._backend import Array, to_numpy_array, empty_cuda_cache
 from .operators import LinearOperator
-from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
+from .pet_lors import Michelogram, RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
 
 
@@ -33,22 +39,29 @@ class ParallelViewProjector2D(LinearOperator):
         image_origin: tuple[float, float],
         voxel_size: tuple[float, float],
     ) -> None:
-        """init method
+        """Set up a 2D parallel-beam projector using Joseph's ray-tracing method.
+
+        LOR start and end points are computed from the scanner radius and the
+        supplied radial positions and view angles.  The image is treated as a
+        2D slice; internally a unit axial dimension is prepended so the 3D
+        ``parallelproj_core`` kernels can be used directly.
 
         Parameters
         ----------
         image_shape : tuple[int, int]
-            shape of the input image (n1, n2)
+            Shape of the 2D input image ``(n1, n2)``.
         radial_positions : Array
-            radial positions of the projection views in world coordinates
+            Radial positions of the detector bins in world coordinates (mm).
         view_angles : Array
-            angles of the projection views in radians
+            View angles in radians, one per projection view.
         radius : float
-            radius of the scanner
+            Scanner radius in mm (distance from centre to detector).
         image_origin : tuple[float, float]
-            world coordinates of the [0,0] voxel
+            World coordinates of the ``[0, 0]`` voxel centre in mm ``(o1, o2)``.
+            Internally promoted to ``(0, o1, o2)`` so the 3D backend can be used.
         voxel_size : tuple[float, float]
-            the voxel size in both directions
+            Voxel size ``(d1, d2)`` in mm.
+            Internally promoted to ``(1, d1, d2)`` with a unit axial dimension.
         """
         super().__init__()
         self._xp = array_api_compat.get_namespace(radial_positions)
@@ -107,10 +120,12 @@ class ParallelViewProjector2D(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Image shape ``(n1, n2)``."""
         return self._image_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Projection shape ``(num_rad, num_views)``."""
         return (self._num_rad, self._num_views)
 
     @property
@@ -135,7 +150,12 @@ class ParallelViewProjector2D(LinearOperator):
 
     @property
     def image_origin(self) -> Array:
-        """image origin - world coordinates of the [0,0] voxel"""
+        """World coordinates of the ``[0, 0]`` voxel, shape ``(3,)``.
+
+        The first element is always ``0`` (the prepended axial dimension used
+        internally by the 3D backend); elements 1 and 2 correspond to the
+        ``image_origin`` passed at construction.
+        """
         return self._image_origin
 
     @property
@@ -145,7 +165,12 @@ class ParallelViewProjector2D(LinearOperator):
 
     @property
     def voxel_size(self) -> Array:
-        """voxel size"""
+        """Voxel size, shape ``(3,)``.
+
+        The first element is always ``1`` (the unit axial dimension used
+        internally by the 3D backend); elements 1 and 2 correspond to the
+        ``voxel_size`` passed at construction.
+        """
         return self._voxel_size
 
     @property
@@ -186,7 +211,7 @@ class ParallelViewProjector2D(LinearOperator):
         image: None | Array = None,
         **kwargs: Any,
     ) -> Figure:
-        """visualize the geometry of certrain projection views
+        """Visualize the geometry of selected projection views.
 
         Parameters
         ----------
@@ -279,7 +304,7 @@ class ParallelViewProjector2D(LinearOperator):
 
 
 class ParallelViewProjector3D(LinearOperator):
-    """3D non-TOF parallel view projector"""
+    """3D non-TOF parallel view projector supporting any odd span."""
 
     def __init__(
         self,
@@ -290,37 +315,42 @@ class ParallelViewProjector3D(LinearOperator):
         image_origin: tuple[float, float, float],
         voxel_size: tuple[float, float, float],
         ring_positions: Array,
-        span: int = 1,
-        max_ring_diff: int | None = None,
+        michelogram: Michelogram,
     ) -> None:
-        """init method
+        """Set up a 3D parallel-beam projector using Joseph's ray-tracing method.
+
+        Extends :class:`ParallelViewProjector2D` to 3D by adding axial rings
+        with support for any odd sinogram span via a :class:`.Michelogram`.
+        Each sinogram plane's axial LOR position is determined by the
+        average z-coordinate of the ring pairs contributing to that plane
+        (exact for span=1; the standard averaged-LOR approximation for span>1).
 
         Parameters
         ----------
         image_shape : tuple[int, int, int]
-            shape of the input image (n0, n1, n2) (last direction is axial)
+            Shape of the 3D input image ``(n0, n1, n2)`` where ``n2`` is axial.
         radial_positions : Array
-            radial positions of the projection views in world coordinates
+            Radial positions of the detector bins in world coordinates (mm).
         view_angles : Array
-            angles of the projection views in radians
+            View angles in radians, one per projection view.
         radius : float
-            radius of the scanner
+            Scanner radius in mm.
         image_origin : tuple[float, float, float]
-            world coordinates of the [0,0,0] voxel
+            World coordinates of the ``[0, 0, 0]`` voxel centre in mm.
         voxel_size : tuple[float, float, float]
-            the voxel size in all three directions (n0, n1, axial)
+            Voxel size ``(d0, d1, d_axial)`` in mm.
         ring_positions : Array
-            position of the rings in world coordinates
-        span : int
-            span of the sinogram - default is 1
-        max_ring_diff : int | None
-            maximum ring difference - default is None (no limit)
+            Axial positions of the detector rings in world coordinates (mm).
+            Must have length equal to ``michelogram.num_rings``.
+        michelogram : Michelogram
+            Axial plane layout encoding the span, max ring difference, and
+            ring-pair grouping.  Use :class:`.Michelogram` with ``span=1``
+            for uncompressed data or any odd ``span`` for compressed data.
         """
 
         super().__init__()
 
         self._xp = array_api_compat.get_namespace(radial_positions)
-
         self._radial_positions = radial_positions
         self._device = array_api_compat.device(radial_positions)
 
@@ -334,10 +364,16 @@ class ParallelViewProjector3D(LinearOperator):
 
         self._view_angles = view_angles
         self._num_views = self._view_angles.shape[0]
-
         self._num_rad = radial_positions.shape[0]
-
         self._radius = radius
+
+        num_rings = ring_positions.shape[0]
+        if michelogram.num_rings != num_rings:
+            raise ValueError(
+                f"michelogram.num_rings ({michelogram.num_rings}) must match "
+                f"len(ring_positions) ({num_rings})"
+            )
+        self._michelogram = michelogram
 
         xstart2d = array_api_compat.to_device(
             self.xp.zeros((self._num_rad, self._num_views, 2), dtype=self.xp.float32),
@@ -368,42 +404,9 @@ class ParallelViewProjector3D(LinearOperator):
                 - self._xp.cos(phi) * self._radius
             )
 
-        self._ring_positions = ring_positions
-        self._num_rings = ring_positions.shape[0]
-        self._span = span
-
-        if max_ring_diff is None:
-            self._max_ring_diff = self._num_rings - 1
-        else:
-            self._max_ring_diff = max_ring_diff
-
-        if self._span == 1:
-            self._num_segments = 2 * self._max_ring_diff + 1
-            self._segment_numbers = np.zeros(self._num_segments, dtype=np.int32)
-            self._segment_numbers[0::2] = np.arange(self._max_ring_diff + 1)
-            self._segment_numbers[1::2] = -np.arange(1, self._max_ring_diff + 1)
-
-            self._num_planes_per_segment = self._num_rings - np.abs(
-                self._segment_numbers
-            )
-
-            self._start_plane_number = []
-            self._end_plane_number = []
-
-            for i, seg_number in enumerate(self._segment_numbers):
-                tmp = np.arange(self._num_planes_per_segment[i])
-
-                if seg_number < 0:
-                    tmp -= seg_number
-
-                self._start_plane_number.append(tmp)
-                self._end_plane_number.append(tmp + seg_number)
-
-            self._start_plane_number = np.concatenate(self._start_plane_number)
-            self._end_plane_number = np.concatenate(self._end_plane_number)
-            self._num_planes = self._start_plane_number.shape[0]
-        else:
-            raise ValueError("span > 1 not implemented yet")
+        # Average z-coordinate per plane (exact for span=1, averaged-LOR for span>1)
+        start_z, end_z = michelogram.average_z_per_plane(to_numpy_array(ring_positions))
+        self._num_planes = michelogram.num_planes
 
         self._xstart = array_api_compat.to_device(
             self._xp.zeros(
@@ -423,14 +426,18 @@ class ParallelViewProjector3D(LinearOperator):
         for i in range(self._num_planes):
             self._xstart[:, :, i, :2] = xstart2d
             self._xend[:, :, i, :2] = xend2d
+            self._xstart[:, :, i, 2] = float(start_z[i])
+            self._xend[:, :, i, 2] = float(end_z[i])
 
-            self._xstart[:, :, i, 2] = self._ring_positions[self._start_plane_number[i]]
-            self._xend[:, :, i, 2] = self._ring_positions[self._end_plane_number[i]]
+    @property
+    def michelogram(self) -> Michelogram:
+        """the Michelogram defining the axial plane layout"""
+        return self._michelogram
 
     @property
     def max_ring_diff(self) -> int:
         """maximum ring difference"""
-        return self._max_ring_diff
+        return self._michelogram.max_ring_difference
 
     @property
     def xp(self) -> ModuleType:
@@ -439,10 +446,12 @@ class ParallelViewProjector3D(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)`` where ``n2`` is axial."""
         return self._image_shape
 
     @property
     def out_shape(self) -> tuple[int, int, int]:
+        """Sinogram shape ``(num_rad, num_views, num_planes)``."""
         return (self._num_rad, self._num_views, self._num_planes)
 
     @property
@@ -565,6 +574,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)``."""
         return self._img_shape
 
     def _compute_out_shape(self) -> tuple[int, ...]:
@@ -578,6 +588,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Sinogram shape respecting ``sinogram_order``, optionally with a trailing TOF axis."""
         return self._out_shape
 
     @property
@@ -587,18 +598,27 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def tof(self) -> bool:
-        """bool indicating whether to use TOF or not"""
+        """Enable or disable TOF mode.
+
+        Setting to ``True`` requires ``tof_parameters`` to be set first;
+        raises ``ValueError`` otherwise.  Setting to ``False`` always
+        succeeds and is a no-op when TOF is already disabled.
+        """
         return self._tof
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        if self.tof_parameters is None:
+        if value and self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
         self._tof = value
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
-        """TOF parameters"""
+        """TOF kernel parameters, or ``None`` for non-TOF mode.
+
+        Assigning a :class:`.TOFParameters` instance automatically enables TOF
+        and recomputes ``out_shape``.  Assigning ``None`` disables TOF.
+        """
         return self._tof_parameters
 
     @tof_parameters.setter
@@ -626,7 +646,11 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def views(self) -> Array:
-        """view numbers to be projected"""
+        """View indices to project.
+
+        Assigning a new array recomputes ``out_shape`` and clears any cached
+        LOR endpoint arrays.
+        """
         return self._views
 
     @views.setter
@@ -682,7 +706,7 @@ class RegularPolygonPETProjector(LinearOperator):
         return st
 
     def _apply(self, x: Array) -> Array:
-        """nonTOF forward projection of input image x including image based resolution model"""
+        """Forward projection of input image x (non-TOF and TOF), including image-based resolution model."""
 
         dev = array_api_compat.device(x)
 
@@ -735,7 +759,7 @@ class RegularPolygonPETProjector(LinearOperator):
         return x_fwd
 
     def _adjoint(self, y: Array) -> Array:
-        """nonTOF back projection of sinogram y"""
+        """Back projection of sinogram y (non-TOF and TOF)."""
         dev = array_api_compat.device(y)
 
         # calculate LOR endpoints if not done yet
@@ -974,8 +998,8 @@ class RegularPolygonPETProjector(LinearOperator):
         Returns
         -------
         tuple[Array, Array, Array | None]
-            event_start_coordinates, event_end_coordinates, event_tofbin
-            in case of non-TOF, event_tofbin is None
+            event_start_coordinates, event_end_coordinates, event_tofbins
+            in case of non-TOF, event_tofbins is None
         """
         events = self.convert_sinogram_to_crystal_index_events(
             sinogram, shuffle=shuffle
@@ -1001,7 +1025,20 @@ class RegularPolygonPETProjector(LinearOperator):
 
 
 class ListmodePETProjector(LinearOperator):
-    """non-TOF and TOF listmode projector for regular polygon PET scanners"""
+    """Non-TOF and TOF listmode projector for regular-polygon PET scanners.
+
+    To enable TOF mode after construction, set the properties in this order:
+
+    1. ``projector.tof_parameters = TOFParameters(...)`` — sets the TOF kernel
+       parameters (TOF remains disabled until step 3).
+    2. ``projector.event_tofbins = <Array>`` — per-event TOF bin indices.
+    3. ``projector.tof = True`` — activates TOF projection.
+
+    Setting ``tof = True`` before both ``tof_parameters`` and
+    ``event_tofbins`` are assigned raises ``ValueError``.  Setting
+    ``event_tofbins = None`` or ``tof_parameters = None`` automatically
+    resets ``tof`` to ``False``.
+    """
 
     def __init__(
         self,
@@ -1062,10 +1099,12 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)``."""
         return self._img_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(num_events,)`` — one value per detected event."""
         return (self._xstart.shape[0],)
 
     @property
@@ -1080,7 +1119,12 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def tof(self) -> bool:
-        """bool indicating whether to use TOF projections or not"""
+        """Enable or disable TOF mode.
+
+        Must set ``tof_parameters`` and ``event_tofbins`` before setting to
+        ``True``; raises ``ValueError`` otherwise.  Setting ``event_tofbins``
+        to ``None`` automatically disables TOF.
+        """
         return self._tof
 
     @tof.setter
@@ -1094,7 +1138,10 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
-        """TOF parameters"""
+        """TOF kernel parameters, or ``None`` for non-TOF mode.
+
+        Assigning ``None`` disables TOF.
+        """
         return self._tof_parameters
 
     @tof_parameters.setter
@@ -1108,7 +1155,12 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def event_tofbins(self) -> None | Array:
-        """TOF bin of each event"""
+        """Integer TOF bin index for each event, or ``None`` for non-TOF mode.
+
+        Assigning an array enables per-event TOF binning; its length must
+        match ``num_events``.  Assigning ``None`` clears the TOF bins and
+        disables TOF.
+        """
         return self._tofbin
 
     @event_tofbins.setter
@@ -1290,10 +1342,12 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)``."""
         return self._img_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(num_block_pairs, num_lors_per_block_pair)`` for non-TOF, with a trailing ``num_tofbins`` axis for TOF."""
         out_shape = [
             self._lor_descriptor.num_block_pairs,
             self._lor_descriptor.num_lors_per_block_pair,
@@ -1306,18 +1360,27 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def tof(self) -> bool:
-        """bool indicating whether to use TOF or not"""
+        """Enable or disable TOF mode.
+
+        Setting to ``True`` requires ``tof_parameters`` to be set first;
+        raises ``ValueError`` otherwise.  Setting to ``False`` always
+        succeeds and is a no-op when TOF is already disabled.
+        """
         return self._tof
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        if self.tof_parameters is None:
+        if value and self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
         self._tof = value
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
-        """TOF parameters"""
+        """TOF kernel parameters, or ``None`` for non-TOF mode.
+
+        Assigning a :class:`.TOFParameters` instance automatically enables TOF.
+        Assigning ``None`` disables TOF.
+        """
         return self._tof_parameters
 
     @tof_parameters.setter
@@ -1348,7 +1411,11 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def num_chunks(self) -> int:
-        """number of chunks to split the block pairs into during projection"""
+        """Number of chunks to split block pairs into during projection.
+
+        Increasing this reduces peak GPU memory usage at the cost of more
+        kernel launches.
+        """
         return self._num_chunks
 
     @num_chunks.setter

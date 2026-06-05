@@ -1,4 +1,14 @@
-"""description of PET LORs (and sinograms bins) consisting of two detector endpoints"""
+"""PET line-of-response (LOR) descriptors - definition of PET sinograms / histograms
+
+Defines how detector endpoint pairs map to sinogram bins (plane, view, radial
+bin) through the :class:`Michelogram` axial layout and the
+:class:`RegularPolygonPETLORDescriptor` class.  Also covers sinogram axis
+ordering conventions, zig-zag crystal pairing, and utilities for computing
+LOR start/end coordinates and visualising the scanner geometry.
+Moreover, also implements :class:`EqualBlockPETLORDescriptor` that allows to
+define PET data histograms for scanners consisting of equal Block without cylindrical
+symmetry.
+"""
 
 from __future__ import annotations
 
@@ -53,11 +63,11 @@ class SinogramZigZagOrder(enum.Enum):
 
     ``END_FIRST``
         The *end* detector steps first for each new radial pair.
-        Pairs (start, end) at view 0: (0,n-1), (0,n-2), (1,n-2), (1,n-3), …
+        Pairs (start, end) at view 0: (0,n-1), (0,n-2), (1,n-2), (1,n-3), ...
 
     ``START_FIRST``
         The *start* detector steps first for each new radial pair.
-        Pairs (start, end) at view 0: (0,n-1), (1,n-1), (1,n-2), (2,n-2), …
+        Pairs (start, end) at view 0: (0,n-1), (1,n-1), (1,n-2), (2,n-2), ...
     """
 
     END_FIRST = enum.auto()
@@ -82,7 +92,7 @@ class Michelogram:
     :math:`s + e` (equivalently in z for equispaced rings).
 
     The class knows nothing about ring z-positions, scanner radius, or
-    sinogram axis ordering — it operates on pure integer indices.  Consumers
+    sinogram axis ordering -- it operates on pure integer indices.  Consumers
     (e.g. :class:`RegularPolygonPETLORDescriptor`,
     :class:`SinogramAxialCompressionOperator`) combine it with the geometry-
     and array-API-specific information they need.
@@ -100,7 +110,7 @@ class Michelogram:
         Maximum ring difference :math:`|e - s|` considered (:math:`\\ge 0`).
         Values larger than ``num_rings - 1`` have no extra effect.
     span : int, optional
-        Axial compression factor — must be odd and :math:`\\ge 1`.
+        Axial compression factor -- must be odd and :math:`\\ge 1`.
         Default ``1`` (no compression).
 
     Examples
@@ -163,7 +173,7 @@ class Michelogram:
         D = self._max_ring_difference
 
         # Group every valid ring pair (s, e) by (segment, s + e).  Iteration
-        # order here does not matter — we sort the result.
+        # order here does not matter -- we sort the result.
         plane_groups: dict[tuple[int, int], list[tuple[int, int]]] = {}
         for s in range(R):
             for e in range(R):
@@ -379,7 +389,7 @@ class Michelogram:
         be an integer multiple of ``self.span``.  Because both spans are
         odd by construction, the ratio ``target.span / self.span`` is then
         automatically odd, which guarantees that every ring pair of any
-        input plane shares the same target plane — so the operation is a
+        input plane shares the same target plane -- so the operation is a
         single-valued gather.
 
         The target's ``max_ring_difference`` must be at least
@@ -855,7 +865,24 @@ class PETLORDescriptor(abc.ABC):
 
     @abc.abstractmethod
     def get_lor_coordinates(self) -> tuple[Array, Array]:
-        """return the start and end coordinates of all (or a subset of) LORs"""
+        """Return the start and end world coordinates of all (or a subset of) LORs.
+
+        Subclasses may accept optional keyword arguments to restrict which LORs
+        are returned (e.g. ``views=`` for sinogram descriptors,
+        ``block_pair_nums=`` for block descriptors).  Calling with no arguments
+        always returns all LORs.
+
+        Returns
+        -------
+        xstart : Array
+            Float array of shape ``(..., 3)`` with the world coordinates of the
+            LOR start points.  The leading dimensions depend on the concrete
+            subclass: ``(N, 3)`` for block-based descriptors,
+            ``(*spatial_sinogram_shape, 3)`` for sinogram-based descriptors.
+        xend : Array
+            Float array with the same shape as ``xstart`` containing the LOR
+            end points.
+        """
         raise NotImplementedError
 
     @property
@@ -875,8 +902,21 @@ class PETLORDescriptor(abc.ABC):
 
 
 class EqualBlockPETLORDescriptor(PETLORDescriptor):
-    """LOR descriptor for scanner consisting of block modules where each
-    block module has the same number of LOR endpoints"""
+    """LOR descriptor for scanners whose modules all have the same number of endpoints.
+
+    LORs are defined by pairs of modules (blocks) that are in coincidence.
+    The ``all_block_pairs`` array encodes these pairs as an integer array of
+    shape ``(num_block_pairs, 2)``, where each row ``[i, j]`` means module
+    ``i`` and module ``j`` form a valid coincidence pair.  Every endpoint in
+    block ``i`` is paired with every endpoint in block ``j``, giving
+    ``num_lor_endpoints_per_block ** 2`` LORs per block pair.
+
+    Prefer :class:`RegularPolygonPETLORDescriptor` for cylindrically-symmetric
+    scanners, which exploits the regular-polygon geometry to define sinogram
+    axes (plane, view, radial) directly.  Use this class for scanners with
+    arbitrary or non-cylindrical block arrangements where no such sinogram
+    parameterisation exists.
+    """
 
     def __init__(
         self, scanner: ModularizedPETScannerGeometry, all_block_pairs: Array
@@ -890,10 +930,6 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         all_block_pairs : Array
             An array containing pairs of integer numbers encoding
             which block pairs are in coincidence and form valid LORs.
-
-        Returns
-        -------
-        None
         """
         # check if all modules (blocks) have the same number of LOR enpoints
         lor_endpoints_per_block = [x.num_lor_endpoints for x in scanner.modules]
@@ -1006,8 +1042,8 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         ----------
         ax : plt.Axes
             a 3D matplotlib axes
-        block_pair_nums : int
-            the block pair numbers to show
+        block_pair_nums : Array
+            Integer array of block pair indices to show.
         lw : float, optional
             the line width, by default 0.2
         """
@@ -1044,7 +1080,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         scanner : RegularPolygonPETScannerGeometry
             a regular polygon PET scanner.
         michelogram : Michelogram, optional
-            the axial plane layout — the single source of truth for the
+            the axial plane layout -- the single source of truth for the
             spanning combinatorics (segments, axial midpoints, ring-pair
             grouping, ordering).  If ``None`` (default), a span-1 layout with
             no constraint on the ring difference is used, i.e.
@@ -1188,17 +1224,17 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     @property
     def plane_segment(self) -> Array:
-        """segment number for each plane (equals abs(rd) for span=1)"""
+        """Signed segment number for each plane (equals the ring difference ``rd`` for span=1)."""
         return self._plane_segment
 
     @property
     def start_in_ring_index(self) -> Array:
-        """start index within ring for all views - shape (num_view, num_rad)"""
+        """start index within ring for all views - shape (num_views, num_rad)"""
         return self._start_in_ring_index
 
     @property
     def end_in_ring_index(self) -> Array:
-        """end index within ring for all views - shape (num_view, num_rad)"""
+        """end index within ring for all views - shape (num_views, num_rad)"""
         return self._end_in_ring_index
 
     @property
@@ -1354,8 +1390,12 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         Returns
         -------
-        xstart, xend : Array
-           2 dimensional floating point arrays containing the start and end coordinates of all LORs
+        xstart : Array
+            Float array of shape ``(*spatial_sinogram_shape, 3)`` containing
+            the LOR start coordinates for the selected views.
+        xend : Array
+            Float array of the same shape as ``xstart`` containing the LOR
+            end coordinates.
         """
 
         if views is None:
@@ -1411,18 +1451,18 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def show_views(
         self, ax: Axes, views: Array, planes: Array, lw: float = 0.2, **kwargs
     ) -> None:
-        """show all LORs of a single view in a given plane
+        """Show all LORs for the given views and planes.
 
         Parameters
         ----------
         ax : plt.Axes
-            a 3D matplotlib axes
-        view : int
-            the view number
-        plane : int
-            the plane number
+            A 3D matplotlib axes.
+        views : Array
+            Integer array of view indices to display.
+        planes : Array
+            Integer array of plane indices to display.
         lw : float, optional
-            the line width, by default 0.2
+            Line width, by default 0.2.
         """
 
         xs, xe = self.get_lor_coordinates(views=views)
@@ -1457,9 +1497,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     ) -> None:
         """Visualise the TOF bin grid for the specified sinogram views and plane.
 
-        Each LOR is drawn as a sequence of coloured line segments — one per
-        TOF bin — directly along the LOR ("zebra" style).  Bin colour runs
-        from blue (bin 0, xstart side) to red (bin N−1, xend side) via
+        Each LOR is drawn as a sequence of coloured line segments -- one per
+        TOF bin -- directly along the LOR ("zebra" style).  Bin colour runs
+        from blue (bin 0, xstart side) to red (bin N-1, xend side) via
         ``bin_cmap``.  Bins whose extent falls completely outside the physical
         LOR (i.e. beyond the detector positions) are silently skipped, so
         short edge LORs naturally show fewer coloured segments than central
@@ -1475,9 +1515,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         views : int, array-like, or None
             Sinogram view index / indices to draw.
 
-            * ``int`` — draw only that view.
-            * array-like — draw those specific views.
-            * ``None`` (default) — draw the single middle view
+            * ``int`` -- draw only that view.
+            * array-like -- draw those specific views.
+            * ``None`` (default) -- draw the single middle view
               (``num_views // 2``).
 
         plane : int
@@ -1680,8 +1720,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
     :math:`(\\text{segment}, \\text{axial midpoint})` where
 
     * ``segment`` is determined by the ring difference :math:`rd = e - s` under
-      target span :math:`S`
-      :meth:`RegularPolygonPETLORDescriptor._ring_diff_to_segment`),
+      target span :math:`S` (see :meth:`Michelogram.ring_diff_to_segment`),
     * ``axial midpoint`` is :math:`s + e` (an integer equal to twice the actual
       midpoint).
 
@@ -1699,8 +1738,8 @@ class SinogramAxialCompressionOperator(LinearOperator):
           \\qquad
           \\left(G^T y\\right)_{p_1} \\;=\\; y_{\\,\\tau(p_1)}\\,.
 
-      This is the natural reduction for **counts-like** sinograms — emission
-      data, measured counts, randoms, etc. — which add when ring pairs are
+      This is the natural reduction for **counts-like** sinograms -- emission
+      data, measured counts, randoms, etc. -- which add when ring pairs are
       grouped together.
 
     * ``mode="average"``.  The output plane is the **mean** of the
@@ -1713,9 +1752,9 @@ class SinogramAxialCompressionOperator(LinearOperator):
           \\left(G_{\\rm avg}^T y\\right)_{p_1}
               \\;=\\; \\frac{y_{\\,\\tau(p_1)}}{m_{\\,\\tau(p_1)}}\\,.
 
-      This is the natural reduction for **multiplicative-factor** sinograms —
+      This is the natural reduction for **multiplicative-factor** sinograms --
       attenuation factors, sensitivity / normalisation factors, geometric
-      efficiency — which should *average* rather than *sum* when ring pairs
+      efficiency -- which should *average* rather than *sum* when ring pairs
       are grouped together.
 
     In both expressions, :math:`\\mathcal{G}(n)` is the set of input plane
@@ -1825,6 +1864,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
             michelogram=target_michelogram,
             radial_trim=lor_descriptor.radial_trim,
             sinogram_order=lor_descriptor.sinogram_order,
+            zig_zag_order=lor_descriptor.zig_zag_order,
         )
 
         self._build_index_maps(target_michelogram)
@@ -1842,8 +1882,8 @@ class SinogramAxialCompressionOperator(LinearOperator):
     def _build_index_maps(self, target_michelogram: Michelogram) -> None:
         """Build the gather/scatter index structures from the Michelogram.
 
-        All the combinatorial work — segment assignment, ring-pair grouping,
-        STIR-standard plane ordering, padded index construction — lives on
+        All the combinatorial work -- segment assignment, ring-pair grouping,
+        STIR-standard plane ordering, padded index construction -- lives on
         :class:`Michelogram`.  This method just converts those numpy arrays
         to the descriptor's ``xp`` and ``dev`` and stores them.
 
@@ -1910,10 +1950,12 @@ class SinogramAxialCompressionOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Spatial sinogram shape of the span-1 input, optionally with a trailing TOF axis."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Spatial sinogram shape of the compressed output, optionally with a trailing TOF axis."""
         return self._out_shape
 
     def _apply(self, x: Array) -> Array:
@@ -1956,7 +1998,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
     def _adjoint(self, y: Array) -> Array:
         """Expand the compressed sinogram back along the plane axis.
 
-        For ``mode="sum"``: ``x_{p1} = y_{tau(p1)}`` — each input plane gets
+        For ``mode="sum"``: ``x_{p1} = y_{tau(p1)}`` -- each input plane gets
         the value of its target output plane.
         For ``mode="average"``: the broadcast value is additionally divided
         by the multiplicity of the target output plane.

@@ -18,7 +18,7 @@ Breaking Changes
   (e.g. ``joseph3d_fwd_tof_sino`` → ``joseph3d_tof_sino_fwd``).
 - **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``,
   ``to_numpy_array``, and ``count_event_multiplicity`` are exported from ``parallelproj``
-  directly. All other classes must now be imported from their submodules:
+  directly. Everything else must be imported from the relevant submodule:
 
   .. code-block:: python
 
@@ -35,6 +35,22 @@ Breaking Changes
   parameter replaced by a ``michelogram`` parameter that accepts a ``Michelogram``
   object. See new ``Michelogram`` class below.
 - **``TOFNonTOFElementwiseMultiplicationOperator`` removed**.
+- **``ParallelViewProjector3D`` signature changed**: the ``span`` and
+  ``max_ring_diff`` keyword arguments have been replaced by a single
+  ``michelogram`` parameter (a :class:`~parallelproj.pet_lors.Michelogram`
+  object).  This enables support for any odd span and makes the axial plane
+  layout explicit.  Replace::
+
+     ParallelViewProjector3D(..., span=1, max_ring_diff=d)
+
+  with::
+
+     from parallelproj.pet_lors import Michelogram
+     ParallelViewProjector3D(..., michelogram=Michelogram(num_rings, d, span=1))
+
+- **``TOFParameters`` defaults removed**: ``num_tofbins``, ``tofbin_width``,
+  and ``sigma_tof`` are now required arguments (no defaults).  ``num_sigmas``
+  defaults to ``3.0`` and ``tofcenter_offset`` defaults to ``0``.
 - **``MatrixOperator.iscomplex`` and ``ElementwiseMultiplicationOperator.iscomplex``
   changed from method to property**: replace ``op.iscomplex()`` calls with
   ``op.iscomplex``.
@@ -80,6 +96,33 @@ New Features
   parameter to randomly permute the returned event list.
 - **``VstackOperator``** now raises ``ValueError`` on inconsistent ``in_shape`` across
   stacked operators (previously silent).
+- **``parallelproj.sinogram_symmetries`` submodule**: new module for exploiting
+  the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
+  sensitivity calculations. Provides:
+
+  - ``compute_sinogram_plane_symmetries`` -- partition all axial ring pairs into
+    equivalence classes under axial block-shift, midplane reflection, and endpoint-swap
+    symmetries (with optional edge-ring correction)
+  - ``build_plane_class_indices``, ``build_view_class_indices``,
+    ``build_radial_class_indices`` -- per-class index arrays for the three sinogram axes
+  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` --
+    array-API-compatible reduce/expand operations for the typical
+    reduce -> compute -> expand sensitivity workflow
+
+- **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
+  data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
+  Provides:
+
+  - ``regular_polygon_events_to_sinogram`` -- histogram per-event crystal and ring
+    indices into a non-TOF or TOF sinogram array; supports numpy, cupy, and torch
+  - ``detection_times_to_tof_bin`` -- convert raw detection-time differences
+    (nanoseconds) to projector-convention unsigned TOF bin indices ready for
+    histogramming
+
+- **``ParallelViewProjector3D`` now supports any odd span**: the projector
+  accepts a :class:`~parallelproj.pet_lors.Michelogram` and uses the
+  averaged-LOR z-position per plane (exact for span=1, standard approximation
+  for span>1), with no loop over ring-pair multiplicities.
 - **``parallelproj.__version__``** is now exposed at the top level.
 
 1.10.2 (Aug 20, 2025)

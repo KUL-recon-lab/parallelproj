@@ -26,8 +26,8 @@ def suggest_array_backend_and_device(
     ``"torch"`` > ``"cupy"`` > ``"numpy"``, paired with a CUDA device when
     one is available and enabled in ``parallelproj_core``.
 
-    To force a specific backend or device — for example to benchmark on CPU
-    or to reproduce a result without a GPU — pass explicit ``backend``
+    To force a specific backend or device -- for example to benchmark on CPU
+    or to reproduce a result without a GPU -- pass explicit ``backend``
     and/or ``dev`` arguments::
 
         # auto-detect (default)
@@ -102,7 +102,7 @@ def suggest_array_backend_and_device(
         if dev is None:
             dev = xp.cuda.Device(0)
         elif isinstance(dev, str):
-            # accept "cuda" → Device(0) or "cuda:N" → Device(N)
+            # accept "cuda" -> Device(0) or "cuda:N" -> Device(N)
             device_id = int(dev.split(":")[-1]) if ":" in dev else 0
             dev = xp.cuda.Device(device_id)
 

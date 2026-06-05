@@ -27,7 +27,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 
 # %%
-# input paraters
+# input parameters
 
 # grid shape of LOR endpoints forming a block module
 block_shape = (3, 2, 2)
@@ -40,8 +40,8 @@ scanner_radius = 10
 # Setup of a modularized PET scanner geometry
 # -------------------------------------------
 #
-# We define 7 block modules arranged in a circle with a radius of 10.
-# The arangement follows a regular polygon with 12 sides, leaving some
+# We define 6 block modules arranged in a circle with a radius of 10.
+# The arrangement follows a regular polygon with 12 sides, leaving some
 # of the sides empty.
 # Note that all block modules must be identical, but can be anywhere in space.
 # The location of a block module can be changed using an affine transformation matrix.
