@@ -164,7 +164,8 @@ def spdhg_update(
     Parameters
     ----------
     x :
-        Current primal variable.  Modified in-place during the primal update.
+        Current primal variable.  A new array is returned for the updated
+        primal variable; the original is not mutated.
     dual_vars :
         List of current dual variables ``y_i``.  In PDHG mode all entries are
         updated in-place; in SPDHG mode only the selected entry is updated.
