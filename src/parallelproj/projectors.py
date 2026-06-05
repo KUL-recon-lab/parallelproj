@@ -998,8 +998,8 @@ class RegularPolygonPETProjector(LinearOperator):
         Returns
         -------
         tuple[Array, Array, Array | None]
-            event_start_coordinates, event_end_coordinates, event_tofbin
-            in case of non-TOF, event_tofbin is None
+            event_start_coordinates, event_end_coordinates, event_tofbins
+            in case of non-TOF, event_tofbins is None
         """
         events = self.convert_sinogram_to_crystal_index_events(
             sinogram, shuffle=shuffle

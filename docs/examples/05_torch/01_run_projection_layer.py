@@ -89,7 +89,7 @@ class LinearSingleChannelOperator(torch.autograd.Function):
         ctx : context object
             that can be used to obtain information from the forward pass
         grad_output : torch.Tensor
-            mini batch of dimension (batch_size, operator.out_shape)
+            mini batch of dimension (batch_size, *operator.out_shape)
 
         Returns
         -------
@@ -181,7 +181,7 @@ class AdjointLinearSingleChannelOperator(torch.autograd.Function):
         ctx : context object
             that can be used to obtain information from the forward pass
         grad_output : torch.Tensor
-            mini batch of dimension (batch_size, 1, operator.in_shape)
+            mini batch of dimension (batch_size, 1, *operator.in_shape)
 
         Returns
         -------
