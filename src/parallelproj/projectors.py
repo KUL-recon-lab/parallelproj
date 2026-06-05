@@ -1020,7 +1020,7 @@ class ListmodePETProjector(LinearOperator):
     To enable TOF mode after construction, set the properties in this order:
 
     1. ``projector.tof_parameters = TOFParameters(...)`` — sets the TOF kernel
-       and implicitly disables TOF until ``event_tofbins`` is provided.
+       parameters (TOF remains disabled until step 3).
     2. ``projector.event_tofbins = <Array>`` — per-event TOF bin indices.
     3. ``projector.tof = True`` — activates TOF projection.
 
