@@ -118,10 +118,12 @@ class ParallelViewProjector2D(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Image shape ``(n1, n2)``."""
         return self._image_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Projection shape ``(num_rad, num_views)``."""
         return (self._num_rad, self._num_views)
 
     @property
@@ -454,10 +456,12 @@ class ParallelViewProjector3D(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)`` where ``n2`` is axial."""
         return self._image_shape
 
     @property
     def out_shape(self) -> tuple[int, int, int]:
+        """Sinogram shape ``(num_rad, num_views, num_planes)``."""
         return (self._num_rad, self._num_views, self._num_planes)
 
     @property
@@ -580,6 +584,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)``."""
         return self._img_shape
 
     def _compute_out_shape(self) -> tuple[int, ...]:
@@ -593,6 +598,7 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Sinogram shape respecting ``sinogram_order``, optionally with a trailing TOF axis."""
         return self._out_shape
 
     @property
@@ -1077,10 +1083,12 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)``."""
         return self._img_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(num_events,)`` — one value per detected event."""
         return (self._xstart.shape[0],)
 
     @property
@@ -1305,10 +1313,12 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, int, int]:
+        """Image shape ``(n0, n1, n2)``."""
         return self._img_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """``(num_block_pairs, num_lors_per_block_pair)`` for non-TOF, with a trailing ``num_tofbins`` axis for TOF."""
         out_shape = [
             self._lor_descriptor.num_block_pairs,
             self._lor_descriptor.num_lors_per_block_pair,
