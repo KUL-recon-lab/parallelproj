@@ -591,14 +591,14 @@ class RegularPolygonPETProjector(LinearOperator):
         """Enable or disable TOF mode.
 
         Setting to ``True`` requires ``tof_parameters`` to be set first;
-        raises ``ValueError`` otherwise.  Setting to ``False`` (or assigning
-        ``None`` to ``tof_parameters``) disables TOF.
+        raises ``ValueError`` otherwise.  Setting to ``False`` always
+        succeeds and is a no-op when TOF is already disabled.
         """
         return self._tof
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        if self.tof_parameters is None:
+        if value and self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
         self._tof = value
 
@@ -1353,14 +1353,14 @@ class EqualBlockPETProjector(LinearOperator):
         """Enable or disable TOF mode.
 
         Setting to ``True`` requires ``tof_parameters`` to be set first;
-        raises ``ValueError`` otherwise.  Assigning ``None`` to
-        ``tof_parameters`` automatically disables TOF.
+        raises ``ValueError`` otherwise.  Setting to ``False`` always
+        succeeds and is a no-op when TOF is already disabled.
         """
         return self._tof
 
     @tof.setter
     def tof(self, value: bool) -> None:
-        if self.tof_parameters is None:
+        if value and self.tof_parameters is None:
             raise ValueError("tof_parameters must not be None")
         self._tof = value
 
