@@ -39,22 +39,27 @@ class ParallelViewProjector2D(LinearOperator):
         image_origin: tuple[float, float],
         voxel_size: tuple[float, float],
     ) -> None:
-        """init method
+        """Set up a 2D parallel-beam projector using Joseph's ray-tracing method.
+
+        LOR start and end points are computed from the scanner radius and the
+        supplied radial positions and view angles.  The image is treated as a
+        2D slice; internally a unit axial dimension is prepended so the 3D
+        ``parallelproj_core`` kernels can be used directly.
 
         Parameters
         ----------
         image_shape : tuple[int, int]
-            shape of the input image (n1, n2)
+            Shape of the 2D input image ``(n1, n2)``.
         radial_positions : Array
-            radial positions of the projection views in world coordinates
+            Radial positions of the detector bins in world coordinates (mm).
         view_angles : Array
-            angles of the projection views in radians
+            View angles in radians, one per projection view.
         radius : float
-            radius of the scanner
+            Scanner radius in mm (distance from centre to detector).
         image_origin : tuple[float, float]
-            world coordinates of the [0,0] voxel
+            World coordinates of the ``[0, 0]`` voxel centre in mm.
         voxel_size : tuple[float, float]
-            the voxel size in both directions
+            Voxel size ``(d1, d2)`` in mm.
         """
         super().__init__()
         self._xp = array_api_compat.get_namespace(radial_positions)
@@ -299,28 +304,32 @@ class ParallelViewProjector3D(LinearOperator):
         span: int = 1,
         max_ring_diff: int | None = None,
     ) -> None:
-        """init method
+        """Set up a 3D parallel-beam projector using Joseph's ray-tracing method.
+
+        Extends :class:`ParallelViewProjector2D` to 3D by adding axial rings.
+        LORs are formed between all combinations of radial/view positions and
+        ring pairs that satisfy the span and ring-difference constraints.
 
         Parameters
         ----------
         image_shape : tuple[int, int, int]
-            shape of the input image (n0, n1, n2) (last direction is axial)
+            Shape of the 3D input image ``(n0, n1, n2)`` where ``n2`` is axial.
         radial_positions : Array
-            radial positions of the projection views in world coordinates
+            Radial positions of the detector bins in world coordinates (mm).
         view_angles : Array
-            angles of the projection views in radians
+            View angles in radians, one per projection view.
         radius : float
-            radius of the scanner
+            Scanner radius in mm.
         image_origin : tuple[float, float, float]
-            world coordinates of the [0,0,0] voxel
+            World coordinates of the ``[0, 0, 0]`` voxel centre in mm.
         voxel_size : tuple[float, float, float]
-            the voxel size in all three directions (n0, n1, axial)
+            Voxel size ``(d0, d1, d_axial)`` in mm.
         ring_positions : Array
-            position of the rings in world coordinates
-        span : int
-            span of the sinogram - default is 1
-        max_ring_diff : int | None
-            maximum ring difference - default is None (no limit)
+            Axial positions of the detector rings in world coordinates (mm).
+        span : int, optional
+            Sinogram span (axial compression factor), default 1.
+        max_ring_diff : int or None, optional
+            Maximum ring difference included; ``None`` means no limit (default).
         """
 
         super().__init__()

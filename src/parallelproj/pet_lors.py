@@ -895,8 +895,21 @@ class PETLORDescriptor(abc.ABC):
 
 
 class EqualBlockPETLORDescriptor(PETLORDescriptor):
-    """LOR descriptor for scanner consisting of block modules where each
-    block module has the same number of LOR endpoints"""
+    """LOR descriptor for scanners whose modules all have the same number of endpoints.
+
+    LORs are defined by pairs of modules (blocks) that are in coincidence.
+    The ``all_block_pairs`` array encodes these pairs as an integer array of
+    shape ``(num_block_pairs, 2)``, where each row ``[i, j]`` means module
+    ``i`` and module ``j`` form a valid coincidence pair.  Every endpoint in
+    block ``i`` is paired with every endpoint in block ``j``, giving
+    ``num_lor_endpoints_per_block ** 2`` LORs per block pair.
+
+    Prefer :class:`RegularPolygonPETLORDescriptor` for cylindrically-symmetric
+    scanners, which exploits the regular-polygon geometry to define sinogram
+    axes (plane, view, radial) directly.  Use this class for scanners with
+    arbitrary or non-cylindrical block arrangements where no such sinogram
+    parameterisation exists.
+    """
 
     def __init__(
         self, scanner: ModularizedPETScannerGeometry, all_block_pairs: Array
@@ -1929,10 +1942,12 @@ class SinogramAxialCompressionOperator(LinearOperator):
 
     @property
     def in_shape(self) -> tuple[int, ...]:
+        """Spatial sinogram shape of the span-1 input, optionally with a trailing TOF axis."""
         return self._in_shape
 
     @property
     def out_shape(self) -> tuple[int, ...]:
+        """Spatial sinogram shape of the compressed output, optionally with a trailing TOF axis."""
         return self._out_shape
 
     def _apply(self, x: Array) -> Array:
