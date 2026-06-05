@@ -150,7 +150,12 @@ class ParallelViewProjector2D(LinearOperator):
 
     @property
     def image_origin(self) -> Array:
-        """image origin - world coordinates of the [0,0] voxel"""
+        """World coordinates of the ``[0, 0]`` voxel, shape ``(3,)``.
+
+        The first element is always ``0`` (the prepended axial dimension used
+        internally by the 3D backend); elements 1 and 2 correspond to the
+        ``image_origin`` passed at construction.
+        """
         return self._image_origin
 
     @property
@@ -160,7 +165,12 @@ class ParallelViewProjector2D(LinearOperator):
 
     @property
     def voxel_size(self) -> Array:
-        """voxel size"""
+        """Voxel size, shape ``(3,)``.
+
+        The first element is always ``1`` (the unit axial dimension used
+        internally by the 3D backend); elements 1 and 2 correspond to the
+        ``voxel_size`` passed at construction.
+        """
         return self._voxel_size
 
     @property

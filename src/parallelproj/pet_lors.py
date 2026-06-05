@@ -1229,12 +1229,12 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     @property
     def start_in_ring_index(self) -> Array:
-        """start index within ring for all views - shape (num_view, num_rad)"""
+        """start index within ring for all views - shape (num_views, num_rad)"""
         return self._start_in_ring_index
 
     @property
     def end_in_ring_index(self) -> Array:
-        """end index within ring for all views - shape (num_view, num_rad)"""
+        """end index within ring for all views - shape (num_views, num_rad)"""
         return self._end_in_ring_index
 
     @property
