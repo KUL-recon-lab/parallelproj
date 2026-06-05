@@ -23,7 +23,7 @@ import parallelproj_core
 
 from ._backend import Array, to_numpy_array, empty_cuda_cache
 from .operators import LinearOperator
-from .pet_lors import RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
+from .pet_lors import Michelogram, RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
 from .tof import TOFParameters
 
 
@@ -294,7 +294,7 @@ class ParallelViewProjector2D(LinearOperator):
 
 
 class ParallelViewProjector3D(LinearOperator):
-    """3D non-TOF parallel view projector"""
+    """3D non-TOF parallel view projector supporting any odd span."""
 
     def __init__(
         self,
@@ -305,14 +305,15 @@ class ParallelViewProjector3D(LinearOperator):
         image_origin: tuple[float, float, float],
         voxel_size: tuple[float, float, float],
         ring_positions: Array,
-        span: int = 1,
-        max_ring_diff: int | None = None,
+        michelogram: Michelogram,
     ) -> None:
         """Set up a 3D parallel-beam projector using Joseph's ray-tracing method.
 
-        Extends :class:`ParallelViewProjector2D` to 3D by adding axial rings.
-        LORs are formed between all combinations of radial/view positions and
-        ring pairs that satisfy the span and ring-difference constraints.
+        Extends :class:`ParallelViewProjector2D` to 3D by adding axial rings
+        with support for any odd sinogram span via a :class:`.Michelogram`.
+        Each sinogram plane's axial LOR position is determined by the
+        average z-coordinate of the ring pairs contributing to that plane
+        (exact for span=1; the standard averaged-LOR approximation for span>1).
 
         Parameters
         ----------
@@ -330,18 +331,16 @@ class ParallelViewProjector3D(LinearOperator):
             Voxel size ``(d0, d1, d_axial)`` in mm.
         ring_positions : Array
             Axial positions of the detector rings in world coordinates (mm).
-        span : int, optional
-            Sinogram span (axial compression factor), default 1.
-            Currently only ``span=1`` is supported; any other value raises
-            ``ValueError``.
-        max_ring_diff : int or None, optional
-            Maximum ring difference included; ``None`` means no limit (default).
+            Must have length equal to ``michelogram.num_rings``.
+        michelogram : Michelogram
+            Axial plane layout encoding the span, max ring difference, and
+            ring-pair grouping.  Use :class:`.Michelogram` with ``span=1``
+            for uncompressed data or any odd ``span`` for compressed data.
         """
 
         super().__init__()
 
         self._xp = array_api_compat.get_namespace(radial_positions)
-
         self._radial_positions = radial_positions
         self._device = array_api_compat.device(radial_positions)
 
@@ -355,10 +354,16 @@ class ParallelViewProjector3D(LinearOperator):
 
         self._view_angles = view_angles
         self._num_views = self._view_angles.shape[0]
-
         self._num_rad = radial_positions.shape[0]
-
         self._radius = radius
+
+        num_rings = ring_positions.shape[0]
+        if michelogram.num_rings != num_rings:
+            raise ValueError(
+                f"michelogram.num_rings ({michelogram.num_rings}) must match "
+                f"len(ring_positions) ({num_rings})"
+            )
+        self._michelogram = michelogram
 
         xstart2d = array_api_compat.to_device(
             self.xp.zeros((self._num_rad, self._num_views, 2), dtype=self.xp.float32),
@@ -389,42 +394,9 @@ class ParallelViewProjector3D(LinearOperator):
                 - self._xp.cos(phi) * self._radius
             )
 
-        self._ring_positions = ring_positions
-        self._num_rings = ring_positions.shape[0]
-        self._span = span
-
-        if max_ring_diff is None:
-            self._max_ring_diff = self._num_rings - 1
-        else:
-            self._max_ring_diff = max_ring_diff
-
-        if self._span == 1:
-            self._num_segments = 2 * self._max_ring_diff + 1
-            self._segment_numbers = np.zeros(self._num_segments, dtype=np.int32)
-            self._segment_numbers[0::2] = np.arange(self._max_ring_diff + 1)
-            self._segment_numbers[1::2] = -np.arange(1, self._max_ring_diff + 1)
-
-            self._num_planes_per_segment = self._num_rings - np.abs(
-                self._segment_numbers
-            )
-
-            self._start_plane_number = []
-            self._end_plane_number = []
-
-            for i, seg_number in enumerate(self._segment_numbers):
-                tmp = np.arange(self._num_planes_per_segment[i])
-
-                if seg_number < 0:
-                    tmp -= seg_number
-
-                self._start_plane_number.append(tmp)
-                self._end_plane_number.append(tmp + seg_number)
-
-            self._start_plane_number = np.concatenate(self._start_plane_number)
-            self._end_plane_number = np.concatenate(self._end_plane_number)
-            self._num_planes = self._start_plane_number.shape[0]
-        else:
-            raise ValueError("span > 1 not implemented yet")
+        # Average z-coordinate per plane (exact for span=1, averaged-LOR for span>1)
+        start_z, end_z = michelogram.average_z_per_plane(to_numpy_array(ring_positions))
+        self._num_planes = michelogram.num_planes
 
         self._xstart = array_api_compat.to_device(
             self._xp.zeros(
@@ -444,14 +416,18 @@ class ParallelViewProjector3D(LinearOperator):
         for i in range(self._num_planes):
             self._xstart[:, :, i, :2] = xstart2d
             self._xend[:, :, i, :2] = xend2d
+            self._xstart[:, :, i, 2] = float(start_z[i])
+            self._xend[:, :, i, 2] = float(end_z[i])
 
-            self._xstart[:, :, i, 2] = self._ring_positions[self._start_plane_number[i]]
-            self._xend[:, :, i, 2] = self._ring_positions[self._end_plane_number[i]]
+    @property
+    def michelogram(self) -> Michelogram:
+        """the Michelogram defining the axial plane layout"""
+        return self._michelogram
 
     @property
     def max_ring_diff(self) -> int:
         """maximum ring difference"""
-        return self._max_ring_diff
+        return self._michelogram.max_ring_difference
 
     @property
     def xp(self) -> ModuleType:

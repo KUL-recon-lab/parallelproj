@@ -8,6 +8,7 @@ import parallelproj.projectors as ppp
 import parallelproj.tof as ppt
 import parallelproj.pet_lors as ppl
 import parallelproj.pet_scanners as pps
+from parallelproj.pet_lors import Michelogram
 
 from .config import pytestmark
 
@@ -74,6 +75,8 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     voxel_size3d = (2.0, 2.0, 2.0)
     ring_positions = xp.asarray([-1, 0, 1.0], dtype=xp.float32, device=dev)
 
+    num_rings = array_api_compat.size(ring_positions)
+
     proj3d = ppp.ParallelViewProjector3D(
         image_shape3d,
         radial_positions,
@@ -82,13 +85,14 @@ def test_parallelviewprojector(xp, dev, verbose=True):
         image_origin3d,
         voxel_size3d,
         ring_positions,
-        max_ring_diff=1,
+        michelogram=Michelogram(num_rings=num_rings, max_ring_difference=1, span=1),
     )
 
     xstart = proj3d.xstart
     xend = proj3d.xend
 
     assert proj3d.image_shape == image_shape3d
+    assert proj3d.michelogram.span == 1
 
     assert proj3d.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
 
@@ -96,7 +100,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     x3d = xp.reshape(xp.arange(8, dtype=xp.float32, device=dev), (2, 2, 2))
     x3d_fwd = proj3d(x3d)
 
-    # check if we get the expected results for the 3 direct planes
+    # check if we get the expected results for the 3 direct planes (segment 0)
     exp_result_dp0 = xp.asarray(
         [[4.0, 16.0], [12.0, 12.0], [20.0, 8.0]], dtype=xp.float32, device=dev
     )
@@ -111,7 +115,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
     assert allclose(x3d_fwd[..., 1], exp_result_dp1)
     assert allclose(x3d_fwd[..., 2], exp_result_dp2)
 
-    # test is max_ring_diff = None works
+    # test max_ring_diff property and all-ring-diff michelogram
     proj3d_2 = ppp.ParallelViewProjector3D(
         image_shape3d,
         radial_positions,
@@ -120,14 +124,32 @@ def test_parallelviewprojector(xp, dev, verbose=True):
         image_origin3d,
         voxel_size3d,
         ring_positions,
-        max_ring_diff=None,
+        michelogram=Michelogram(
+            num_rings=num_rings, max_ring_difference=num_rings - 1, span=1
+        ),
     )
 
-    assert proj3d_2.max_ring_diff == array_api_compat.size(ring_positions) - 1
+    assert proj3d_2.max_ring_diff == num_rings - 1
 
-    # test whether span > 1 raises execption
-    with pytest.raises(Exception) as e_info:
-        proj3d_2 = ppp.ParallelViewProjector3D(
+    # test that span=3 works (adjointness confirms correctness)
+    proj3d_span3 = ppp.ParallelViewProjector3D(
+        image_shape3d,
+        radial_positions,
+        view_angles,
+        radius,
+        image_origin3d,
+        voxel_size3d,
+        ring_positions,
+        michelogram=Michelogram(
+            num_rings=num_rings, max_ring_difference=num_rings - 1, span=3
+        ),
+    )
+
+    assert proj3d_span3.adjointness_test(xp, dev, verbose=verbose, dtype=xp.float32)
+
+    # test that mismatched num_rings raises ValueError
+    with pytest.raises(ValueError):
+        ppp.ParallelViewProjector3D(
             image_shape3d,
             radial_positions,
             view_angles,
@@ -135,8 +157,7 @@ def test_parallelviewprojector(xp, dev, verbose=True):
             image_origin3d,
             voxel_size3d,
             ring_positions,
-            max_ring_diff=None,
-            span=3,
+            michelogram=Michelogram(num_rings=99, max_ring_difference=1, span=1),
         )
 
 
