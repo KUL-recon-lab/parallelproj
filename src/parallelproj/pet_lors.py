@@ -930,10 +930,6 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         all_block_pairs : Array
             An array containing pairs of integer numbers encoding
             which block pairs are in coincidence and form valid LORs.
-
-        Returns
-        -------
-        None
         """
         # check if all modules (blocks) have the same number of LOR enpoints
         lor_endpoints_per_block = [x.num_lor_endpoints for x in scanner.modules]
@@ -1046,8 +1042,8 @@ class EqualBlockPETLORDescriptor(PETLORDescriptor):
         ----------
         ax : plt.Axes
             a 3D matplotlib axes
-        block_pair_nums : int
-            the block pair numbers to show
+        block_pair_nums : Array
+            Integer array of block pair indices to show.
         lw : float, optional
             the line width, by default 0.2
         """
