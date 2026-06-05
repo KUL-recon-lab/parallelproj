@@ -513,7 +513,14 @@ class GaussianFilterOperator(LinearOperator):
 
 
 class VstackOperator(LinearOperator):
-    """Stacking operator for stacking multiple linear operators vertically"""
+    """Stack multiple linear operators vertically into a single operator.
+
+    All operators must share the same ``in_shape``.  Each operator's output
+    is ravelled to a 1-D vector before concatenation, so ``out_shape`` is
+    always ``(sum of all output sizes,)`` regardless of the individual output
+    shapes.  The adjoint sums the individual adjoint outputs over all stacked
+    operators.
+    """
 
     def __init__(self, operators: tuple[LinearOperator, ...]) -> None:
         """init method
@@ -824,18 +831,22 @@ class FiniteForwardDifference(LinearOperator):
 
 
 class GradientFieldProjectionOperator(LinearOperator):
-    """Gradient Field Projection Operator
+    """Gradient field projection operator (self-adjoint).
 
-    See Ehrhardt and Betcke: "Multicontrast MRI Reconstruction with Structure-Guided Total Variation"
-    https://doi.org/10.1137/15M1047325
-
-    .. math::
-       P_{\\xi_n}x = x - \\langle \\xi_n, x \\rangle \\xi_n
+    Projects a gradient field onto the subspace orthogonal to a normalised
+    structural prior gradient :math:`\\xi_n`:
 
     .. math::
+       P_{\\xi_n}x = x - \\langle \\xi_n, x \\rangle \\xi_n, \\qquad
        \\xi_n = g_n / \\| g_n \\|_{\\eta}
 
-    for the joint gradient field :math:`g_n`
+    where :math:`g_n` is the joint gradient field and :math:`\\eta` is a
+    smoothing parameter for the pointwise gradient norm.  The operator is
+    self-adjoint (its own adjoint) because orthogonal projection operators
+    are symmetric.
+
+    See Ehrhardt and Betcke, "Multicontrast MRI Reconstruction with
+    Structure-Guided Total Variation" (doi: 10.1137/15M1047325).
     """
 
     def __init__(self, gradient_field: Array, eta: float = 0.0):

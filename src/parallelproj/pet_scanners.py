@@ -675,12 +675,20 @@ class ModularizedPETScannerGeometry:
 
     @property
     def xp(self) -> ModuleType:
-        """array module to use for storing the LOR endpoints"""
+        """Array module of the first module.
+
+        All modules in the scanner must share the same array namespace;
+        this property returns the namespace of the first one as representative.
+        """
         return self._modules[0].xp
 
     @property
     def dev(self) -> str:
-        """device to use for storing the LOR endpoints"""
+        """Device of the first module.
+
+        All modules in the scanner must reside on the same device;
+        this property returns the device of the first one as representative.
+        """
         return self._modules[0].dev
 
     def linear_lor_endpoint_index(
@@ -906,7 +914,12 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
 
     @property
     def all_lor_endpoints_ring_number(self) -> Array:
-        """the ring (regular polygon) number of all LOR endpoints"""
+        """Ring (axial module) index for every LOR endpoint.
+
+        For a regular-polygon scanner each axial ring is one module, so this
+        is an alias for ``all_lor_endpoints_module_number``.  Values range
+        from ``0`` to ``num_rings - 1``.
+        """
         return self._all_lor_endpoints_module_number
 
     @property
