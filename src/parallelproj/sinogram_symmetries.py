@@ -395,8 +395,8 @@ def build_bin_to_class(
     For each bin ``i`` in ``[0, num_bins)``, ``bin_to_class[i]`` is the index
     of the equivalence class that contains ``i``.
 
-    This is the companion of :func:`reduce_sinogram_by_symmetry_class` and is
-    used internally by :func:`expand_sinogram_by_symmetry_class`.
+    This is used internally by :func:`expand_sinogram_by_symmetry_class` to
+    build the index array needed to broadcast class values back to all bins.
 
     Parameters
     ----------
