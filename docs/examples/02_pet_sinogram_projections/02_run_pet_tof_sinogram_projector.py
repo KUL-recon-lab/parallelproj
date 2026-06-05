@@ -118,8 +118,8 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(
 # Combining resolution model, TOF projector and attenuation model
 # ---------------------------------------------------------------
 #
-# The attenuation sinogram is non-TOF with shape = (161, 90, 7) while the projector
-# output is a TOF sinogram with shape = (161, 90, 7, num_tofbins).
+# The attenuation sinogram is non-TOF with shape = (159, 90, 7) while the projector
+# output is a TOF sinogram with shape = (159, 90, 7, num_tofbins).
 # We use broadcast_to to add a trailing singleton dimension to att_sino and broadcast
 # it over the TOF-bins axis without copying data (zero-stride view).
 
