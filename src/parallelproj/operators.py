@@ -277,9 +277,17 @@ class AdjointLinearOperator(LinearOperator):
     def scale(self) -> float | complex:
         """Complex conjugate of the wrapped operator's scale.
 
-        The scale is **bidirectionally coupled**: setting ``A.H.scale = c``
-        also sets ``A.scale = conj(c)``, and vice versa, because both objects
-        share the same underlying scale via the wrapped operator.
+        Both ``A.H.scale`` and ``A.scale`` read from and write to the same
+        underlying value on the wrapped operator, so they are always
+        consistent:
+
+        - ``A.H.scale`` returns ``conj(A.scale)``
+        - ``A.H.scale = c`` sets ``A.scale = conj(c)``
+        - Setting ``A.scale = c`` is automatically reflected in ``A.H.scale``
+
+        The :meth:`apply` and :meth:`adjoint` methods on ``A.H`` read this
+        property (not the instance variable ``_scale``) so the coupling is
+        always active.
         """
         return self._operator.scale.conjugate()
 
@@ -293,6 +301,42 @@ class AdjointLinearOperator(LinearOperator):
 
     def _adjoint(self, y: Array) -> Array:
         return self._operator._apply(y)
+
+    def apply(self, x: Array) -> Array:
+        """(scaled) forward step :math:`y = \\overline{\\alpha} A^H x`.
+
+        Uses the property :attr:`scale` (= ``conj(A.scale)``) rather than the
+        instance variable so that scale changes on either ``A`` or ``A.H``
+        are always reflected.
+
+        Parameters
+        ----------
+        x : Array
+
+        Returns
+        -------
+        Array
+        """
+        s = self.scale
+        if s == 1.0:
+            return self._apply(x)
+        return s * self._apply(x)
+
+    def adjoint(self, y: Array) -> Array:
+        """(scaled) adjoint step :math:`x = \\alpha A y`.
+
+        Parameters
+        ----------
+        y : Array
+
+        Returns
+        -------
+        Array
+        """
+        s = self.scale.conjugate()
+        if s == 1.0:
+            return self._adjoint(y)
+        return s * self._adjoint(y)
 
 
 class MatrixOperator(LinearOperator):

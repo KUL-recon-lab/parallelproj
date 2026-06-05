@@ -77,10 +77,15 @@ def test_adjoint_operator(xp: ModuleType, dev: str):
     # scale propagation: setting A.scale updates A.H.scale to its conjugate
     op.scale = 2.0
     assert op_H.scale == 2.0  # real scale: conjugate of 2.0 is 2.0
+    # apply/adjoint of A.H must reflect the scale, not just the property
+    assert allclose(op_H(y), 2.0 * op.adjoint(y) / op.scale)  # = op.adjoint(y) unscaled * op_H.scale
+    assert allclose(op_H(y), op_H.scale * op_H._apply(y))
 
     # setting A.H.scale propagates back to A as conjugate
     op_H.scale = 3.0
     assert op.scale == 3.0
+    assert allclose(op_H(y), 3.0 * op_H._apply(y))
+    assert allclose(op_H.adjoint(x), 3.0 * op_H._adjoint(x))
 
 
 def test_adjoint_operator_complex_scale(xp: ModuleType, dev: str):
