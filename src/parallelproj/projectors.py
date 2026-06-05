@@ -688,7 +688,7 @@ class RegularPolygonPETProjector(LinearOperator):
         return st
 
     def _apply(self, x: Array) -> Array:
-        """nonTOF forward projection of input image x including image based resolution model"""
+        """Forward projection of input image x (non-TOF and TOF), including image-based resolution model."""
 
         dev = array_api_compat.device(x)
 
@@ -741,7 +741,7 @@ class RegularPolygonPETProjector(LinearOperator):
         return x_fwd
 
     def _adjoint(self, y: Array) -> Array:
-        """nonTOF back projection of sinogram y"""
+        """Back projection of sinogram y (non-TOF and TOF)."""
         dev = array_api_compat.device(y)
 
         # calculate LOR endpoints if not done yet

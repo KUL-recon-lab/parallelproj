@@ -137,7 +137,7 @@ class PETScannerModule(abc.ABC):
         Returns
         -------
         Array
-            a 3 x len(inds) float array with the world coordinates of the LOR endpoints
+            float array of shape (len(inds), 3) with the world coordinates of the LOR endpoints
         """
         raise NotImplementedError
 
@@ -153,8 +153,8 @@ class PETScannerModule(abc.ABC):
         Returns
         -------
         Array
-            a 3 x len(inds) float array with the world coordinates of the LOR endpoints including an
-            affine transformation
+            float array of shape (len(inds), 3) with the world coordinates of the LOR endpoints
+            after applying the affine transformation (if any)
         """
 
         lor_endpoints = self.get_raw_lor_endpoints(inds)

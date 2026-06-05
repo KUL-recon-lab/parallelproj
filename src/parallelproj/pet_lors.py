@@ -1421,18 +1421,18 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def show_views(
         self, ax: Axes, views: Array, planes: Array, lw: float = 0.2, **kwargs
     ) -> None:
-        """show all LORs of a single view in a given plane
+        """Show all LORs for the given views and planes.
 
         Parameters
         ----------
         ax : plt.Axes
-            a 3D matplotlib axes
-        view : int
-            the view number
-        plane : int
-            the plane number
+            A 3D matplotlib axes.
+        views : Array
+            Integer array of view indices to display.
+        planes : Array
+            Integer array of plane indices to display.
         lw : float, optional
-            the line width, by default 0.2
+            Line width, by default 0.2.
         """
 
         xs, xe = self.get_lor_coordinates(views=views)
@@ -1690,8 +1690,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
     :math:`(\\text{segment}, \\text{axial midpoint})` where
 
     * ``segment`` is determined by the ring difference :math:`rd = e - s` under
-      target span :math:`S`
-      :meth:`RegularPolygonPETLORDescriptor._ring_diff_to_segment`),
+      target span :math:`S` (see :meth:`Michelogram.ring_diff_to_segment`),
     * ``axial midpoint`` is :math:`s + e` (an integer equal to twice the actual
       midpoint).
 
