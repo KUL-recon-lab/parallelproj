@@ -608,7 +608,12 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def tof(self) -> bool:
-        """bool indicating whether to use TOF or not"""
+        """Enable or disable TOF mode.
+
+        Setting to ``True`` requires ``tof_parameters`` to be set first;
+        raises ``ValueError`` otherwise.  Setting to ``False`` (or assigning
+        ``None`` to ``tof_parameters``) disables TOF.
+        """
         return self._tof
 
     @tof.setter
@@ -619,7 +624,11 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
-        """TOF parameters"""
+        """TOF kernel parameters, or ``None`` for non-TOF mode.
+
+        Assigning a :class:`.TOFParameters` instance automatically enables TOF
+        and recomputes ``out_shape``.  Assigning ``None`` disables TOF.
+        """
         return self._tof_parameters
 
     @tof_parameters.setter
@@ -647,7 +656,11 @@ class RegularPolygonPETProjector(LinearOperator):
 
     @property
     def views(self) -> Array:
-        """view numbers to be projected"""
+        """View indices to project.
+
+        Assigning a new array recomputes ``out_shape`` and clears any cached
+        LOR endpoint arrays.
+        """
         return self._views
 
     @views.setter
@@ -1103,7 +1116,12 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def tof(self) -> bool:
-        """bool indicating whether to use TOF projections or not"""
+        """Enable or disable TOF mode.
+
+        Must set ``tof_parameters`` and ``event_tofbins`` before setting to
+        ``True``; raises ``ValueError`` otherwise.  Setting ``event_tofbins``
+        to ``None`` automatically disables TOF.
+        """
         return self._tof
 
     @tof.setter
@@ -1117,7 +1135,10 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
-        """TOF parameters"""
+        """TOF kernel parameters, or ``None`` for non-TOF mode.
+
+        Assigning ``None`` disables TOF.
+        """
         return self._tof_parameters
 
     @tof_parameters.setter
@@ -1131,7 +1152,12 @@ class ListmodePETProjector(LinearOperator):
 
     @property
     def event_tofbins(self) -> None | Array:
-        """TOF bin of each event"""
+        """Integer TOF bin index for each event, or ``None`` for non-TOF mode.
+
+        Assigning an array enables per-event TOF binning; its length must
+        match ``num_events``.  Assigning ``None`` clears the TOF bins and
+        disables TOF.
+        """
         return self._tofbin
 
     @event_tofbins.setter
@@ -1331,7 +1357,12 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def tof(self) -> bool:
-        """bool indicating whether to use TOF or not"""
+        """Enable or disable TOF mode.
+
+        Setting to ``True`` requires ``tof_parameters`` to be set first;
+        raises ``ValueError`` otherwise.  Assigning ``None`` to
+        ``tof_parameters`` automatically disables TOF.
+        """
         return self._tof
 
     @tof.setter
@@ -1342,7 +1373,11 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def tof_parameters(self) -> TOFParameters | None:
-        """TOF parameters"""
+        """TOF kernel parameters, or ``None`` for non-TOF mode.
+
+        Assigning a :class:`.TOFParameters` instance automatically enables TOF.
+        Assigning ``None`` disables TOF.
+        """
         return self._tof_parameters
 
     @tof_parameters.setter
@@ -1373,7 +1408,11 @@ class EqualBlockPETProjector(LinearOperator):
 
     @property
     def num_chunks(self) -> int:
-        """number of chunks to split the block pairs into during projection"""
+        """Number of chunks to split block pairs into during projection.
+
+        Increasing this reduces peak GPU memory usage at the cost of more
+        kernel launches.
+        """
         return self._num_chunks
 
     @num_chunks.setter
