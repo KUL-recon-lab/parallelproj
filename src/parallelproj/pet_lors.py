@@ -865,7 +865,17 @@ class PETLORDescriptor(abc.ABC):
 
     @abc.abstractmethod
     def get_lor_coordinates(self) -> tuple[Array, Array]:
-        """return the start and end coordinates of all (or a subset of) LORs"""
+        """Return the start and end world coordinates of all (or a subset of) LORs.
+
+        Returns
+        -------
+        xstart : Array
+            Float array of shape ``(N, 3)`` with the world coordinates of the
+            LOR start points.
+        xend : Array
+            Float array of shape ``(N, 3)`` with the world coordinates of the
+            LOR end points.
+        """
         raise NotImplementedError
 
     @property

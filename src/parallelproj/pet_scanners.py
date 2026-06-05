@@ -327,6 +327,21 @@ class BlockPETScannerModule(PETScannerModule):
         return self._lor_endpoints
 
     def get_raw_lor_endpoints(self, inds: Array | None = None) -> Array:
+        """Return world coordinates of the requested crystal endpoints.
+
+        Looks up pre-computed endpoint positions from the stored grid array.
+
+        Parameters
+        ----------
+        inds : Array | None, optional
+            Integer indices into the module's endpoint list.
+            ``None`` returns all endpoints (default).
+
+        Returns
+        -------
+        Array
+            Float array of shape ``(len(inds), 3)`` with world coordinates.
+        """
         if inds is None:
             inds = self.lor_endpoint_numbers
 
@@ -495,6 +510,23 @@ class RegularPolygonPETScannerModule(PETScannerModule):
 
     # abstract method from base class to be implemented
     def get_raw_lor_endpoints(self, inds: Array | None = None) -> Array:
+        """Compute world coordinates for the requested crystal endpoints.
+
+        Calculates endpoint positions analytically from the scanner geometry
+        (radius, number of sides, crystals per side, azimuthal offset),
+        respecting the configured :class:`RingEndpointOrdering`.
+
+        Parameters
+        ----------
+        inds : Array | None, optional
+            Integer indices into the module's endpoint list.
+            ``None`` returns all endpoints (default).
+
+        Returns
+        -------
+        Array
+            Float array of shape ``(len(inds), 3)`` with world coordinates.
+        """
         if inds is None:
             inds = self.lor_endpoint_numbers
 
@@ -535,7 +567,17 @@ class RegularPolygonPETScannerModule(PETScannerModule):
 
 
 class ModularizedPETScannerGeometry:
-    """description of a PET scanner geometry consisting of LOR endpoint modules"""
+    """A PET scanner geometry built from an ordered list of :class:`PETScannerModule` objects.
+
+    Each module contributes a contiguous block of LOR endpoints to the global
+    flat index space.  The global index of endpoint ``k`` in module ``i`` is
+    ``all_lor_endpoints_index_offset[i] + k``.  All modules must share the
+    same array namespace (``xp``) and device.
+
+    Use :class:`RegularPolygonPETScannerGeometry` for the common case of a
+    cylindrical scanner with stacked regular-polygon rings.  Use this class
+    directly when the scanner has an irregular or custom module layout.
+    """
 
     def __init__(self, modules: Sequence[PETScannerModule]):
         """
@@ -712,7 +754,16 @@ class ModularizedPETScannerGeometry:
 
 
 class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
-    """description of a PET scanner geometry consisting of stacked regular polygons"""
+    """A cylindrical PET scanner built from stacked regular-polygon rings.
+
+    Each axial ring is a :class:`RegularPolygonPETScannerModule` with
+    ``num_sides`` sides and ``num_lor_endpoints_per_side`` crystals per side,
+    giving ``num_lor_endpoints_per_ring = num_sides * num_lor_endpoints_per_side``
+    endpoints per ring.  Rings are stacked axially; the global flat endpoint
+    index increases first within a ring and then across rings, so endpoint
+    ``r * num_lor_endpoints_per_ring + k`` belongs to ring ``r`` and in-ring
+    position ``k``.
+    """
 
     def __init__(
         self,
