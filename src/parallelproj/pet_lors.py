@@ -1857,6 +1857,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
             michelogram=target_michelogram,
             radial_trim=lor_descriptor.radial_trim,
             sinogram_order=lor_descriptor.sinogram_order,
+            zig_zag_order=lor_descriptor.zig_zag_order,
         )
 
         self._build_index_maps(target_michelogram)
