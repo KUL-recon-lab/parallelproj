@@ -113,7 +113,7 @@ Replace ``cuda129`` below with the CUDA version matching your system (e.g. ``cud
 
         .. code-block:: console
 
-           $ conda create -n parallelproj-cuda129 -c conda-forge cuda-version=13.0 parallelproj
+           $ conda create -n parallelproj-cuda129 -c conda-forge cuda-version=12.9 parallelproj
 
     .. tab-item:: pixi
 
