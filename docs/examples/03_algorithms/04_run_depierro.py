@@ -38,14 +38,14 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # Setup of the forward model :math:`\bar{y}(x) = A x + s`
 # --------------------------------------------------------
 #
-# We setup a minimal linear forward operator :math:`A` respresented by a 4x4 matrix
-# and an arbritrary contamination vector :math:`s` of length 4.
+# We setup a minimal linear forward operator :math:`A` respresented by a 5x4 matrix
+# and an arbritrary contamination vector :math:`s` of length 5.
 #
 # .. note::
-#     The OSEM implementation below works with all linear operators that
+#     The DePierro implementation below works with all linear operators that
 #     subclass :class:`.LinearOperator` (e.g. the high-level projectors).
 
-# setup an arbitrary 4x4 matrix
+# setup an arbitrary 5x4 matrix
 mat = xp.asarray(
     [
         [2.5, 1.2, 0.3, 0.1],

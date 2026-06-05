@@ -1,5 +1,5 @@
 """
-PDHG and LM-SPHG to optimize the Poisson logL and total variation
+PDHG and LM-SPDHG to optimize the Poisson logL and total variation
 =================================================================
 
 This example demonstrates the use of the primal dual hybrid gradient (PDHG) algorithm,
@@ -65,7 +65,7 @@ num_iter_spdhg = 200
 beta = 10.0
 # step size ratio for LM-SPDHG
 gamma = 1.0 / img_scale
-# rho value for LM-SPHDHG
+# rho value for LM-SPDHG
 rho = 0.9999
 # contaminaton in every sinogram bin relative to mean of trues sinogram
 contam = 1.0
