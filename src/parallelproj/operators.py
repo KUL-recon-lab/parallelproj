@@ -731,10 +731,12 @@ class FiniteForwardDifference(LinearOperator):
 
     Maps an image of shape ``in_shape`` to a gradient field of shape
     ``(ndim, *in_shape)`` where axis 0 enumerates the spatial directions.
-    Boundary conditions are Neumann (zero-padding): the last slice along each
-    axis is set to zero in the forward pass.  The adjoint is the negative
-    discrete divergence, consistent with the standard TV regularisation
-    convention.  Self-adjointness is verified by :meth:`adjointness_test`.
+    At each boundary the difference wraps to zero: the last difference along
+    each axis is forced to zero in the forward pass (as if the image is padded
+    with a copy of the border value, so the difference there vanishes).  The
+    adjoint is the negative discrete divergence, consistent with the standard
+    TV regularisation convention.  Self-adjointness is verified by
+    :meth:`adjointness_test`.
     """
 
     def __init__(self, in_shape: tuple[int, ...]) -> None:
