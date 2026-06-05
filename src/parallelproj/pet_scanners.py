@@ -47,7 +47,19 @@ class RingEndpointOrdering(enum.Enum):
 
 
 class PETScannerModule(abc.ABC):
-    """abstract base class for PET scanner module"""
+    """Abstract base class for a single detector module in a PET scanner.
+
+    A module groups a fixed number of LOR endpoints (detector elements) and
+    exposes their world coordinates via :meth:`get_raw_lor_endpoints` (before
+    any affine transform) and :meth:`get_lor_endpoints` (after).  An optional
+    4x4 affine transformation matrix can be supplied to reposition the module
+    in world space.
+
+    Concrete subclasses:
+
+    - :class:`BlockPETScannerModule` -- a 3-D rectangular grid of crystals
+    - :class:`RegularPolygonPETScannerModule` -- one flat side of a regular-polygon scanner
+    """
 
     def __init__(
         self,

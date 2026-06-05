@@ -613,18 +613,40 @@ class LinearOperatorSequence(Sequence[LinearOperator]):
         return self._operators[i]
 
     def apply(self, x: Array) -> list[Array]:
-        """:math:`(A^0(x), A^1(x), \\ldots, A^{n-1}(x))`"""
+        """Apply each operator independently: :math:`(A^0(x), A^1(x), \\ldots, A^{n-1}(x))`.
 
+        Parameters
+        ----------
+        x : Array
+            Input array of shape ``in_shape``.
+
+        Returns
+        -------
+        list[Array]
+            List of ``n`` output arrays, one per operator.
+        """
         y = [op(x) for op in self]
 
         return y
 
     def __call__(self, x: Array) -> list[Array]:
+        """Alias for :meth:`apply`."""
         return self.apply(x)
 
     def adjoint(self, y: list[Array]) -> Array:
-        """:math:`\\sum_i (A^i)^H y^i` for all :math:`i`"""
+        """Sum of adjoint outputs: :math:`\\sum_i (A^i)^H y^i`.
 
+        Parameters
+        ----------
+        y : list[Array]
+            List of ``n`` arrays, one per operator, each matching the
+            corresponding operator's ``out_shape``.
+
+        Returns
+        -------
+        Array
+            Sum of all adjoint outputs, shape ``in_shape``.
+        """
         result = self._operators[0].adjoint(y[0])
         for i, op in enumerate(self._operators[1:], start=1):
             result = result + op.adjoint(y[i])
@@ -660,6 +682,13 @@ class FiniteForwardDifference(LinearOperator):
     """
 
     def __init__(self, in_shape: tuple[int, ...]) -> None:
+        """
+        Parameters
+        ----------
+        in_shape : tuple[int, ...]
+            Shape of the input image.  Must have 1 to 4 dimensions;
+            raises ``ValueError`` for higher-dimensional inputs.
+        """
         if len(in_shape) > 4:
             raise ValueError("only up to 4 dimensions supported")
 
