@@ -1006,6 +1006,15 @@ class NegPoissonLogLListmode(C2Function):
         supplied externally.  Wrapping it with :class:`C2AffineObjective`
         would double-compose the forward model and is therefore not supported.
 
+    .. note::
+
+        Every call to :meth:`__call__`, :meth:`gradient`, or
+        :meth:`hessian_diag_vec_prod` requires that all per-event predicted
+        counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly positive**.
+        A :exc:`ValueError` is raised otherwise, so ensure that
+        ``contamination_list`` is positive whenever the image :math:`x` may
+        have zero-valued voxels.
+
     Parameters
     ----------
     lm_op : LinearOperator
@@ -1246,8 +1255,10 @@ class NonNegativeIndicator(FunctionWithProx):
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
         For an indicator function the value is 0 or :math:`+\\infty`
-        regardless of :math:`\\beta > 0`, but :math:`\\beta` affects the
-        effective step size passed to :meth:`prox`.
+        regardless of :math:`\\beta > 0`.  The :meth:`prox` output is also
+        unaffected by :math:`\\beta`, because the projection onto the
+        non-negative orthant (:math:`\\max(x, 0)`) is independent of the
+        step size.
     """
 
     def _call(self, x: Array) -> float:

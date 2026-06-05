@@ -275,7 +275,12 @@ class AdjointLinearOperator(LinearOperator):
 
     @property
     def scale(self) -> float | complex:
-        """conjugate of the wrapped operator's scale"""
+        """Complex conjugate of the wrapped operator's scale.
+
+        The scale is **bidirectionally coupled**: setting ``A.H.scale = c``
+        also sets ``A.scale = conj(c)``, and vice versa, because both objects
+        share the same underlying scale via the wrapped operator.
+        """
         return self._operator.scale.conjugate()
 
     @scale.setter
