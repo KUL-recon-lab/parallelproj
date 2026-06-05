@@ -165,7 +165,15 @@ def to_numpy_array(x: Array) -> np.ndarray:
 def empty_cuda_cache(xp: ModuleType) -> None:
     """Empty cached CUDA memory for supported backends.
 
-    For unsupported or non-CUDA namespaces (e.g. NumPy), do nothing.
+    For CuPy, frees all blocks in both the default memory pool and the pinned
+    memory pool.  For PyTorch, calls ``torch.cuda.empty_cache()`` when a CUDA
+    device is available.  For all other namespaces (e.g. NumPy) this is a
+    no-op.
+
+    Parameters
+    ----------
+    xp : ModuleType
+        Array namespace as returned by ``array_api_compat.get_namespace()``.
     """
     if array_api_compat.is_cupy_namespace(xp):
         xp.get_default_memory_pool().free_all_blocks()

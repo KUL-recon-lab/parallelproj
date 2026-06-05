@@ -48,7 +48,7 @@ class FunctionWithConjProx(ABC):
 
     @property
     def beta(self) -> float:
-        """Multiplicative scale factor :math:`\\beta`."""
+        """Multiplicative scale factor :math:`\\beta` (should be > 0)."""
         return self._beta
 
     @beta.setter
@@ -175,7 +175,7 @@ class FunctionWithProx(ABC):
 
     @property
     def beta(self) -> float:
-        """Multiplicative scale factor :math:`\\beta`."""
+        """Multiplicative scale factor :math:`\\beta` (should be > 0)."""
         return self._beta
 
     @beta.setter
@@ -300,7 +300,7 @@ class C1Function(ABC):
 
     @property
     def beta(self) -> float:
-        """Multiplicative scale factor :math:`\\beta`."""
+        """Multiplicative scale factor :math:`\\beta` (should be > 0)."""
         return self._beta
 
     @beta.setter
@@ -439,16 +439,14 @@ class C1FunctionWithConjProx(C1Function, FunctionWithConjProx):
     """Abstract base class for C1 functions that also admit a closed-form
     proximal operator of their convex conjugate.
 
-    Combines :class:`C1Function` (gradient, call) with
-    :class:`FunctionWithConjProx` (:meth:`prox_convex_conj`).
+    Use this as the base class when your function is differentiable **and**
+    has a cheap closed-form :math:`\\operatorname{prox}_{\\sigma f^*}`.
     Subclasses must implement :meth:`_call`, :meth:`_gradient`, and
-    :meth:`_prox_convex_conj`.
+    :meth:`_prox_convex_conj`.  The :math:`\\beta` scaling and the public
+    :meth:`prox_convex_conj` wrapper are inherited and require no override.
 
-    MRO: ``C1FunctionWithConjProx -> C1Function -> FunctionWithConjProx -> ABC``
-
-    The ``beta`` property and ``__call__`` are resolved from :class:`C1Function`.
-    The :meth:`prox_convex_conj` public method is resolved from
-    :class:`FunctionWithConjProx`.
+    See :class:`NegPoissonLogL` and :class:`HalfSquaredL2Deviation` for
+    concrete examples.
     """
 
 
