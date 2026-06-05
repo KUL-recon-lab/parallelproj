@@ -129,7 +129,9 @@ class FunctionWithConjProx(ABC):
         .. math::
 
             \\text{prox}_{\\sigma (\\beta f)}(x)
-            = x - \\sigma \\, \\text{prox}_{(\\beta f)^* / \\sigma}(x / \\sigma)
+            = x - \\sigma \\, \\text{prox}_{(1/\\sigma)(\\beta f)^*}(x / \\sigma)
+
+        where the inner prox uses step-size :math:`1/\\sigma`.
 
         Subclasses with a cheaper closed-form direct prox may override this.
 
@@ -256,7 +258,9 @@ class FunctionWithProx(ABC):
         .. math::
 
             \\text{prox}_{\\sigma (\\beta f)^*}(y)
-            = y - \\sigma \\, \\text{prox}_{(\\beta f) / \\sigma}(y / \\sigma)
+            = y - \\sigma \\, \\text{prox}_{(1/\\sigma)(\\beta f)}(y / \\sigma)
+
+        where the inner prox uses step-size :math:`1/\\sigma`.
 
         Subclasses with a cheaper closed-form dual prox may override this.
 
@@ -479,7 +483,8 @@ class NegPoissonLogL(C2FunctionWithConjProx):
 
         \\nabla_{\\bar{y}} f = 1 - \\frac{y}{\\bar{y}}.
 
-    This class operates directly on the predicted counts :math:`\\bar{y}`,
+    This class operates directly on the predicted counts :math:`\\bar{y}`
+    (passed as the argument ``x`` to the callable interface),
     independently of how they were computed. Use :class:`C2AffineObjective` to
     compose with a forward model :math:`\\bar{y}(x) = A x + s`.
 
@@ -979,10 +984,10 @@ class NegPoissonLogLListmode(C2Function):
 
     .. note::
 
-        Unlike :class:`NegPoissonLogL`, this class operates directly in
-        **image space** (it takes :math:`x` as input, not the predicted counts
-        :math:`\\bar{y}`).  It therefore cannot be composed with
-        :class:`C2AffineObjective`; the forward model is built in internally.
+        Unlike :class:`NegPoissonLogL`, the forward model
+        :math:`A_{\\text{LM}}` is built into this class rather than being
+        supplied externally.  Wrapping it with :class:`C2AffineObjective`
+        would double-compose the forward model and is therefore not supported.
 
     Parameters
     ----------
