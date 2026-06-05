@@ -380,7 +380,7 @@ class C1Function(ABC):
         return (v, g) if self._beta == 1.0 else (self._beta * v, self._beta * g)
 
     def __add__(self, other: "C1Function") -> "SumC1Function":
-        """Return a :class:`SumC2Function` or :class:`SumC1Function` for ``self + other``.
+        """Return the sum ``self + other`` as a new function object.
 
         Parameters
         ----------
@@ -389,10 +389,10 @@ class C1Function(ABC):
 
         Returns
         -------
-        SumC2Function
-            If both operands are :class:`C2Function` instances.
         SumC1Function
-            Otherwise.
+            A :class:`SumC2Function` (subclass of :class:`SumC1Function`) when
+            both operands are :class:`C2Function` instances; a plain
+            :class:`SumC1Function` otherwise.
         """
         if isinstance(self, C2Function) and isinstance(other, C2Function):
             return SumC2Function([self, other])
