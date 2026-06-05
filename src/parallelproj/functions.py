@@ -463,8 +463,7 @@ class C2FunctionWithConjProx(C2Function, C1FunctionWithConjProx):
     Subclasses must implement :meth:`_call`, :meth:`_gradient`,
     :meth:`_hessian_diag_vec_prod`, and :meth:`_prox_convex_conj`.
 
-    MRO: ``C2FunctionWithConjProx -> C2Function -> C1FunctionWithConjProx``
-    ``-> C1Function -> FunctionWithConjProx -> ABC``
+    MRO: ``C2FunctionWithConjProx -> C2Function -> C1FunctionWithConjProx -> C1Function -> FunctionWithConjProx -> ABC``
     """
 
 
