@@ -439,3 +439,50 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             x_fwd5 = proj5(x)
 
             assert bool(xp.all(proj5.views == subset_views))
+
+
+def test_fov_mask(xp: ModuleType, dev: str) -> None:
+    radius = 12.0
+    z = radius / float(np.sqrt(2.0))
+    vox_size = 2.0
+    img_shape = (15, 15, 15)
+
+    for symmetry_axis in [0, 1, 2]:
+        scanner = pps.RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=radius,
+            num_sides=8,
+            num_lor_endpoints_per_side=1,
+            lor_spacing=1.0,
+            ring_positions=xp.asarray([-z, 0, z], device=dev),
+            symmetry_axis=symmetry_axis,
+        )
+
+        for sinogram_order in ppl.SinogramSpatialAxisOrder:
+            lor_desc = ppl.RegularPolygonPETLORDescriptor(
+                scanner, radial_trim=1, sinogram_order=sinogram_order
+            )
+
+            proj = ppp.RegularPolygonPETProjector(
+                lor_desc,
+                img_shape=img_shape,
+                voxel_size=(vox_size, vox_size, vox_size),
+            )
+
+            mask = proj.fov_mask()
+
+            # shape must match the image shape
+            assert mask.shape == proj.in_shape
+
+            # center voxel is always inside the FOV
+            assert bool(mask[img_shape[0] // 2, img_shape[1] // 2, img_shape[2] // 2])
+
+            # all slices along the symmetry axis must be identical —
+            # the cylinder does not depend on the axial coordinate
+            ref_sl = [slice(None)] * 3
+            ref_sl[symmetry_axis] = img_shape[symmetry_axis] // 2
+            for s in range(img_shape[symmetry_axis]):
+                sl = [slice(None)] * 3
+                sl[symmetry_axis] = s
+                assert bool(xp.all(mask[tuple(sl)] == mask[tuple(ref_sl)]))

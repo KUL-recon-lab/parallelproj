@@ -705,7 +705,7 @@ class RegularPolygonPETProjector(LinearOperator):
         xstart, xend = self.lor_descriptor.get_lor_coordinates(
             views=xp.asarray([0], device=dev)
         )
-        mid = (xstart.reshape(-1, 3)[0] + xend.reshape(-1, 3)[0]) / 2
+        mid = (xp.reshape(xstart, (-1, 3))[0, :] + xp.reshape(xend, (-1, 3))[0, :]) / 2
         lor_radius = float(xp.sqrt(mid[ax0] ** 2 + mid[ax1] ** 2))
 
         # voxel centre coordinates along the two transaxial axes
