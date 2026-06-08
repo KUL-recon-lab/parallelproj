@@ -7,6 +7,13 @@ of multiple block modules where each block module consists of a regular
 grid of LOR endpoints.
 We also show how to define a LOR descriptor for this geometry using
 a description of which block pairs are in coincidence.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

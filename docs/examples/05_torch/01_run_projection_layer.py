@@ -21,7 +21,6 @@ import parallelproj.pet_lors
 import parallelproj_core as ppc
 from array_api_compat import device
 
-
 # device variable (cpu or cuda) that determines whether calculations
 # are performed on the cpu or cuda gpu
 if torch.cuda.is_available() and ppc.cuda_enabled == 1:

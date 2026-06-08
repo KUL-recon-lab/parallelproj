@@ -52,6 +52,13 @@ as sinogram :class:`.C2AffineObjective` or listmode :class:`.NegPoissonLogLListm
 objects), the SGD and SVRG loops are *identical* -- they only depend on the
 :class:`.C1Function` interface (``gradient`` method).  Regularisation is added
 transparently via the :meth:`~.C1Function.__add__` operator.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

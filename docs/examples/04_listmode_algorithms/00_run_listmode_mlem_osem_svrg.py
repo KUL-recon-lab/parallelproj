@@ -48,6 +48,13 @@ partitioning*.  The same :func:`em_update` function is used for all four
 variants (sinogram MLEM, LM-MLEM, sinogram OSEM, LM-OSEM) because every
 objective implements the :class:`.C1Function` interface with the correct
 gradient w.r.t. :math:`x`.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

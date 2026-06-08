@@ -5,6 +5,13 @@ Non-TOF and TOF projections using a modularized (block) PET scanner geometry
 In this example, we show how to perform non-TOF and TOF projections using a
 PET scanner consisting of multiple block modules where each block module
 consists of a regular grid of LOR endpoints.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

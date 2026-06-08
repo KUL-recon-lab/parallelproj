@@ -6,6 +6,13 @@ In this example we show how to setup and use a PET listmode projector
 for both non-TOF and TOF acquisitions, including geometrical forward
 projection in listmode, image-based resolution model, and a listmode
 attenuation model.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

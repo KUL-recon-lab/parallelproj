@@ -52,6 +52,13 @@ exploit this splitting:
     :math:`m` variance-reduced subset updates.  The epoch axis in the
     convergence plot therefore understates the true computational cost of
     SVRG relative to SGD by a factor of roughly two.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

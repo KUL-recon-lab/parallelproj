@@ -4,6 +4,13 @@ Regular polygon PET scanner geometry
 
 This example shows how to create and visualize PET scanners where the LOR
 endpoints can be modeled as a stack of regular polygons.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

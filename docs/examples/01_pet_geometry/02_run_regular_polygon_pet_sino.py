@@ -6,6 +6,13 @@ In a scanner with "cylindrical symmetry", all possible lines of response (LORs)
 between two LOR endpoints can be sorted into a sinogram containing a radial,
 view and plane dimension.
 This example shows how this can be done using the :class:`.RegularPolygonPETLORDescriptor`
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

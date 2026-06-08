@@ -4,6 +4,13 @@
 
 This example demonstrates the run 2D filtered back projection (FBP)
 on pre-corrected Poisson emission data.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%

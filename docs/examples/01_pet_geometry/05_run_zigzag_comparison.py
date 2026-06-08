@@ -19,6 +19,13 @@ parameter of :class:`.RegularPolygonPETLORDescriptor`.
 
 This example visualises both conventions for a minimal scanner with 1 ring and
 8 detector endpoints.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script and install parallelproj
+   (``conda install -c conda-forge parallelproj``).
 """
 
 # %%
