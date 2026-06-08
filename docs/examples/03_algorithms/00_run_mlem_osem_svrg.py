@@ -290,10 +290,22 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
-# single mask: True where every subset sees the voxel (intersection of all subset supports)
-# None when no masking is needed (all voxels seen by all subsets)
-_all_positive = bool(xp.all(subset_adjoint_ones > 0))
-sens_mask = None if _all_positive else xp.all(subset_adjoint_ones > 0, axis=0)
+# cylindrical FOV mask: radius = radial distance of the first LOR of the first view
+_xstart, _xend = lor_desc.get_lor_coordinates(views=xp.asarray([0], device=dev))
+# midpoint of first LOR (first radial bin, first plane) in the transaxial plane
+_mid_xy = (_xstart[0, 0, 0, :2] + _xend[0, 0, 0, :2]) / 2
+lor_radius = float(xp.sqrt(xp.sum(_mid_xy**2)))
+
+_ix = (
+    xp.arange(img_shape[0], device=dev, dtype=xp.float32) - (img_shape[0] - 1) / 2
+) * voxel_size[0]
+_iy = (
+    xp.arange(img_shape[1], device=dev, dtype=xp.float32) - (img_shape[1] - 1) / 2
+) * voxel_size[1]
+_r = xp.sqrt(_ix[:, None] ** 2 + _iy[None, :] ** 2)
+cyl_mask = _r[:, :, None] <= lor_radius  # broadcast over z, shape img_shape
+
+sens_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 
 subset_data_fidelities = [
     C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
@@ -304,17 +316,20 @@ full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contaminat
 
 # run 1 OSEM epoch as a common warm-start for MLEM, OSEM and SVRG
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+# zero out voxels not seen by every subset so they don't carry a spurious non-zero value
+if sens_mask is not None:
+    x_init = xp.where(sens_mask, x_init, xp.zeros_like(x_init))
+
 for k in range(len(subset_slices)):
     print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
-    x_init = em_update(x_init, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask)
+    x_init = em_update(
+        x_init, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask
+    )
 print()
 
 # full sensitivity image: A^H 1 = sum of all subset adjoint ones
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
 
-# zero out voxels not seen by every subset so they don't carry a spurious non-zero value
-if sens_mask is not None:
-    x_init = xp.where(sens_mask, x_init, xp.zeros_like(x_init))
 
 # %%
 # MLEM
@@ -354,7 +369,9 @@ for i in range(num_epochs):
             f"OSEM epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
             end="\r",
         )
-        x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask)
+        x_osem = em_update(
+            x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask
+        )
 
     df_osem[i] = full_data_fidelity(x_osem)
 print()
@@ -437,7 +454,9 @@ for epoch in range(num_epochs):
             if sens_mask is None:
                 svrg_precond = x_svrg / adjoint_ones
             else:
-                svrg_precond = xp.where(sens_mask, x_svrg / adjoint_ones, xp.zeros_like(x_svrg))
+                svrg_precond = xp.where(
+                    sens_mask, x_svrg / adjoint_ones, xp.zeros_like(x_svrg)
+                )
 
         stored_grads, full_grad = svrg_calc_snapshot_gradients(
             x_svrg, subset_data_fidelities
