@@ -95,7 +95,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 # %%
 # setup the LOR descriptor that defines the sinogram
 
-img_shape = (40, 40, 8)
+img_shape = (55, 55, 8)
 voxel_size = (2.0, 2.0, 2.0)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
@@ -262,9 +262,13 @@ def em_update(
     x_cur: Array,
     negpoissonlogl: C1Function,
     adj_ones: Array,
+    mask: Array | None = None,
 ) -> Array:
     """EM update re-written as preconditioned GD step"""
-    em_diag_precond = x_cur / adj_ones
+    if mask is None:
+        em_diag_precond = x_cur / adj_ones
+    else:
+        em_diag_precond = xp.where(mask, x_cur / adj_ones, xp.zeros_like(x_cur))
     return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
 
 
@@ -286,6 +290,11 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
+# single mask: True where every subset sees the voxel (intersection of all subset supports)
+# None when no masking is needed (all voxels seen by all subsets)
+_all_positive = bool(xp.all(subset_adjoint_ones > 0))
+sens_mask = None if _all_positive else xp.all(subset_adjoint_ones > 0, axis=0)
+
 subset_data_fidelities = [
     C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
     for k, sl in enumerate(subset_slices)
@@ -297,11 +306,15 @@ full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contaminat
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 for k in range(len(subset_slices)):
     print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
-    x_init = em_update(x_init, subset_data_fidelities[k], subset_adjoint_ones[k])
+    x_init = em_update(x_init, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask)
 print()
 
 # full sensitivity image: A^H 1 = sum of all subset adjoint ones
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
+
+# zero out voxels not seen by every subset so they don't carry a spurious non-zero value
+if sens_mask is not None:
+    x_init = xp.where(sens_mask, x_init, xp.zeros_like(x_init))
 
 # %%
 # MLEM
@@ -320,7 +333,7 @@ if run_mlem:
     x_mlem = xp.asarray(x_init, copy=True)
     for i in range(num_epochs_mlem):
         print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-        x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones)
+        x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones, sens_mask)
         df_mlem[i] = full_data_fidelity(x_mlem)
     print()
 
@@ -341,7 +354,7 @@ for i in range(num_epochs):
             f"OSEM epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
             end="\r",
         )
-        x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k])
+        x_osem = em_update(x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask)
 
     df_osem[i] = full_data_fidelity(x_osem)
 print()
@@ -421,7 +434,10 @@ df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond = x_svrg / adjoint_ones
+            if sens_mask is None:
+                svrg_precond = x_svrg / adjoint_ones
+            else:
+                svrg_precond = xp.where(sens_mask, x_svrg / adjoint_ones, xp.zeros_like(x_svrg))
 
         stored_grads, full_grad = svrg_calc_snapshot_gradients(
             x_svrg, subset_data_fidelities
