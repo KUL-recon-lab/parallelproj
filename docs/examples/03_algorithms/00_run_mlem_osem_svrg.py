@@ -291,7 +291,9 @@ for k, op in enumerate(pet_subset_linop_seq):
     )
 
 cyl_mask = proj.fov_mask()
-sens_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+del cyl_mask
+
 
 subset_data_fidelities = [
     C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
@@ -303,13 +305,13 @@ full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contaminat
 # run 1 OSEM epoch as a common warm-start for MLEM, OSEM and SVRG
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 # zero out voxels not seen by every subset so they don't carry a spurious non-zero value
-if sens_mask is not None:
-    x_init = xp.where(sens_mask, x_init, xp.zeros_like(x_init))
+if fov_mask is not None:
+    x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
 
 for k in range(len(subset_slices)):
     print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
     x_init = em_update(
-        x_init, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask
+        x_init, subset_data_fidelities[k], subset_adjoint_ones[k], fov_mask
     )
 print()
 
@@ -334,7 +336,7 @@ if run_mlem:
     x_mlem = xp.asarray(x_init, copy=True)
     for i in range(num_epochs_mlem):
         print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-        x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones, sens_mask)
+        x_mlem = em_update(x_mlem, full_data_fidelity, adjoint_ones, fov_mask)
         df_mlem[i] = full_data_fidelity(x_mlem)
     print()
 
@@ -356,7 +358,7 @@ for i in range(num_epochs):
             end="\r",
         )
         x_osem = em_update(
-            x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], sens_mask
+            x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], fov_mask
         )
 
     df_osem[i] = full_data_fidelity(x_osem)
@@ -437,11 +439,11 @@ df_svrg = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            if sens_mask is None:
+            if fov_mask is None:
                 svrg_precond = x_svrg / adjoint_ones
             else:
                 svrg_precond = xp.where(
-                    sens_mask, x_svrg / adjoint_ones, xp.zeros_like(x_svrg)
+                    fov_mask, x_svrg / adjoint_ones, xp.zeros_like(x_svrg)
                 )
 
         stored_grads, full_grad = svrg_calc_snapshot_gradients(
@@ -565,13 +567,23 @@ axs[1].grid(ls=":")
 fig.show()
 
 # %%
+vmax = float(xp.max(x_mlem))
+
 fig, axs, widgets = show_vol_cuts(
-    to_numpy_array(x_osem), voxel_size=voxel_size, fig_title="OSEM result"
+    to_numpy_array(x_osem),
+    voxel_size=voxel_size,
+    fig_title="OSEM result",
+    vmin=0,
+    vmax=vmax,
 )
 fig.show()
 
 # %%
 fig2, axs2, widgets2 = show_vol_cuts(
-    to_numpy_array(x_svrg), voxel_size=voxel_size, fig_title="SVRG result"
+    to_numpy_array(x_svrg),
+    voxel_size=voxel_size,
+    fig_title="SVRG result",
+    vmin=0,
+    vmax=vmax,
 )
 fig2.show()
