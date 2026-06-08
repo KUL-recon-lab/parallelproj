@@ -49,6 +49,19 @@ sphinx_gallery_conf = {
     "plot_gallery": True,
     "within_subsection_order": FileNameSortKey,
     "parallel": os.cpu_count(),
+    # Inject a setup note at the top of every generated Jupyter notebook so
+    # that users who download a notebook know how to obtain the helper modules.
+    "first_notebook_cell": (
+        "# To run this notebook you need parallelproj and three helper modules.\n"
+        "#\n"
+        "# 1. Install parallelproj (if not already):\n"
+        "#      conda install -c conda-forge parallelproj\n"
+        "#\n"
+        "# 2. Download the helper modules into the same folder as this notebook:\n"
+        "#    array_utils.py: https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/array_utils.py\n"
+        "#    img.py:         https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/img.py\n"
+        "#    vis.py:         https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/vis.py"
+    ),
 }
 
 # -- Options for HTML output -------------------------------------------------

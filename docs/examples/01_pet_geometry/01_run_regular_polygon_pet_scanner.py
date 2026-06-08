@@ -233,7 +233,11 @@ centre_to_centre = subblock_span + pitch + extra_gap  # 18 mm
 sub_centers = centre_to_centre * (np.arange(num_subblocks) - (num_subblocks - 1) / 2.0)
 # = [-27, -9, +9, +27] mm
 
-lor_endpoint_positions = (sub_centers[:, None] + sub_offsets[None, :]).ravel()
+lor_endpoint_positions = xp.asarray(
+    (sub_centers[:, None] + sub_offsets[None, :]).ravel(),
+    dtype=xp.float32,
+    device=dev,
+)
 # = [-33, -29, -25, -21, -15, -11, -7, -3, +3, +7, +11, +15, +21, +25, +29, +33]
 
 scanner5 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(

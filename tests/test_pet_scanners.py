@@ -93,7 +93,9 @@ def test_regular_polygon_pet_module_custom_positions(xp: ModuleType, dev: str) -
     d = 4.0
 
     # anti-symmetric uniform positions — should match the uniform constructor
-    positions = d * (np.arange(N, dtype=np.float32) - (N - 1) / 2.0)
+    positions = xp.asarray(
+        d * (np.arange(N, dtype=np.float32) - (N - 1) / 2.0), device=dev
+    )
 
     mod_uniform = pps.RegularPolygonPETScannerModule(
         xp, dev, radius=radius, num_sides=num_sides,
@@ -121,7 +123,7 @@ def test_regular_polygon_pet_module_custom_positions(xp: ModuleType, dev: str) -
         pps.RegularPolygonPETScannerModule(xp, dev, radius=radius, num_sides=num_sides)
 
     # asymmetric positions raise UserWarning
-    asymmetric = np.array([-3.0, -1.0, 0.5, 2.0], dtype=np.float32)
+    asymmetric = xp.asarray([-3.0, -1.0, 0.5, 2.0], dtype=xp.float32, device=dev)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         pps.RegularPolygonPETScannerModule(
