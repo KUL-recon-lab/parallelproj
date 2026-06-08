@@ -567,7 +567,7 @@ axs[1].grid(ls=":")
 fig.show()
 
 # %%
-vmax = float(xp.max(x_mlem))
+vmax = float(xp.max(x_svrg))
 
 fig, axs, widgets = show_vol_cuts(
     to_numpy_array(x_osem),
