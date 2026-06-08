@@ -66,6 +66,12 @@ Simulation pipeline
 8. **TOF sign illustration** -- six events on two LORs, with both orderings
    of (d_red, d_blue) relative to (xstart, xend), show that
    :func:`.detection_times_to_tof_bin` handles the sign flip correctly.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -81,10 +87,10 @@ from parallelproj.unlist import (
     detection_times_to_tof_bin,
     regular_polygon_events_to_sinogram,
 )
-from img import elliptic_cylinder_phantom
+from example_utils import elliptic_cylinder_phantom
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 xp, dev = suggest_array_backend_and_device(None, None)
 

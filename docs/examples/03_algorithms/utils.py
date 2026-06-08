@@ -618,4 +618,4 @@ class RDP(SmoothFunctionWithDiagonalHessian):
 
 # show_vol_cuts and show_3d_cuts are defined in docs/examples/vis.py
 # and made importable via sys.path in docs/conf.py
-from vis import show_vol_cuts, show_3d_cuts  # noqa: F401
+from example_utils import show_vol_cuts, show_3d_cuts  # noqa: F401

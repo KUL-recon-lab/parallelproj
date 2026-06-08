@@ -45,10 +45,22 @@ sphinx_gallery_conf = {
     "backreferences_dir": "auto_examples/backreferences",
     "doc_module": ("parallelproj",),
     "filename_pattern": r"[\\/]\d{2,3}_run_.*\.py$",
-    "ignore_pattern": r"(^|[\\/])(vis|utils|img|array_utils)\.py$",
+    "ignore_pattern": r"(^|[\\/])(utils|example_utils)\.py$",
     "plot_gallery": True,
     "within_subsection_order": FileNameSortKey,
     "parallel": os.cpu_count(),
+    # Inject a setup note at the top of every generated Jupyter notebook so
+    # that users who download a notebook know how to obtain the helper modules.
+    "first_notebook_cell": (
+        "# To run this notebook you need parallelproj and the example_utils helper.\n"
+        "#\n"
+        "# 1. Install parallelproj (if not already):\n"
+        "#      conda install -c conda-forge parallelproj\n"
+        "#\n"
+        "# 2. Download example_utils.py into the same folder as this notebook:\n"
+        "#    https://raw.githubusercontent.com/KUL-recon-lab/"
+        "parallelproj/main/docs/examples/example_utils.py"
+    ),
 }
 
 # -- Options for HTML output -------------------------------------------------

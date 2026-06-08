@@ -374,7 +374,7 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
         phi0: float = 0.0,
-        lor_endpoint_positions: np.ndarray | None = None,
+        lor_endpoint_positions: Array | None = None,
     ) -> None:
         """
 
@@ -411,7 +411,7 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             azimuthal offset of side 0 in radians, by default 0.
             Only applied when ``phis`` is ``None``; ignored when ``phis`` is
             provided explicitly.
-        lor_endpoint_positions : np.ndarray or None, optional
+        lor_endpoint_positions : Array or None, optional
             1-D array of crystal positions (in mm) along each polygon side,
             with 0 at the centre of the side.  When given, overrides
             ``num_lor_endpoints_per_side`` and ``lor_spacing``.
@@ -425,14 +425,16 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             Examples for a side with **even** N=6 (3 crystals each half,
             uniform 2 mm pitch, 1 mm gap)::
 
-                lor_endpoint_positions = np.array([-3.5, -1.5, -0.5,
-                                                    0.5,  1.5,  3.5])
+                lor_endpoint_positions = xp.asarray(
+                    [-3.5, -1.5, -0.5, 0.5, 1.5, 3.5], device=dev
+                )
 
             Examples for **odd** N=5 (2 crystals each half + one centre
             crystal, uniform 2 mm pitch)::
 
-                lor_endpoint_positions = np.array([-4.0, -2.0,  0.0,
-                                                    2.0,  4.0])
+                lor_endpoint_positions = xp.asarray(
+                    [-4.0, -2.0, 0.0, 2.0, 4.0], device=dev
+                )
         """
 
         self._radius = radius
@@ -443,9 +445,9 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         self._phi0 = phi0
 
         if lor_endpoint_positions is not None:
-            pos = np.asarray(lor_endpoint_positions, dtype=np.float32)
-            # warn if not anti-symmetric about 0
-            if not np.allclose(pos + pos[::-1], 0, atol=1e-4 * max(float(np.max(np.abs(pos))), 1.0)):
+            # lor_endpoint_positions is already an Array on the correct device
+            max_abs = max(float(xp.max(xp.abs(lor_endpoint_positions))), 1.0)
+            if not bool(xp.all(xp.abs(lor_endpoint_positions + xp.flip(lor_endpoint_positions)) < 1e-4 * max_abs)):
                 warnings.warn(
                     "lor_endpoint_positions is not anti-symmetric about 0 "
                     "(pos[i] != -pos[N-1-i]). Radial sinogram symmetry "
@@ -453,13 +455,14 @@ class RegularPolygonPETScannerModule(PETScannerModule):
                     UserWarning,
                     stacklevel=2,
                 )
-            self._lor_endpoint_positions = xp.asarray(pos, device=dev, dtype=xp.float32)
-            self._num_lor_endpoints_per_side = len(pos)
+            self._lor_endpoint_positions = lor_endpoint_positions
+            self._num_lor_endpoints_per_side = int(lor_endpoint_positions.shape[0])
             self._lor_spacing = None
         elif num_lor_endpoints_per_side is not None and lor_spacing is not None:
             N = num_lor_endpoints_per_side
-            pos_np = lor_spacing * (np.arange(N, dtype=np.float32) - (N - 1) / 2.0)
-            self._lor_endpoint_positions = xp.asarray(pos_np, device=dev, dtype=xp.float32)
+            self._lor_endpoint_positions = lor_spacing * (
+                xp.arange(N, dtype=xp.float32, device=dev) - (N - 1) / 2.0
+            )
             self._num_lor_endpoints_per_side = N
             self._lor_spacing = lor_spacing
         else:
@@ -848,7 +851,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
         phi0: float = 0.0,
-        lor_endpoint_positions: np.ndarray | None = None,
+        lor_endpoint_positions: Array | None = None,
     ) -> None:
         """
         Parameters
@@ -881,7 +884,7 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             azimuthal offset of side 0 in radians, by default 0.
             Only applied when ``phis`` is ``None``; ignored when ``phis`` is
             provided explicitly.
-        lor_endpoint_positions : np.ndarray or None, optional
+        lor_endpoint_positions : Array or None, optional
             Custom 1-D array of crystal positions along each polygon side in mm.
             When given, overrides ``num_lor_endpoints_per_side`` and
             ``lor_spacing``.  See :class:`RegularPolygonPETScannerModule` for
@@ -897,13 +900,14 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
 
         # Resolve positions: custom or uniform
         if lor_endpoint_positions is not None:
-            _positions = np.asarray(lor_endpoint_positions, dtype=np.float32)
-            self._num_lor_endpoints_per_side = len(_positions)
+            # lor_endpoint_positions is already an Array on the correct device
+            _positions = lor_endpoint_positions
+            self._num_lor_endpoints_per_side = int(_positions.shape[0])
             self._lor_spacing = None
         elif num_lor_endpoints_per_side is not None and lor_spacing is not None:
             N = num_lor_endpoints_per_side
             _positions = lor_spacing * (
-                np.arange(N, dtype=np.float32) - (N - 1) / 2.0
+                xp.arange(N, dtype=xp.float32, device=dev) - (N - 1) / 2.0
             )
             self._num_lor_endpoints_per_side = N
             self._lor_spacing = lor_spacing

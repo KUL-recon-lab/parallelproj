@@ -5,12 +5,18 @@ Non-TOF and TOF projections using a modularized (block) PET scanner geometry
 In this example, we show how to perform non-TOF and TOF projections using a
 PET scanner consisting of multiple block modules where each block module
 consists of a regular grid of LOR endpoints.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
 import math
 import matplotlib.pyplot as plt
-from vis import show_vol_cuts
+from example_utils import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -19,7 +25,7 @@ import parallelproj.tof
 from parallelproj import to_numpy_array
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

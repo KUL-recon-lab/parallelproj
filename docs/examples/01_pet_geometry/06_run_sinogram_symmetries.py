@@ -31,6 +31,12 @@ symmetries.
 5. **Radial mirror symmetry** -- radial bins ``r`` and ``num_rad - 1 - r``
    subtend the same perpendicular distance from the FOV centre and carry equal
    expected counts for a centred object.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -52,7 +58,7 @@ from parallelproj.sinogram_symmetries import (
 )
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 xp, dev = suggest_array_backend_and_device(None, None)
 

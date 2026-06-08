@@ -19,6 +19,12 @@ parameter of :class:`.RegularPolygonPETLORDescriptor`.
 
 This example visualises both conventions for a minimal scanner with 1 ring and
 8 detector endpoints.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -28,7 +34,7 @@ import parallelproj.pet_scanners
 import parallelproj.pet_lors
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 xp, dev = suggest_array_backend_and_device(None, None)
 

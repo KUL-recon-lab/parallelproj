@@ -6,6 +6,12 @@ In a scanner with "cylindrical symmetry", all possible lines of response (LORs)
 between two LOR endpoints can be sorted into a sinogram containing a radial,
 view and plane dimension.
 This example shows how this can be done using the :class:`.RegularPolygonPETLORDescriptor`
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -15,7 +21,7 @@ import parallelproj.pet_lors
 import matplotlib.pyplot as plt
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

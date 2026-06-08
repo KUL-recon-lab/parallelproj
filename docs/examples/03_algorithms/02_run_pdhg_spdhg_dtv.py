@@ -39,6 +39,12 @@ algorithms.
 See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior
 and the SPDHG algorithm (Algorithm 2), and :cite:p:`Schramm2022` for the step-size
 rules used here.
+
+.. note::
+
+   To run this example locally, download
+   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -46,8 +52,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from copy import copy
 import matplotlib.pyplot as plt
-from vis import show_vol_cuts
-from img import elliptic_cylinder_phantom
+from example_utils import show_vol_cuts
+from example_utils import elliptic_cylinder_phantom
 import numpy as np
 
 import parallelproj.operators
@@ -59,7 +65,7 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
