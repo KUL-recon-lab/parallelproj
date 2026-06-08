@@ -41,11 +41,11 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 from parallelproj.functions import NegPoissonLogL, C2AffineObjective, C1Function
 
-from vis import show_vol_cuts
-from img import elliptic_cylinder_phantom
+from example_utils import show_vol_cuts
+from example_utils import elliptic_cylinder_phantom
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

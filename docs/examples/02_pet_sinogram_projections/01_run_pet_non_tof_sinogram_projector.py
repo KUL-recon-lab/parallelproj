@@ -9,7 +9,7 @@ a resolution model and a correction for attenuation.
 
 # %%
 import matplotlib.pyplot as plt
-from vis import show_vol_cuts
+from example_utils import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -18,7 +18,7 @@ import parallelproj.operators
 from parallelproj import to_numpy_array
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

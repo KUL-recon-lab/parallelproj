@@ -28,7 +28,7 @@ import parallelproj.pet_scanners
 import parallelproj.pet_lors
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 xp, dev = suggest_array_backend_and_device(None, None)
 

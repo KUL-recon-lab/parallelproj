@@ -27,8 +27,8 @@ using the linear forward model
 # %%
 from __future__ import annotations
 import matplotlib.pyplot as plt
-from vis import show_vol_cuts
-from img import elliptic_cylinder_phantom
+from example_utils import show_vol_cuts
+from example_utils import elliptic_cylinder_phantom
 import numpy as np
 import math
 from array_api_compat import size
@@ -41,7 +41,7 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, count_event_multiplicity
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

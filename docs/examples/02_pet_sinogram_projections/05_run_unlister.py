@@ -81,10 +81,10 @@ from parallelproj.unlist import (
     detection_times_to_tof_bin,
     regular_polygon_events_to_sinogram,
 )
-from img import elliptic_cylinder_phantom
+from example_utils import elliptic_cylinder_phantom
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 xp, dev = suggest_array_backend_and_device(None, None)
 

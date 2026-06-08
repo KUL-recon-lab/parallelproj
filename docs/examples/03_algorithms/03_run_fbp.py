@@ -16,7 +16,7 @@ from utils import RadonDisk, RadonObjectSequence
 from scipy.ndimage import gaussian_filter
 
 # %%
-from array_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
