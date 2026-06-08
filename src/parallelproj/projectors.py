@@ -683,6 +683,52 @@ class RegularPolygonPETProjector(LinearOperator):
 
         empty_cuda_cache(self.xp)
 
+    def fov_mask(self) -> Array:
+        """Boolean cylindrical FOV mask for this projector's image grid.
+
+        The cylinder radius equals the transaxial distance of the midpoint
+        of the first LOR of the first sinogram view from the scanner
+        isocenter.  The cylinder axis is aligned with the scanner's
+        symmetry axis.
+
+        Returns
+        -------
+        Array of bool, shape ``in_shape``
+            ``True`` inside the cylindrical FOV, ``False`` outside.
+        """
+        xp = self.xp
+        dev = self._dev
+        sym_ax = self.lor_descriptor.scanner.symmetry_axis
+        ax0, ax1 = [ax for ax in range(3) if ax != sym_ax]
+
+        # midpoint of the first LOR of the first view in world coordinates
+        xstart, xend = self.lor_descriptor.get_lor_coordinates(
+            views=xp.asarray([0], device=dev)
+        )
+        mid = (xstart.reshape(-1, 3)[0] + xend.reshape(-1, 3)[0]) / 2
+        lor_radius = float(xp.sqrt(mid[ax0] ** 2 + mid[ax1] ** 2))
+
+        # voxel centre coordinates along the two transaxial axes
+        c0 = (
+            self._img_origin[ax0]
+            + xp.arange(self._img_shape[ax0], device=dev, dtype=xp.float32)
+            * self._voxel_size[ax0]
+        )
+        c1 = (
+            self._img_origin[ax1]
+            + xp.arange(self._img_shape[ax1], device=dev, dtype=xp.float32)
+            * self._voxel_size[ax1]
+        )
+
+        # transaxial distance from isocenter, shape (n_ax0, n_ax1)
+        r = xp.sqrt(c0[:, None] ** 2 + c1[None, :] ** 2)
+
+        # expand along symmetry axis and broadcast to full image shape
+        return (
+            xp.broadcast_to(xp.expand_dims(r, axis=sym_ax), self._img_shape)
+            <= lor_radius
+        )
+
     def __str__(self) -> str:
         """string representation"""
 

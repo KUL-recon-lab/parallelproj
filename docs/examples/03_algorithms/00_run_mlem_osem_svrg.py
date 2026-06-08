@@ -290,21 +290,7 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
-# cylindrical FOV mask: radius = radial distance of the first LOR of the first view
-_xstart, _xend = lor_desc.get_lor_coordinates(views=xp.asarray([0], device=dev))
-# midpoint of first LOR (first radial bin, first plane) in the transaxial plane
-_mid_xy = (_xstart[0, 0, 0, :2] + _xend[0, 0, 0, :2]) / 2
-lor_radius = float(xp.sqrt(xp.sum(_mid_xy**2)))
-
-_ix = (
-    xp.arange(img_shape[0], device=dev, dtype=xp.float32) - (img_shape[0] - 1) / 2
-) * voxel_size[0]
-_iy = (
-    xp.arange(img_shape[1], device=dev, dtype=xp.float32) - (img_shape[1] - 1) / 2
-) * voxel_size[1]
-_r = xp.sqrt(_ix[:, None] ** 2 + _iy[None, :] ** 2)
-cyl_mask = _r[:, :, None] <= lor_radius  # broadcast over z, shape img_shape
-
+cyl_mask = proj.fov_mask()
 sens_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 
 subset_data_fidelities = [
