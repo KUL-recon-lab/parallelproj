@@ -12,7 +12,7 @@ a description of which block pairs are in coincidence.
 
    To run this example locally, download
    `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed
+   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
