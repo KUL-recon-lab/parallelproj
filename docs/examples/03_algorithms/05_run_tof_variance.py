@@ -341,11 +341,14 @@ def em_update(
     x_cur: Array,
     data_fidelity: C1Function,
     adj_ones: Array,
+    img_mask: Array | None = None,
 ) -> Array:
     """One EM update rewritten as a preconditioned gradient descent step.
 
     Computes :math:`x^+ = x - D \\nabla f(x)` where the diagonal
     preconditioner is :math:`D = \\operatorname{diag}(x / (A^H 1))`.
+    Voxels outside the FOV are excluded via ``img_mask`` to avoid
+    division by the zero sensitivity values in ``adj_ones``.
 
     Parameters
     ----------
@@ -357,13 +360,21 @@ def em_update(
     adj_ones : Array
         Sensitivity image :math:`A^H 1` (or subset variant
         :math:`(A^k)^H 1`).
+    img_mask : Array or None, optional
+        Boolean FOV mask (``True`` inside the FOV).  Preconditioner is
+        zeroed outside the FOV so that zero-sensitivity voxels do not
+        produce NaN / Inf.  Pass ``None`` when every voxel is in the FOV.
 
     Returns
     -------
     Array
         Updated image :math:`x^+`, same shape as ``x_cur``.
     """
-    return x_cur - (x_cur / adj_ones) * data_fidelity.gradient(x_cur)
+    if img_mask is None:
+        d = x_cur / adj_ones
+    else:
+        d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
+    return x_cur - d * data_fidelity.gradient(x_cur)
 
 
 def svrg_calc_snapshot_gradients(
@@ -393,6 +404,22 @@ def svrg_update(
     approx_grad = m * (grad_k - stored_grads[subset_idx]) + full_grad
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
+
+# %%
+# FOV mask
+# --------
+#
+# The scanner's cylindrical field of view does not cover every voxel of the
+# image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity :math:`(A^H 1)_i = 0`.  Dividing by zero in the EM
+# preconditioner would produce NaN / Inf values that corrupt the
+# reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
+# boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
+# ``None`` when every image voxel is inside the FOV (no masking needed).
+
+cyl_mask = proj_non_tof.fov_mask()
+fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+del cyl_mask
 
 # %%
 # Non-TOF: subset operators, warm start, and SVRG
@@ -437,9 +464,11 @@ subset_fidelities_nt = [
 
 # --- warm start: 1 OSEM epoch ---
 x_nt = count_factor * xp.ones(img_shape, device=dev, dtype=xp.float32)
+if fov_mask is not None:
+    x_nt = xp.where(fov_mask, x_nt, xp.zeros_like(x_nt))
 for k in range(num_subsets):
     print(f"  non-TOF warm-start subset {k + 1:03}/{num_subsets:03}", end="\r")
-    x_nt = em_update(x_nt, subset_fidelities_nt[k], subset_adj_ones_nt[k])
+    x_nt = em_update(x_nt, subset_fidelities_nt[k], subset_adj_ones_nt[k], fov_mask)
 print()
 x_nt_warmstart_sm = sm_op(x_nt)
 
@@ -520,9 +549,11 @@ subset_fidelities_tof = [
 
 # --- warm start: 1 OSEM epoch ---
 x_tof = count_factor * xp.ones(img_shape, device=dev, dtype=xp.float32)
+if fov_mask is not None:
+    x_tof = xp.where(fov_mask, x_tof, xp.zeros_like(x_tof))
 for k in range(num_subsets):
     print(f"  TOF warm-start subset {k + 1:03}/{num_subsets:03}", end="\r")
-    x_tof = em_update(x_tof, subset_fidelities_tof[k], subset_adj_ones_tof[k])
+    x_tof = em_update(x_tof, subset_fidelities_tof[k], subset_adj_ones_tof[k], fov_mask)
 print()
 x_tof_warmstart_sm = sm_op(x_tof)
 

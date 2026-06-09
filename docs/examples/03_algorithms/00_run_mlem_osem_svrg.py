@@ -292,10 +292,10 @@ def em_update(
         Updated image :math:`x^+`, same shape as ``x_cur``.
     """
     if img_mask is None:
-        em_diag_precond = x_cur / adj_ones
+        d = x_cur / adj_ones
     else:
-        em_diag_precond = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
-    return x_cur - em_diag_precond * data_fidelity.gradient(x_cur)
+        d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
+    return x_cur - d * data_fidelity.gradient(x_cur)
 
 
 # %%
