@@ -35,10 +35,10 @@ projector runs on the current one.
         s_k:    ~0.65 MB
         total:  ~1.30 MB  (vs ~30 MB -- a 23x reduction)
 
-On a clinical scanner (400 rad × 400 views × 837 planes × 27 TOF bins)
+On a clinical scanner (400 rad x 400 views x 837 planes x 27 TOF bins)
 the full sinogram is ~3.5 GB each, and the saving scales accordingly.
 
-**Helper code** (in :mod:`parallelproj.sinogram`):
+**Helper code** (in :mod:`parallelproj.data`):
 
 * :class:`parallelproj.data.SubsetArrayMmap` -- read-only wrapper
   around a ``numpy.memmap`` file.  ``mmap[k]`` returns an *owned* copy of
@@ -70,17 +70,19 @@ from parallelproj.data import to_subset_mmap
 from example_utils import (
     elliptic_cylinder_phantom,
     show_vol_cuts,
-    suggest_array_backend_and_device,
 )
 
 # %%
 # Backend and device
 # ------------------
 #
-# Replace ``None, None`` with e.g. ``"numpy", "cpu"`` to force a specific
-# backend.
+# In principle we can run on any backend or device
+# However, since we will use (numpy-based) memmaps, it is best to use
+# the CPU as device.
 
-xp, dev = suggest_array_backend_and_device(None, None)
+import array_api_compat.numpy as xp
+
+dev = "cpu"
 
 # %%
 # Scanner and projector setup
