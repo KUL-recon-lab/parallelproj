@@ -342,7 +342,27 @@ def em_update(
     data_fidelity: C1Function,
     adj_ones: Array,
 ) -> Array:
-    """EM update (preconditioned gradient step) used for the warm start."""
+    """One EM update rewritten as a preconditioned gradient descent step.
+
+    Computes :math:`x^+ = x - D \\nabla f(x)` where the diagonal
+    preconditioner is :math:`D = \\operatorname{diag}(x / (A^H 1))`.
+
+    Parameters
+    ----------
+    x_cur : Array
+        Current image estimate.
+    data_fidelity : C1Function
+        Differentiable data-fidelity term whose gradient is evaluated at
+        ``x_cur``.
+    adj_ones : Array
+        Sensitivity image :math:`A^H 1` (or subset variant
+        :math:`(A^k)^H 1`).
+
+    Returns
+    -------
+    Array
+        Updated image :math:`x^+`, same shape as ``x_cur``.
+    """
     return x_cur - (x_cur / adj_ones) * data_fidelity.gradient(x_cur)
 
 

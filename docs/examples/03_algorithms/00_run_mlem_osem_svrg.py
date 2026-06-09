@@ -260,16 +260,42 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 
 def em_update(
     x_cur: Array,
-    negpoissonlogl: C1Function,
+    data_fidelity: C1Function,
     adj_ones: Array,
-    mask: Array | None = None,
+    img_mask: Array | None = None,
 ) -> Array:
-    """EM update re-written as preconditioned GD step"""
-    if mask is None:
+    """One EM update rewritten as a preconditioned gradient descent step.
+
+    Computes :math:`x^+ = x - D \\nabla f(x)` where the diagonal
+    preconditioner is :math:`D = \\operatorname{diag}(x / (A^H 1))`.
+    Voxels outside the FOV are excluded via ``img_mask`` to avoid
+    division by the zero sensitivity values in ``adj_ones``.
+
+    Parameters
+    ----------
+    x_cur : Array
+        Current image estimate.
+    data_fidelity : C1Function
+        Differentiable data-fidelity term whose gradient is evaluated at
+        ``x_cur``.
+    adj_ones : Array
+        Sensitivity image :math:`A^H 1` (or subset variant
+        :math:`(A^k)^H 1`).
+    img_mask : Array or None, optional
+        Boolean FOV mask (``True`` inside the FOV).  Preconditioner is
+        zeroed outside the FOV so that zero-sensitivity voxels do not
+        produce NaN / Inf.  Pass ``None`` when every voxel is in the FOV.
+
+    Returns
+    -------
+    Array
+        Updated image :math:`x^+`, same shape as ``x_cur``.
+    """
+    if img_mask is None:
         em_diag_precond = x_cur / adj_ones
     else:
-        em_diag_precond = xp.where(mask, x_cur / adj_ones, xp.zeros_like(x_cur))
-    return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
+        em_diag_precond = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
+    return x_cur - em_diag_precond * data_fidelity.gradient(x_cur)
 
 
 # %%
@@ -290,10 +316,31 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
+# full sensitivity image A^H 1 = sum of all subset sensitivities
+adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
+
+# %%
+# FOV mask
+# --------
+#
+# The scanner's cylindrical field of view does not cover every voxel of the
+# image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity :math:`(A^H 1)_i = 0`.  Dividing by zero in the EM
+# preconditioner would produce NaN / Inf values that corrupt the
+# reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
+# boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
+# ``None`` when every image voxel is inside the FOV (no masking needed).
+
 cyl_mask = proj.fov_mask()
 fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 del cyl_mask
 
+# %%
+# Setup of data-fidelity terms
+# ----------------------------
+#
+# We define one :class:`.C2AffineObjective` per subset (for OSEM and SVRG)
+# and one for the full data (for MLEM and objective evaluation).
 
 subset_data_fidelities = [
     C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
@@ -314,10 +361,6 @@ for k in range(len(subset_slices)):
         x_init, subset_data_fidelities[k], subset_adjoint_ones[k], fov_mask
     )
 print()
-
-# full sensitivity image: A^H 1 = sum of all subset adjoint ones
-adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
-
 
 # %%
 # MLEM
