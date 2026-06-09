@@ -131,7 +131,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 # %%
 # setup the LOR descriptor that defines the sinogram
 
-img_shape = (40, 40, 8)
+img_shape = (55, 55, 8)
 voxel_size = (2.0, 2.0, 2.0)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
@@ -317,6 +317,25 @@ full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contaminat
 # also setup the full objective F for evaluation of the iterates
 total_objective = full_data_fidelity + reg
 
+# %%
+# FOV mask
+# --------
+#
+# The scanner's cylindrical field of view does not cover every voxel of the
+# image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity :math:`(A^H 1)_i = 0`.  In this example the regulariser
+# Hessian keeps the preconditioner denominator strictly positive everywhere,
+# so there is no divide-by-zero risk.  However, zeroing the initial image
+# outside the FOV ensures those voxels stay at zero throughout reconstruction:
+# because the preconditioner is proportional to :math:`x`, a zero initialisation
+# propagates as zero updates in every subsequent SGD / SVRG step.
+# :meth:`.RegularPolygonPETProjector.fov_mask` returns a boolean array that is
+# ``True`` inside the FOV.  ``fov_mask`` is set to ``None`` when every image
+# voxel is inside the FOV (no masking needed).
+
+cyl_mask = proj.fov_mask()
+fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+del cyl_mask
 
 # %%
 # Warm start
@@ -325,11 +344,15 @@ total_objective = full_data_fidelity + reg
 # Run one SGD epoch with regularisation as a common warm-start.
 
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+if fov_mask is not None:
+    x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
 for k in range(num_subsets):
     print(f"warm-start SGD subset {(k+1):03} / {num_subsets:03}", end="\r")
-    init_precond = x_init / (
-        adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
-    )
+    _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
+    if fov_mask is None:
+        init_precond = x_init / _denom
+    else:
+        init_precond = xp.where(fov_mask, x_init / _denom, xp.zeros_like(x_init))
     x_init = xp.clip(
         x_init - init_precond * (num_subsets * subset_objectives[k].gradient(x_init)),
         0,
@@ -360,9 +383,11 @@ sgd_recons[0, ...] = x_sgd
 
 for i in range(num_epochs):
     if i % 2 == 0 and i <= 4:
-        sgd_precond = x_sgd / (
-            adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd, x_sgd)
-        )
+        _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd, x_sgd)
+        if fov_mask is None:
+            sgd_precond = x_sgd / _denom
+        else:
+            sgd_precond = xp.where(fov_mask, x_sgd / _denom, xp.zeros_like(x_sgd))
     for k in range(num_subsets):
         print(
             f"SGD epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
@@ -436,9 +461,13 @@ df_svrg[0] = total_objective(x_svrg)
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond = x_svrg / (
-                adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg, x_svrg)
-            )
+            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg, x_svrg)
+            if fov_mask is None:
+                svrg_precond = x_svrg / _denom
+            else:
+                svrg_precond = xp.where(
+                    fov_mask, x_svrg / _denom, xp.zeros_like(x_svrg)
+                )
 
         stored_grads, full_grad = svrg_calc_snapshot_gradients(
             x_svrg, subset_objectives
