@@ -91,7 +91,16 @@ autodoc_default_options = {
 autoclass_content = "both"
 autodoc_typehints = "both"
 
-suppress_warnings = ["config.cache"]
+suppress_warnings = [
+    "config.cache",
+    # ``shape`` is a valid property on several classes (SubsetArrayMmap,
+    # BlockPETScannerModule, Array Protocol, …).  autodoc_typehints="both"
+    # causes Sphinx to emit a "more than one target" warning whenever a bare
+    # ``shape`` cross-reference is resolved and finds multiple candidates.
+    # ``ref.python`` only fires for ambiguous targets; without nitpicky=True
+    # missing targets are silently skipped, so this suppression is safe.
+    "ref.python",
+]
 
 
 def _auto_minigallery(app, what, name, obj, options, lines):

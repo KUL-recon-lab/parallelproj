@@ -51,8 +51,8 @@ def test_to_subset_mmap_returns_subset_array_mmap(arr, slices, tmp_path):
     assert isinstance(result, SubsetArrayMmap)
 
 
-def test_to_subset_mmap_on_disk_shape(arr, slices, tmp_path):
-    """The on-disk shape is (num_subsets, *subset_shape)."""
+def test_to_subset_mmap_shape(arr, slices, tmp_path):
+    """shape is (num_subsets, *subset_shape)."""
     num_subsets = len(slices)
     subset_shape = arr[slices[0]].shape
     mmap = to_subset_mmap(arr, slices, tmp_path / "y.bin")

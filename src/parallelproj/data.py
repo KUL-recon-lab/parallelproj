@@ -39,7 +39,7 @@ class SubsetArrayMmap:
     --------
     >>> mmap = SubsetArrayMmap("y_subsets.bin", num_subsets=24,
     ...                        subset_shape=(171, 4, 19, 13))
-    >>> y_k = mmap[3]   # owned float32 ndarray, shape (171, 4, 19, 13)
+    >>> y_k = mmap[3]   # owned float32 ndarray of shape (171, 4, 19, 13)
     >>> del y_k          # RAM freed immediately
     """
 
@@ -48,6 +48,7 @@ class SubsetArrayMmap:
         path: str | os.PathLike,
         num_subsets: int,
         subset_shape: tuple[int, ...],
+        *,
         dtype: np.dtype = np.float32,
         mode: str = "r",
     ) -> None:
@@ -85,7 +86,7 @@ class SubsetArrayMmap:
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """Full on-disk shape ``(num_subsets, *subset_shape)``."""
+        """Full shape of the on-disk array: ``(num_subsets, *subset_shape)``."""
         return (self._num_subsets,) + self._subset_shape
 
     @property
