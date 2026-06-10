@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import warnings
+
 import numpy as _np
 import pytest
 import array_api_compat
@@ -132,57 +135,51 @@ def test_neg_poisson_logl_beta_scaling(xp: ModuleType, dev: str):
 
 
 # ---------------------------------------------------------------------------
-# NegPoissonLogLSafe
+# NegPoissonLogL safe mode
 # ---------------------------------------------------------------------------
 
+# bins 2 & 3: y = 0 AND ybar = 0 (virtual bins or noisy zeros) -> need safe mode
 _Y_SAFE_NP = _np.asarray([3.0, 1.0, 0.0, 0.0])
 _YBAR_SAFE_NP = _np.asarray([2.5, 1.5, 0.0, 0.0])
-_MASK_NP = _np.asarray([True, True, False, False])
 
 
-def test_neg_poisson_logl_safe_call_no_virtual_bins(xp: ModuleType, dev: str):
-    y = xp.asarray(_Y_NP, device=dev)
-    ybar = xp.asarray(_YBAR_NP, device=dev)
-    mask = xp.asarray(_np.asarray([True, True, True, True]), device=dev)
+def test_neg_poisson_logl_safe_matches_unsafe_on_positive_ybar(
+    xp: ModuleType, dev: str
+):
+    """With ybar > 0 everywhere, safe mode must match the plain evaluation
+    in value and gradient -- including bins where y = 0 (noisy zero counts)."""
+    y_np = _np.asarray([3.0, 0.0, 7.0, 0.0])  # bins 1 & 3: y = 0, ybar > 0
+    ybar_np = _np.asarray([2.5, 1.5, 4.0, 0.5])
+    y = xp.asarray(y_np, device=dev)
+    ybar = xp.asarray(ybar_np, device=dev)
 
-    f_safe = ppf.NegPoissonLogLSafe(y, mask)
+    f_safe = ppf.NegPoissonLogL(y, safe=True)
     f_ref = ppf.NegPoissonLogL(y)
     assert abs(f_safe(ybar) - f_ref(ybar)) < 1e-8
-
-
-def test_neg_poisson_logl_safe_gradient_no_virtual_bins(xp: ModuleType, dev: str):
-    y = xp.asarray(_Y_NP, device=dev)
-    ybar = xp.asarray(_YBAR_NP, device=dev)
-    mask = xp.asarray(_np.asarray([True, True, True, True]), device=dev)
-
-    f_safe = ppf.NegPoissonLogLSafe(y, mask)
-    f_ref = ppf.NegPoissonLogL(y)
     assert allclose(f_safe.gradient(ybar), f_ref.gradient(ybar))
 
 
-def test_neg_poisson_logl_safe_virtual_bins_zero_out(xp: ModuleType, dev: str):
-    """Virtual bins (mask=False, ybar=0) must contribute 0 to the function value."""
+def test_neg_poisson_logl_safe_call_zero_bins(xp: ModuleType, dev: str):
+    """Bins with y = 0 and ybar = 0 must contribute 0 to the function value
+    (f_i(ybar) = ybar is exact when y = 0)."""
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
-    mask = xp.asarray(_MASK_NP, device=dev)
 
-    f = ppf.NegPoissonLogLSafe(y, mask)
+    f = ppf.NegPoissonLogL(y, safe=True)
     val = f(ybar)
 
-    # only active bins contribute
     expected = float(
         _np.sum(_YBAR_SAFE_NP[:2] - _Y_SAFE_NP[:2] * _np.log(_YBAR_SAFE_NP[:2]))
     )
     assert abs(val - expected) < 1e-5
 
 
-def test_neg_poisson_logl_safe_gradient_virtual_bins(xp: ModuleType, dev: str):
-    """Virtual bins must have gradient value = 1 (the correct limiting value)."""
+def test_neg_poisson_logl_safe_gradient_zero_bins(xp: ModuleType, dev: str):
+    """Bins with y = 0 and ybar = 0 must have gradient value = 1 (exact)."""
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
-    mask = xp.asarray(_MASK_NP, device=dev)
 
-    f = ppf.NegPoissonLogLSafe(y, mask)
+    f = ppf.NegPoissonLogL(y, safe=True)
     grad = f.gradient(ybar)
 
     expected_np = _np.concatenate(
@@ -192,15 +189,14 @@ def test_neg_poisson_logl_safe_gradient_virtual_bins(xp: ModuleType, dev: str):
     assert allclose(grad, expected)
 
 
-def test_neg_poisson_logl_safe_hessian_diag_virtual_bins(xp: ModuleType, dev: str):
-    """Virtual bins must be zero in the diagonal Hessian-vector product."""
+def test_neg_poisson_logl_safe_hessian_diag_zero_bins(xp: ModuleType, dev: str):
+    """Bins with y = 0 and ybar = 0 must be zero in the diag Hessian-vector product."""
     v_np = _np.asarray([1.0, 1.0, 1.0, 1.0])
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
-    mask = xp.asarray(_MASK_NP, device=dev)
     v = xp.asarray(v_np, device=dev)
 
-    f = ppf.NegPoissonLogLSafe(y, mask)
+    f = ppf.NegPoissonLogL(y, safe=True)
     hv = f.hessian_diag_vec_prod(ybar, v)
 
     expected_np = _np.concatenate(
@@ -216,12 +212,27 @@ def test_neg_poisson_logl_safe_hessian_diag_virtual_bins(xp: ModuleType, dev: st
 def test_neg_poisson_logl_safe_call_and_gradient(xp: ModuleType, dev: str):
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
-    mask = xp.asarray(_MASK_NP, device=dev)
 
-    f = ppf.NegPoissonLogLSafe(y, mask)
+    f = ppf.NegPoissonLogL(y, safe=True)
     val, grad = f.call_and_gradient(ybar)
     assert abs(val - f(ybar)) < 1e-8
     assert allclose(grad, f.gradient(ybar))
+
+
+def test_neg_poisson_logl_safe_model_violation_yields_inf(xp: ModuleType, dev: str):
+    """y > 0 with ybar = 0 is a genuine model violation: f = +inf, grad = -inf,
+    even in safe mode (must not be masked)."""
+    y = xp.asarray(_np.asarray([3.0, 1.0]), device=dev)
+    ybar = xp.asarray(_np.asarray([2.5, 0.0]), device=dev)
+
+    f = ppf.NegPoissonLogL(y, safe=True)
+    with warnings.catch_warnings():
+        # numpy warns on log(0) / division by zero; inf is the intended result
+        warnings.simplefilter("ignore", RuntimeWarning)
+        val = f(ybar)
+        grad = f.gradient(ybar)
+    assert math.isinf(val) and val > 0
+    assert math.isinf(float(grad[1])) and float(grad[1]) < 0
 
 
 # ---------------------------------------------------------------------------
@@ -1148,40 +1159,38 @@ def test_neg_poisson_logl_prox_convex_conj_beta_scaling(xp: ModuleType, dev: str
 
 
 # ---------------------------------------------------------------------------
-# NegPoissonLogLSafe: prox_convex_conj correctness (lines 642-644)
+# NegPoissonLogL safe mode: prox_convex_conj correctness
 # ---------------------------------------------------------------------------
 
 
 def test_neg_poisson_logl_safe_prox_convex_conj(xp: ModuleType, dev: str):
-    """prox_convex_conj uses safe_data (zeros on virtual bins) (lines 642-644)."""
+    """prox_convex_conj needs no masking: with d_i = 0 the closed form already
+    yields min(y_i, 1), the prox of the conjugate of the linear loss."""
     y_np = _np.asarray([0.5, 0.8, 1.2, -0.3])
     sigma = 0.7
     y = xp.asarray(y_np, device=dev)
     d = xp.asarray(_Y_SAFE_NP, device=dev)
-    mask = xp.asarray(_MASK_NP, device=dev)
 
-    f = ppf.NegPoissonLogLSafe(d, mask)
+    f = ppf.NegPoissonLogL(d, safe=True)
     result = f.prox_convex_conj(y, sigma)
 
-    # safe_data zeros out virtual bins (indices 2, 3)
-    safe_data = _Y_SAFE_NP.copy()
-    safe_data[~_MASK_NP] = 0.0
-    expected_np = 0.5 * (y_np + 1 - _np.sqrt((y_np - 1) ** 2 + 4 * sigma * safe_data))
+    expected_np = 0.5 * (
+        y_np + 1 - _np.sqrt((y_np - 1) ** 2 + 4 * sigma * _Y_SAFE_NP)
+    )
     expected = xp.asarray(expected_np, device=dev)
     assert allclose(result, expected)
+    # bins with d = 0 (indices 2, 3) reduce to min(y, 1)
+    assert allclose(result[2:], xp.asarray(_np.minimum(y_np[2:], 1.0), device=dev))
 
 
 def test_neg_poisson_logl_safe_prox_moreau_identity(xp: ModuleType, dev: str):
-    """Moreau identity holds for NegPoissonLogLSafe on active bins."""
-    x_np = _np.asarray([2.5, 1.5, 0.0, 0.0])
+    """Moreau identity holds in safe mode on bins with y > 0."""
+    x_np = _np.asarray([2.5, 1.5])
     sigma = 0.8
-    # only test on active bins (mask=True) where f is non-linear
-    x_active = x_np[:2]
     d = xp.asarray(_Y_SAFE_NP[:2], device=dev)
-    mask = xp.asarray(_np.asarray([True, True]), device=dev)
-    x = xp.asarray(x_active, device=dev)
+    x = xp.asarray(x_np, device=dev)
 
-    f = ppf.NegPoissonLogLSafe(d, mask)
+    f = ppf.NegPoissonLogL(d, safe=True)
     p = f.prox(x, sigma)
     q = f.prox_convex_conj(x / sigma, 1.0 / sigma)
     assert allclose(p + sigma * q, x, atol=1e-6, rtol=1e-6)
