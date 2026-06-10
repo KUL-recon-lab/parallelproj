@@ -155,6 +155,7 @@ def test_neg_poisson_logl_safe_matches_unsafe_on_positive_ybar(
 
     f_safe = ppf.NegPoissonLogL(y, safe=True)
     f_ref = ppf.NegPoissonLogL(y)
+    assert f_safe.safe and not f_ref.safe
     assert abs(f_safe(ybar) - f_ref(ybar)) < 1e-8
     assert allclose(f_safe.gradient(ybar), f_ref.gradient(ybar))
 
