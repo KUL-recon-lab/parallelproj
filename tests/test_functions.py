@@ -293,6 +293,85 @@ def test_neg_poisson_logl_extra_checks_off_by_default(xp: ModuleType, dev: str):
 
 
 # ---------------------------------------------------------------------------
+# NegPoissonLogL + C2AffineObjective: analytic ML solution
+# ---------------------------------------------------------------------------
+
+# A is invertible, so the ML solution saturates the likelihood (ybar = y):
+#   x_ml = inv(A) y, with inv(A) = [[0, 1], [1, -1]]  ->  x_ml = [2, 0]
+#   ybar(x_ml) = y = [2, 2] > 0 everywhere -> unsafe mode is valid
+#   f(x_ml)    = sum(ybar - y log(ybar)) = 4 - 4 log(2)
+#   grad(x_ml) = A^T (1 - y / ybar) = A^T 0 = 0
+_A_ML_NP = _np.asarray([[1.0, 1.0], [1.0, 0.0]])
+_Y_ML_NP = _np.asarray([2.0, 2.0])
+_X_ML_NP = _np.asarray([2.0, 0.0])
+_F_ML = 4.0 - 4.0 * math.log(2.0)
+
+# same model with an extra all-zero row (third, virtual detector) measuring 0:
+#   ybar(x_ml) = [2, 2, 0] -> bin 3 has y = 0 and ybar = 0 -> needs safe mode
+#   the virtual bin contributes 0 to f and (via the zero column of A^T)
+#   nothing to the gradient, so f(x_ml) and grad(x_ml) are unchanged
+_A_ML3_NP = _np.asarray([[1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
+_Y_ML3_NP = _np.asarray([2.0, 2.0, 0.0])
+
+
+def test_neg_poisson_logl_affine_ml_solution_unsafe(xp: ModuleType, dev: str):
+    """Function value and gradient at the analytic ML solution (no virtual
+    bins, plain fast mode): f(x_ml) = 4 - 4 log(2), grad(x_ml) = 0."""
+    A = xp.asarray(_A_ML_NP, device=dev)
+    y = xp.asarray(_Y_ML_NP, device=dev)
+    x_ml = xp.asarray(_X_ML_NP, device=dev)
+
+    obj = ppf.C2AffineObjective(ppf.NegPoissonLogL(y), ppo.MatrixOperator(A))
+
+    assert abs(obj(x_ml) - _F_ML) < 1e-6
+    assert allclose(obj.gradient(x_ml), xp.zeros_like(x_ml), atol=1e-6)
+
+
+def test_neg_poisson_logl_affine_ml_solution_safe_virtual_bin(
+    xp: ModuleType, dev: str
+):
+    """With an extra virtual bin (zero row in A, y = 0) and safe mode, the
+    function value and gradient at the ML solution are identical to the
+    virtual-bin-free model."""
+    A3 = xp.asarray(_A_ML3_NP, device=dev)
+    y3 = xp.asarray(_Y_ML3_NP, device=dev)
+    x_ml = xp.asarray(_X_ML_NP, device=dev)
+
+    obj3 = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y3, safe=True), ppo.MatrixOperator(A3)
+    )
+
+    assert abs(obj3(x_ml) - _F_ML) < 1e-6
+    assert allclose(obj3.gradient(x_ml), xp.zeros_like(x_ml), atol=1e-6)
+
+    # explicit cross-check against the 2x2 model without virtual bins
+    A = xp.asarray(_A_ML_NP, device=dev)
+    y = xp.asarray(_Y_ML_NP, device=dev)
+    obj = ppf.C2AffineObjective(ppf.NegPoissonLogL(y), ppo.MatrixOperator(A))
+    assert abs(obj3(x_ml) - obj(x_ml)) < 1e-8
+    assert allclose(obj3.gradient(x_ml), obj.gradient(x_ml), atol=1e-8)
+
+
+def test_neg_poisson_logl_affine_ml_solution_unsafe_virtual_bin_nan(
+    xp: ModuleType, dev: str
+):
+    """Negative control: the virtual-bin model evaluated WITHOUT safe mode
+    must produce nan in both the function value and the gradient."""
+    A3 = xp.asarray(_A_ML3_NP, device=dev)
+    y3 = xp.asarray(_Y_ML3_NP, device=dev)
+    x_ml = xp.asarray(_X_ML_NP, device=dev)
+
+    obj3 = ppf.C2AffineObjective(ppf.NegPoissonLogL(y3), ppo.MatrixOperator(A3))
+
+    with _np.errstate(divide="ignore", invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        val = obj3(x_ml)
+        grad = obj3.gradient(x_ml)
+    assert math.isnan(val)
+    assert bool(xp.any(xp.isnan(grad)))
+
+
+# ---------------------------------------------------------------------------
 # HalfSquaredL2Deviation
 # ---------------------------------------------------------------------------
 
