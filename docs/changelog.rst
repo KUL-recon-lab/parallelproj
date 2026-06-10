@@ -70,8 +70,12 @@ New Features
   (``C1Function``, ``C2Function``, ``FunctionWithProx``, ``FunctionWithConjProx``) and
   concrete loss/regularisation implementations for optimisation:
 
-  - ``NegPoissonLogL``, ``NegPoissonLogLSafe`` — Poisson log-likelihood (sinogram and
-    masked variants)
+  - ``NegPoissonLogL`` — Poisson log-likelihood, with a ``safe`` mode (on by default)
+    that exactly handles bins where both the data and the expectation are zero (mask
+    derived from ``data == 0``, no user input needed; pass ``safe=False`` to skip the
+    extra ``where`` when the expectation is guaranteed positive, e.g. strictly positive
+    contamination), and optional ``enable_extra_checks=True`` debug mode that warns on
+    inputs producing ``nan`` / ``inf``
   - ``NegPoissonLogLListmode`` — listmode Poisson log-likelihood with built-in forward
     model
   - ``HalfSquaredL2Deviation`` — weighted least-squares deviation

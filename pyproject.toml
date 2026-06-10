@@ -106,7 +106,7 @@ hatchling = "*"
 [tool.pixi.package.run-dependencies]
 # Runtime deps: what every consumer of the built parallelproj conda
 # package needs.  Mirrors what the conda-forge feedstock declares.
-parallelproj-core = ">=2.0.5"
+parallelproj-core = ">=2.0.6"
 numpy = ">=1.23"
 scipy = ">=1.15"
 array-api-compat = ">=1.7"

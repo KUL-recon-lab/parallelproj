@@ -8,6 +8,7 @@ array-API compatible and work with NumPy, CuPy, and PyTorch.
 """
 
 import math
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
@@ -487,25 +488,146 @@ class NegPoissonLogL(C2FunctionWithConjProx):
     independently of how they were computed. Use :class:`C2AffineObjective` to
     compose with a forward model :math:`\\bar{y}(x) = A x + s`.
 
+    **Safe mode** (``safe=True``) makes the evaluation robust for bins where
+    both :math:`y_i = 0` and :math:`\\bar{y}_i = 0`, which would otherwise
+    produce ``nan`` from :math:`0 \\cdot \\log 0`, :math:`0/0`, or
+    :math:`0/0^2`.  Such bins arise either as *virtual bins* (no image voxel
+    contributes and the contamination is zero, so :math:`\\bar{y}_i = 0` by
+    construction) or as active bins that observed zero counts due to Poisson
+    noise while :math:`\\bar{y}_i \\to 0` during optimization.  In both cases
+    the per-bin function is exactly linear, :math:`f_i(\\bar{y}_i) =
+    \\bar{y}_i`, so the exact values
+
+    ============================================  ===============
+    Expression                                    Value
+    ============================================  ===============
+    :math:`\\bar{y}_i - y_i \\log \\bar{y}_i`        :math:`\\bar{y}_i`
+    :math:`1 - y_i / \\bar{y}_i`                   :math:`1`
+    :math:`y_i / \\bar{y}_i^2`                     :math:`0`
+    ============================================  ===============
+
+    are substituted on **all** bins with :math:`y_i = 0`.  This is exact (not
+    a limit approximation) for any :math:`\\bar{y}_i \\geq 0`, so no
+    user-supplied mask is needed -- the condition :math:`y_i = 0` is derived
+    from the data at init time.
+
+    .. note::
+
+        Bins with :math:`y_i > 0` and :math:`\\bar{y}_i = 0` deliberately
+        yield :math:`f = +\\infty` (and gradient :math:`-\\infty`) in both
+        modes: observing counts where the model predicts strictly zero counts
+        is a genuine model violation that should surface, not be masked.
+
     Parameters
     ----------
     data : Array
-        Measured data :math:`y`.
+        Measured data :math:`y` (non-negative).
+    beta : float, optional
+        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
+    safe : bool, optional
+        If ``True`` (default), handle bins with :math:`y_i = 0` and
+        :math:`\\bar{y}_i = 0` exactly as described above, at the cost of
+        one extra ``where`` per evaluation.
+        With ``safe=False``, such bins produce ``nan`` -- numpy emits a
+        ``RuntimeWarning``, but cupy and torch fail *silently*.  Only
+        disable safe mode when :math:`\\bar{y}_i > 0` is guaranteed for all
+        bins (e.g. strictly positive contamination), to save the extra
+        ``where``.
+    enable_extra_checks : bool, optional
+        If ``True``, inspect ``x`` on every evaluation of the function value,
+        gradient, or Hessian-diagonal product and emit a ``RuntimeWarning``
+        for problematic inputs (negative values; zeros that lead to ``nan``
+        in non-safe mode or to :math:`\\pm\\infty` at bins with
+        :math:`y_i > 0`).  Useful for debugging with cupy / torch, which --
+        unlike numpy -- produce ``nan`` / ``inf`` silently.  The checks cost
+        one reduction and a device-to-host sync per call, so they are off by
+        default.
     """
 
-    def __init__(self, data: Array):
-        super().__init__()
+    def __init__(
+        self,
+        data: Array,
+        beta: float = 1.0,
+        safe: bool = True,
+        enable_extra_checks: bool = False,
+    ):
+        super().__init__(beta)
         self._data = data
+        self._safe = safe
+        self._data_is_zero = (data == 0) if safe else None
+        self._enable_extra_checks = enable_extra_checks
+
+    @property
+    def safe(self) -> bool:
+        """Whether safe handling of bins with :math:`y_i = \\bar{y}_i = 0` is enabled."""
+        return self._safe
+
+    @property
+    def enable_extra_checks(self) -> bool:
+        """Whether input checks (with warnings) are performed on every evaluation."""
+        return self._enable_extra_checks
+
+    @enable_extra_checks.setter
+    def enable_extra_checks(self, value: bool) -> None:
+        self._enable_extra_checks = value
+
+    def _check_x(self, x: Array) -> None:
+        """Optional input validation, emits ``RuntimeWarning`` for problematic ``x``."""
+        if not self._enable_extra_checks:
+            return
+        xp = get_namespace(x)
+        xmin = float(xp.min(x))
+        if xmin < 0:
+            warnings.warn(
+                "x contains negative values: log/division are undefined and "
+                "will produce nan",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        elif xmin == 0:
+            if self._safe:
+                if bool(xp.any((x == 0) & ~self._data_is_zero)):
+                    warnings.warn(
+                        "x is 0 at bins with positive measured data: "
+                        "function value is +inf and gradient -inf there "
+                        "(model violation)",
+                        RuntimeWarning,
+                        stacklevel=3,
+                    )
+            else:
+                warnings.warn(
+                    "x contains zeros: bins with zero measured data produce "
+                    "nan (consider safe=True), bins with positive measured "
+                    "data produce +/-inf",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+
+    def _safe_x(self, x: Array) -> Array:
+        """Return ``x`` with entries replaced by 1 where ``data == 0`` (safe mode only).
+
+        On those bins the numerator :math:`y_i = 0` already nullifies the
+        log / division terms, so substituting 1 in the denominator (or log
+        argument) yields the exact values while leaving all other bins
+        untouched.
+        """
+        if not self._safe:
+            return x
+        xp = get_namespace(x)
+        return xp.where(self._data_is_zero, xp.ones_like(x), x)
 
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
-        return float(xp.sum(x - self._data * xp.log(x)))
+        self._check_x(x)
+        return float(xp.sum(x - self._data * xp.log(self._safe_x(x))))
 
     def _gradient(self, x: Array) -> Array:
-        return 1 - self._data / x
+        self._check_x(x)
+        return 1 - self._data / self._safe_x(x)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        return self._data / (x**2) * v
+        self._check_x(x)
+        return self._data / (self._safe_x(x) ** 2) * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of the negative Poisson log-likelihood.
@@ -514,6 +636,12 @@ class NegPoissonLogL(C2FunctionWithConjProx):
 
             \\left(\\operatorname{prox}_{\\sigma f^*}(y)\\right)_i
             = \\frac{1}{2}\\left(y_i + 1 - \\sqrt{(y_i - 1)^2 + 4 \\sigma d_i}\\right)
+
+        No special handling is needed in safe mode: the formula contains no
+        log or division.  For bins with :math:`d_i = 0` the loss is linear,
+        :math:`f_i(\\bar{y}_i) = \\bar{y}_i`, whose conjugate is the indicator
+        of :math:`(-\\infty, 1]` with prox :math:`\\min(y_i, 1)` -- which the
+        formula above already yields exactly when :math:`d_i = 0`.
 
         Parameters
         ----------
@@ -529,126 +657,6 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         """
         xp = get_namespace(y)
         return 0.5 * (y + 1 - xp.sqrt((y - 1) ** 2 + 4 * sigma * self._data))
-
-
-class NegPoissonLogLSafe(C2FunctionWithConjProx):
-    """Negative Poisson log-likelihood, safe for bins with zero expectation.
-
-    Identical to :class:`NegPoissonLogL` but correctly handles *virtual bins*
-    where the predicted counts :math:`\\bar{y}_i = 0`.  Naively evaluating
-    :math:`0 \\cdot \\log 0`, :math:`0 / 0`, or :math:`0 / 0^2` yields
-    ``nan``; this class avoids those cases via a user-supplied boolean mask
-    :math:`m_i` (``True`` = active bin, ``False`` = virtual bin).
-
-    .. note::
-
-        The mask cannot be derived from the measured data :math:`y` alone.
-        With Poisson noise, any active bin can observe :math:`y_i = 0`
-        while still having :math:`\\bar{y}_i > 0`, which is well-defined
-        and requires no special treatment.  The mask must reflect the
-        *structure* of the forward model: a bin is virtual when no image
-        voxel contributes to it (i.e. the corresponding row of :math:`A`
-        is zero) **and** the contamination :math:`s_i = 0`.  This
-        information is geometry-dependent and must be provided by the user.
-        If :math:`s_i > 0` for all bins, no virtual bins exist and
-        :class:`NegPoissonLogL` can be used directly.
-
-    Implements
-
-    .. math::
-
-        f(\\bar{y}) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i
-
-    with gradient
-
-    .. math::
-
-        \\nabla_{\\bar{y}} f = 1 - \\frac{y}{\\bar{y}}
-
-    and diagonal Hessian-vector product
-
-    .. math::
-
-        \\operatorname{diag}(H_f(\\bar{y})) \\odot v = \\frac{y}{\\bar{y}^2} \\odot v.
-
-    For virtual bins (:math:`m_i = \\text{False}`, :math:`\\bar{y}_i = 0`)
-    the mathematically correct limiting values are substituted:
-
-    ============================================  ==========
-    Expression                                    Limit
-    ============================================  ==========
-    :math:`\\bar{y}_i - y_i \\log \\bar{y}_i`        :math:`0`
-    :math:`1 - y_i / \\bar{y}_i`                   :math:`1`
-    :math:`y_i / \\bar{y}_i^2`                     :math:`0`
-    ============================================  ==========
-
-    Parameters
-    ----------
-    data : Array
-        Measured data :math:`y`.
-    mask : Array
-        Boolean array of the same shape as ``data``.  ``True`` for active
-        bins (:math:`\\bar{y}_i > 0` is guaranteed), ``False`` for virtual
-        bins (:math:`\\bar{y}_i = 0` by construction).
-    beta : float, optional
-        Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
-    """
-
-    def __init__(self, data: Array, mask: Array, beta: float = 1.0):
-        super().__init__(beta)
-        self._data = data
-        self._mask = mask
-
-    def _call(self, x: Array) -> float:
-        xp = get_namespace(x)
-        safe_x = xp.where(self._mask, x, xp.ones_like(x))
-        return float(
-            xp.sum(
-                x - xp.where(self._mask, self._data * xp.log(safe_x), xp.zeros_like(x))
-            )
-        )
-
-    def _gradient(self, x: Array) -> Array:
-        xp = get_namespace(x)
-        safe_x = xp.where(self._mask, x, xp.ones_like(x))
-        return 1 - xp.where(self._mask, self._data / safe_x, xp.zeros_like(x))
-
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        xp = get_namespace(x)
-        safe_x = xp.where(self._mask, x, xp.ones_like(x))
-        return xp.where(self._mask, self._data / (safe_x**2), xp.zeros_like(x)) * v
-
-    def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
-        """Proximal operator of the convex conjugate, safe for virtual bins.
-
-        Uses the same closed-form as :class:`NegPoissonLogL` with the data
-        zeroed out on virtual bins (``mask = False``).  For a virtual bin
-        the loss reduces to :math:`f_i(\\bar{y}_i) = \\bar{y}_i` (linear),
-        whose conjugate is the indicator of :math:`(-\\infty, 1]`, so the
-        prox is :math:`\\min(y_i, 1)`.  The general formula
-
-        .. math::
-
-            \\frac{1}{2}\\left(y_i + 1 - \\sqrt{(y_i-1)^2 + 4\\sigma d_i}\\right)
-
-        yields exactly :math:`\\min(y_i, 1)` when :math:`d_i = 0`, so no
-        separate branch is needed.
-
-        Parameters
-        ----------
-        y : Array
-            Input array (dual variable), same shape as the data.
-        sigma : float or Array
-            Step-size parameter :math:`\\sigma > 0`.
-
-        Returns
-        -------
-        Array
-            :math:`\\operatorname{prox}_{\\sigma f^*}(y)`.
-        """
-        xp = get_namespace(y)
-        safe_data = xp.where(self._mask, self._data, xp.zeros_like(self._data))
-        return 0.5 * (y + 1 - xp.sqrt((y - 1) ** 2 + 4 * sigma * safe_data))
 
 
 class HalfSquaredL2Deviation(C2FunctionWithConjProx):
@@ -1007,10 +1015,17 @@ class NegPoissonLogLListmode(C2Function):
 
     .. note::
 
-        Every call to :meth:`__call__`, :meth:`gradient`, or
-        :meth:`hessian_diag_vec_prod` requires that all per-event predicted
-        counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly positive**.
-        A :exc:`ValueError` is raised otherwise, so ensure that
+        No analogue of the ``safe`` mode of :class:`NegPoissonLogL` is
+        needed here: bins with :math:`y_i = 0` cannot appear in the event
+        list, so the indeterminate :math:`0 \\cdot \\log 0` / :math:`0/0`
+        cases are excluded by construction.  The only remaining failure mode
+        is a *detected* event with zero predicted counts
+        (:math:`\\bar{y}_e = 0`, equivalent to :math:`y_i > 0`,
+        :math:`\\bar{y}_i = 0` in sinogram space), which is a genuine model
+        violation.  Every call to :meth:`__call__`, :meth:`gradient`, or
+        :meth:`hessian_diag_vec_prod` therefore requires that all per-event
+        predicted counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly
+        positive**.  A :exc:`ValueError` is raised otherwise, so ensure that
         ``contamination_list`` is positive whenever the image :math:`x` may
         have zero-valued voxels.
 
@@ -1176,16 +1191,15 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
 
     Pure linear forward model with virtual bins (zero rows in :math:`A`)
-    handled via :class:`NegPoissonLogLSafe` and a user-supplied mask:
+    handled via :class:`NegPoissonLogL` in safe mode (no mask needed --
+    bins with :math:`y_i = 0` are derived from the data):
 
-    >>> from parallelproj.functions import NegPoissonLogLSafe
     >>> A2 = np.zeros((6, 4))
     >>> A2[:4, :] = np.random.rand(4, 4)   # last 2 rows are virtual (all zero)
     >>> op2   = MatrixOperator(A2)
     >>> data2 = np.array([2., 1., 3., 0., 0., 0.])  # virtual bins measure 0
-    >>> mask  = np.array([True, True, True, True, False, False])
     >>>
-    >>> loss2 = NegPoissonLogLSafe(data2, mask)
+    >>> loss2 = NegPoissonLogL(data2, safe=True)
     >>> aff_obj2 = C2AffineObjective(loss2, op2)            # no contamination s
     >>>
     >>> fx2   = aff_obj2(x)                                 # scalar function value, no nan

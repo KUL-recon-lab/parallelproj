@@ -295,6 +295,17 @@ reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
 #
 # We define one subset objective :math:`f_k` per subset and one full
 # objective :math:`F` for evaluation, as well as the sensitivity image :math:`A^H 1`
+#
+# .. note::
+#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
+#     handles bins where the measured **and** the expected data are both zero,
+#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
+#     (silently so with cupy / torch).  It costs one extra elementwise
+#     ``where`` per evaluation.  Since our contamination is strictly positive,
+#     the expected data ``A x + s`` is positive in every bin and we can
+#     disable safe mode for speed.  Keep ``safe=True`` whenever the expected
+#     data can reach zero, e.g. with zero contamination or "virtual" bins
+#     without geometric sensitivity.
 
 # sensitivity image (adjoint of all-ones vector)
 adjoint_ones = pet_lin_op.adjoint(
@@ -304,14 +315,24 @@ adjoint_ones = pet_lin_op.adjoint(
 # reg/m term shared by all subset objectives
 reg_per_subset = C2AffineObjective(LogCosh(delta=delta, beta=beta / num_subsets), G)
 
+# safe mode is only needed if the expected data can be 0 in some bins,
+# which cannot happen if the contamination is strictly positive
+safe_mode = bool(xp.min(contamination) == 0)
+
 # f_k = data_fidelity_k + (beta/m) * R(x)
 subset_objectives = [
-    C2AffineObjective(NegPoissonLogL(y[sl]), pet_subset_linop_seq[k], contamination[sl])
+    C2AffineObjective(
+        NegPoissonLogL(y[sl], safe=safe_mode),
+        pet_subset_linop_seq[k],
+        contamination[sl],
+    )
     + reg_per_subset
     for k, sl in enumerate(subset_slices)
 ]
 
-full_data_fidelity = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
+full_data_fidelity = C2AffineObjective(
+    NegPoissonLogL(y, safe=safe_mode), pet_lin_op, contamination
+)
 
 
 # also setup the full objective F for evaluation of the iterates
