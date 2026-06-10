@@ -433,6 +433,22 @@ del cyl_mask
 # The warm start runs a single OSEM epoch, which moves the initial flat
 # image close enough to the solution for the SVRG preconditioner to be
 # meaningful from the very first epoch.
+#
+# .. note::
+#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
+#     handles bins where the measured **and** the expected data are both zero,
+#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
+#     (silently so with cupy / torch).  It costs one extra elementwise
+#     ``where`` per evaluation.  Since our contamination is strictly positive
+#     (in TOF and non-TOF form), the expected data ``A x + s`` are positive
+#     in every bin and we can disable safe mode for speed.  Keep
+#     ``safe=True`` whenever the expected data can reach zero, e.g. with zero
+#     contamination or "virtual" bins without geometric sensitivity.
+
+# safe mode is only needed if the expected data can be 0 in some bins,
+# which cannot happen if the contamination is strictly positive
+safe_mode_nt = bool(xp.min(contamination_non_tof) == 0)
+safe_mode_tof = bool(xp.min(contamination_tof) == 0)
 
 proj_non_tof.clear_cached_lor_endpoints()
 subset_linops_nt = []
@@ -455,7 +471,7 @@ adjoint_ones_nt = xp.sum(subset_adj_ones_nt, axis=0)
 
 subset_fidelities_nt = [
     C2AffineObjective(
-        NegPoissonLogL(y_non_tof[subset_slices_nt[k]]),
+        NegPoissonLogL(y_non_tof[subset_slices_nt[k]], safe=safe_mode_nt),
         subset_linops_nt[k],
         contamination_non_tof[subset_slices_nt[k]],
     )
@@ -540,7 +556,7 @@ adjoint_ones_tof = xp.sum(subset_adj_ones_tof, axis=0)
 
 subset_fidelities_tof = [
     C2AffineObjective(
-        NegPoissonLogL(y_tof[subset_slices_tof[k]]),
+        NegPoissonLogL(y_tof[subset_slices_tof[k]], safe=safe_mode_tof),
         subset_linops_tof[k],
         contamination_tof[subset_slices_tof[k]],
     )

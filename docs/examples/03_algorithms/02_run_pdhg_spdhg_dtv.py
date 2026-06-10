@@ -481,6 +481,18 @@ for i in range(num_epochs_mlem):
 #   ``data_fid_full`` is the full-sinogram version used by PDHG and for cost evaluation,
 # - ``nonneg``           -- :class:`.NonNegativeIndicator`, implements :math:`g = \iota_{\geq 0}`,
 # - ``reg``              -- :class:`.MixedL21Norm` (weighted by ``beta``), implements :math:`\beta f_\text{reg}`.
+#
+# .. note::
+#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
+#     handles bins where the measured **and** the expected data are both zero,
+#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
+#     (silently so with cupy / torch).  It costs one extra elementwise
+#     ``where`` per evaluation (only in the function value / gradient -- the
+#     dual prox used by PDHG / SPDHG needs no special handling).  Since our
+#     contamination is strictly positive, the expected data are positive in
+#     every bin and we can disable safe mode for speed.  Keep ``safe=True``
+#     whenever the expected data can reach zero, e.g. with zero contamination
+#     or "virtual" bins without geometric sensitivity.
 
 # setup the finite-difference gradient operator
 G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
@@ -490,15 +502,20 @@ joint_vector_field = G(x_struct)
 P = parallelproj.operators.GradientFieldProjectionOperator(joint_vector_field, eta=1e-4)
 D = parallelproj.operators.CompositeLinearOperator((P, G))
 
+# safe mode is only needed if the expected data can be 0 in some bins,
+# which cannot happen if the contamination is strictly positive
+safe_mode = bool(xp.min(contamination) == 0)
+
 # one data-fidelity function per subset
 data_fid_subsets = [
-    parallelproj.functions.NegPoissonLogL(d[sl]) for sl in subset_slices
+    parallelproj.functions.NegPoissonLogL(d[sl], safe=safe_mode)
+    for sl in subset_slices
 ]
 nonneg = parallelproj.functions.NonNegativeIndicator()
 reg = parallelproj.functions.MixedL21Norm(beta=beta)
 
 # full data fidelity for cost evaluation only
-data_fid_full = parallelproj.functions.NegPoissonLogL(d)
+data_fid_full = parallelproj.functions.NegPoissonLogL(d, safe=safe_mode)
 
 
 # %%

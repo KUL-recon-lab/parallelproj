@@ -525,13 +525,14 @@ class NegPoissonLogL(C2FunctionWithConjProx):
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
     safe : bool, optional
-        If ``True``, handle bins with :math:`y_i = 0` and
+        If ``True`` (default), handle bins with :math:`y_i = 0` and
         :math:`\\bar{y}_i = 0` exactly as described above, at the cost of
-        one extra ``where`` per evaluation.  Defaults to ``False``.
+        one extra ``where`` per evaluation.
         With ``safe=False``, such bins produce ``nan`` -- numpy emits a
-        ``RuntimeWarning``, but cupy and torch fail *silently*.  Enable safe
-        mode whenever :math:`\\bar{y}_i = 0` cannot be ruled out (e.g. zero
-        contamination and a non-negative update that can reach 0).
+        ``RuntimeWarning``, but cupy and torch fail *silently*.  Only
+        disable safe mode when :math:`\\bar{y}_i > 0` is guaranteed for all
+        bins (e.g. strictly positive contamination), to save the extra
+        ``where``.
     enable_extra_checks : bool, optional
         If ``True``, inspect ``x`` on every evaluation of the function value,
         gradient, or Hessian-diagonal product and emit a ``RuntimeWarning``
@@ -547,7 +548,7 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         self,
         data: Array,
         beta: float = 1.0,
-        safe: bool = False,
+        safe: bool = True,
         enable_extra_checks: bool = False,
     ):
         super().__init__(beta)

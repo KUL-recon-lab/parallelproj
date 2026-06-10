@@ -153,8 +153,8 @@ def test_neg_poisson_logl_safe_matches_unsafe_on_positive_ybar(
     y = xp.asarray(y_np, device=dev)
     ybar = xp.asarray(ybar_np, device=dev)
 
-    f_safe = ppf.NegPoissonLogL(y, safe=True)
-    f_ref = ppf.NegPoissonLogL(y)
+    f_safe = ppf.NegPoissonLogL(y)  # safe=True is the default
+    f_ref = ppf.NegPoissonLogL(y, safe=False)
     assert f_safe.safe and not f_ref.safe
     assert abs(f_safe(ybar) - f_ref(ybar)) < 1e-8
     assert allclose(f_safe.gradient(ybar), f_ref.gradient(ybar))
@@ -241,7 +241,7 @@ def test_neg_poisson_logl_extra_checks_warn_unsafe(xp: ModuleType, dev: str):
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)  # contains zeros
 
-    f = ppf.NegPoissonLogL(y, enable_extra_checks=True)
+    f = ppf.NegPoissonLogL(y, safe=False, enable_extra_checks=True)
     # np.errstate silences numpy's own 0/0 warning without affecting the
     # warnings module (no-op for other backends)
     with pytest.warns(RuntimeWarning, match="contains zeros"), _np.errstate(
@@ -322,7 +322,9 @@ def test_neg_poisson_logl_affine_ml_solution_unsafe(xp: ModuleType, dev: str):
     y = xp.asarray(_Y_ML_NP, device=dev)
     x_ml = xp.asarray(_X_ML_NP, device=dev)
 
-    obj = ppf.C2AffineObjective(ppf.NegPoissonLogL(y), ppo.MatrixOperator(A))
+    obj = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y, safe=False), ppo.MatrixOperator(A)
+    )
 
     assert abs(obj(x_ml) - _F_ML) < 1e-6
     assert allclose(obj.gradient(x_ml), xp.zeros_like(x_ml), atol=1e-6)
@@ -362,7 +364,9 @@ def test_neg_poisson_logl_affine_ml_solution_unsafe_virtual_bin_nan(
     y3 = xp.asarray(_Y_ML3_NP, device=dev)
     x_ml = xp.asarray(_X_ML_NP, device=dev)
 
-    obj3 = ppf.C2AffineObjective(ppf.NegPoissonLogL(y3), ppo.MatrixOperator(A3))
+    obj3 = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y3, safe=False), ppo.MatrixOperator(A3)
+    )
 
     with _np.errstate(divide="ignore", invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
