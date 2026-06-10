@@ -1015,10 +1015,17 @@ class NegPoissonLogLListmode(C2Function):
 
     .. note::
 
-        Every call to :meth:`__call__`, :meth:`gradient`, or
-        :meth:`hessian_diag_vec_prod` requires that all per-event predicted
-        counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly positive**.
-        A :exc:`ValueError` is raised otherwise, so ensure that
+        No analogue of the ``safe`` mode of :class:`NegPoissonLogL` is
+        needed here: bins with :math:`y_i = 0` cannot appear in the event
+        list, so the indeterminate :math:`0 \\cdot \\log 0` / :math:`0/0`
+        cases are excluded by construction.  The only remaining failure mode
+        is a *detected* event with zero predicted counts
+        (:math:`\\bar{y}_e = 0`, equivalent to :math:`y_i > 0`,
+        :math:`\\bar{y}_i = 0` in sinogram space), which is a genuine model
+        violation.  Every call to :meth:`__call__`, :meth:`gradient`, or
+        :meth:`hessian_diag_vec_prod` therefore requires that all per-event
+        predicted counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly
+        positive**.  A :exc:`ValueError` is raised otherwise, so ensure that
         ``contamination_list`` is positive whenever the image :math:`x` may
         have zero-valued voxels.
 
