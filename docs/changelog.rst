@@ -72,7 +72,8 @@ New Features
 
   - ``NegPoissonLogL`` — Poisson log-likelihood, with optional ``safe=True`` mode that
     exactly handles bins where both the data and the expectation are zero (mask derived
-    from ``data == 0``, no user input needed)
+    from ``data == 0``, no user input needed), and optional ``enable_extra_checks=True``
+    debug mode that warns on inputs producing ``nan`` / ``inf``
   - ``NegPoissonLogLListmode`` — listmode Poisson log-likelihood with built-in forward
     model
   - ``HalfSquaredL2Deviation`` — weighted least-squares deviation

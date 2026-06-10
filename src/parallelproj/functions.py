@@ -8,6 +8,7 @@ array-API compatible and work with NumPy, CuPy, and PyTorch.
 """
 
 import math
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
@@ -528,22 +529,78 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         :math:`\\bar{y}_i = 0` exactly as described above, at the cost of
         one extra ``where`` per evaluation.  Defaults to ``False``.
         With ``safe=False``, such bins produce ``nan`` -- numpy emits a
-        ``RuntimeWarning``, but cupy and torch fail *silently*.  No runtime
-        check is performed; enable safe mode whenever :math:`\\bar{y}_i = 0`
-        cannot be ruled out (e.g. zero contamination and a non-negative
-        update that can reach 0).
+        ``RuntimeWarning``, but cupy and torch fail *silently*.  Enable safe
+        mode whenever :math:`\\bar{y}_i = 0` cannot be ruled out (e.g. zero
+        contamination and a non-negative update that can reach 0).
+    enable_extra_checks : bool, optional
+        If ``True``, inspect ``x`` on every evaluation of the function value,
+        gradient, or Hessian-diagonal product and emit a ``RuntimeWarning``
+        for problematic inputs (negative values; zeros that lead to ``nan``
+        in non-safe mode or to :math:`\\pm\\infty` at bins with
+        :math:`y_i > 0`).  Useful for debugging with cupy / torch, which --
+        unlike numpy -- produce ``nan`` / ``inf`` silently.  The checks cost
+        one reduction and a device-to-host sync per call, so they are off by
+        default.
     """
 
-    def __init__(self, data: Array, beta: float = 1.0, safe: bool = False):
+    def __init__(
+        self,
+        data: Array,
+        beta: float = 1.0,
+        safe: bool = False,
+        enable_extra_checks: bool = False,
+    ):
         super().__init__(beta)
         self._data = data
         self._safe = safe
         self._data_is_zero = (data == 0) if safe else None
+        self._enable_extra_checks = enable_extra_checks
 
     @property
     def safe(self) -> bool:
         """Whether safe handling of bins with :math:`y_i = \\bar{y}_i = 0` is enabled."""
         return self._safe
+
+    @property
+    def enable_extra_checks(self) -> bool:
+        """Whether input checks (with warnings) are performed on every evaluation."""
+        return self._enable_extra_checks
+
+    @enable_extra_checks.setter
+    def enable_extra_checks(self, value: bool) -> None:
+        self._enable_extra_checks = value
+
+    def _check_x(self, x: Array) -> None:
+        """Optional input validation, emits ``RuntimeWarning`` for problematic ``x``."""
+        if not self._enable_extra_checks:
+            return
+        xp = get_namespace(x)
+        xmin = float(xp.min(x))
+        if xmin < 0:
+            warnings.warn(
+                "x contains negative values: log/division are undefined and "
+                "will produce nan",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        elif xmin == 0:
+            if self._safe:
+                if bool(xp.any((x == 0) & ~self._data_is_zero)):
+                    warnings.warn(
+                        "x is 0 at bins with positive measured data: "
+                        "function value is +inf and gradient -inf there "
+                        "(model violation)",
+                        RuntimeWarning,
+                        stacklevel=3,
+                    )
+            else:
+                warnings.warn(
+                    "x contains zeros: bins with zero measured data produce "
+                    "nan (consider safe=True), bins with positive measured "
+                    "data produce +/-inf",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
 
     def _safe_x(self, x: Array) -> Array:
         """Return ``x`` with entries replaced by 1 where ``data == 0`` (safe mode only).
@@ -560,12 +617,15 @@ class NegPoissonLogL(C2FunctionWithConjProx):
 
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
+        self._check_x(x)
         return float(xp.sum(x - self._data * xp.log(self._safe_x(x))))
 
     def _gradient(self, x: Array) -> Array:
+        self._check_x(x)
         return 1 - self._data / self._safe_x(x)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        self._check_x(x)
         return self._data / (self._safe_x(x) ** 2) * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:

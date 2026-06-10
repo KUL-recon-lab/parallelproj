@@ -235,6 +235,63 @@ def test_neg_poisson_logl_safe_model_violation_yields_inf(xp: ModuleType, dev: s
     assert math.isinf(float(grad[1])) and float(grad[1]) < 0
 
 
+def test_neg_poisson_logl_extra_checks_warn_unsafe(xp: ModuleType, dev: str):
+    """enable_extra_checks warns on zeros in x when safe=False."""
+    y = xp.asarray(_Y_SAFE_NP, device=dev)
+    ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)  # contains zeros
+
+    f = ppf.NegPoissonLogL(y, enable_extra_checks=True)
+    # np.errstate silences numpy's own 0/0 warning without affecting the
+    # warnings module (no-op for other backends)
+    with pytest.warns(RuntimeWarning, match="contains zeros"), _np.errstate(
+        divide="ignore", invalid="ignore"
+    ):
+        f.gradient(ybar)
+
+
+def test_neg_poisson_logl_extra_checks_warn_negative(xp: ModuleType, dev: str):
+    """enable_extra_checks warns on negative values in x."""
+    y = xp.asarray(_Y_NP, device=dev)
+    ybar = xp.asarray(_np.asarray([2.5, -1.5, 4.0, 0.5]), device=dev)
+
+    f = ppf.NegPoissonLogL(y, safe=True, enable_extra_checks=True)
+    with pytest.warns(RuntimeWarning, match="negative"):
+        f.gradient(ybar)
+
+
+def test_neg_poisson_logl_extra_checks_safe_mode(xp: ModuleType, dev: str):
+    """In safe mode, zeros at bins with y == 0 are fine (no warning); zeros at
+    bins with y > 0 warn about the model violation."""
+    y = xp.asarray(_Y_SAFE_NP, device=dev)
+    ybar_ok = xp.asarray(_YBAR_SAFE_NP, device=dev)  # zeros only where y == 0
+
+    f = ppf.NegPoissonLogL(y, safe=True, enable_extra_checks=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        f.gradient(ybar_ok)  # must not warn
+
+    ybar_bad = xp.asarray(_np.asarray([2.5, 0.0, 0.0, 0.0]), device=dev)  # y[1] > 0
+    with pytest.warns(RuntimeWarning, match="positive measured data"), _np.errstate(
+        divide="ignore", invalid="ignore"
+    ):
+        f.gradient(ybar_bad)
+
+
+def test_neg_poisson_logl_extra_checks_off_by_default(xp: ModuleType, dev: str):
+    """Without enable_extra_checks, no parallelproj warning is emitted on positive x."""
+    y = xp.asarray(_Y_NP, device=dev)
+    ybar = xp.asarray(_YBAR_NP, device=dev)
+
+    f = ppf.NegPoissonLogL(y)
+    assert not f.enable_extra_checks
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        f.gradient(ybar)  # must not warn
+    # property setter
+    f.enable_extra_checks = True
+    assert f.enable_extra_checks
+
+
 # ---------------------------------------------------------------------------
 # HalfSquaredL2Deviation
 # ---------------------------------------------------------------------------
