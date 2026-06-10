@@ -527,6 +527,11 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         If ``True``, handle bins with :math:`y_i = 0` and
         :math:`\\bar{y}_i = 0` exactly as described above, at the cost of
         one extra ``where`` per evaluation.  Defaults to ``False``.
+        With ``safe=False``, such bins produce ``nan`` -- numpy emits a
+        ``RuntimeWarning``, but cupy and torch fail *silently*.  No runtime
+        check is performed; enable safe mode whenever :math:`\\bar{y}_i = 0`
+        cannot be ruled out (e.g. zero contamination and a non-negative
+        update that can reach 0).
     """
 
     def __init__(self, data: Array, beta: float = 1.0, safe: bool = False):
