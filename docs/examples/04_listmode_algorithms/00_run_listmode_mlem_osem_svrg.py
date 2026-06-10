@@ -290,8 +290,25 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 # Both gradients are mathematically equivalent because each detected event
 # from sinogram bin :math:`i` contributes the same :math:`\log\bar{y}_i`
 # term, so :math:`\sum_e \log\bar{y}_{j_e} = \sum_i y_i\log\bar{y}_i`.
+#
+# .. note::
+#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
+#     handles bins where the measured **and** the expected data are both zero,
+#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
+#     (silently so with cupy / torch).  It costs one extra elementwise
+#     ``where`` per evaluation.  Since our contamination is strictly positive,
+#     the expected data ``A x + s`` are positive in every bin and we can
+#     disable safe mode for speed.  Keep ``safe=True`` whenever the expected
+#     data can reach zero, e.g. with zero contamination or "virtual" bins
+#     without geometric sensitivity.
 
-sinogram_neg_logL = C2AffineObjective(NegPoissonLogL(y), pet_lin_op, contamination)
+# safe mode is only needed if the expected data can be 0 in some bins,
+# which cannot happen if the contamination is strictly positive
+safe_mode = bool(xp.min(contamination) == 0)
+
+sinogram_neg_logL = C2AffineObjective(
+    NegPoissonLogL(y, safe=safe_mode), pet_lin_op, contamination
+)
 
 # The sensitivity image A^T 1 is required by NegPoissonLogLListmode.
 # It equals the adjoint of the *sinogram* (full) forward model applied to
@@ -360,7 +377,9 @@ for k, op in enumerate(sino_subset_linop_list):
 
 sino_subset_neg_logL = [
     C2AffineObjective(
-        NegPoissonLogL(y[sl]), sino_subset_linop_list[k], contamination[sl]
+        NegPoissonLogL(y[sl], safe=safe_mode),
+        sino_subset_linop_list[k],
+        contamination[sl],
     )
     for k, sl in enumerate(subset_slices)
 ]
