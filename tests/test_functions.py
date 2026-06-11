@@ -86,9 +86,15 @@ def test_neg_poisson_logl_call(xp: ModuleType, dev: str):
     y = xp.asarray(_Y_NP, device=dev)
     ybar = xp.asarray(_YBAR_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(y)
+    f = ppf.NegPoissonLogL(y, exact=True)
     expected = float(_np.sum(_YBAR_NP - _Y_NP * _np.log(_YBAR_NP)))
     assert abs(f(ybar) - expected) < 1e-5
+
+    # default (eps) mode evaluates the shifted-Poisson surrogate
+    f_eps = ppf.NegPoissonLogL(y)
+    e = f_eps.eps
+    expected_eps = float(_np.sum(_YBAR_NP - (_Y_NP + e) * _np.log(_YBAR_NP + e)))
+    assert abs(f_eps(ybar) - expected_eps) < 1e-5
 
 
 def test_neg_poisson_logl_gradient(xp: ModuleType, dev: str):
@@ -117,10 +123,17 @@ def test_neg_poisson_logl_hessian_diag_vec_prod(xp: ModuleType, dev: str):
     ybar = xp.asarray(_YBAR_NP, device=dev)
     v = xp.asarray(v_np, device=dev)
 
-    f = ppf.NegPoissonLogL(y)
+    f = ppf.NegPoissonLogL(y, exact=True)
     hv = f.hessian_diag_vec_prod(ybar, v)
     expected = xp.asarray(_Y_NP / _YBAR_NP**2 * v_np, device=dev)
     assert allclose(hv, expected)
+
+    # default (eps) mode
+    f_eps = ppf.NegPoissonLogL(y)
+    e = f_eps.eps
+    hv_eps = f_eps.hessian_diag_vec_prod(ybar, v)
+    expected_eps = xp.asarray((_Y_NP + e) / (_YBAR_NP + e) ** 2 * v_np, device=dev)
+    assert allclose(hv_eps, expected_eps)
 
 
 def test_neg_poisson_logl_beta_scaling(xp: ModuleType, dev: str):
@@ -135,38 +148,22 @@ def test_neg_poisson_logl_beta_scaling(xp: ModuleType, dev: str):
 
 
 # ---------------------------------------------------------------------------
-# NegPoissonLogL safe mode
+# NegPoissonLogL exact mode (exact=True)
 # ---------------------------------------------------------------------------
 
-# bins 2 & 3: y = 0 AND ybar = 0 (virtual bins or noisy zeros) -> need safe mode
+# bins 2 & 3: y = 0 AND ybar = 0 (virtual bins or noisy zeros)
 _Y_SAFE_NP = _np.asarray([3.0, 1.0, 0.0, 0.0])
 _YBAR_SAFE_NP = _np.asarray([2.5, 1.5, 0.0, 0.0])
 
 
-def test_neg_poisson_logl_safe_matches_unsafe_on_positive_ybar(
-    xp: ModuleType, dev: str
-):
-    """With ybar > 0 everywhere, safe mode must match the plain evaluation
-    in value and gradient -- including bins where y = 0 (noisy zero counts)."""
-    y_np = _np.asarray([3.0, 0.0, 7.0, 0.0])  # bins 1 & 3: y = 0, ybar > 0
-    ybar_np = _np.asarray([2.5, 1.5, 4.0, 0.5])
-    y = xp.asarray(y_np, device=dev)
-    ybar = xp.asarray(ybar_np, device=dev)
-
-    f_safe = ppf.NegPoissonLogL(y)  # safe=True is the default
-    f_ref = ppf.NegPoissonLogL(y, safe=False)
-    assert f_safe.safe and not f_ref.safe
-    assert abs(f_safe(ybar) - f_ref(ybar)) < 1e-8
-    assert allclose(f_safe.gradient(ybar), f_ref.gradient(ybar))
-
-
-def test_neg_poisson_logl_safe_call_zero_bins(xp: ModuleType, dev: str):
+def test_neg_poisson_logl_exact_call_zero_bins(xp: ModuleType, dev: str):
     """Bins with y = 0 and ybar = 0 must contribute 0 to the function value
     (f_i(ybar) = ybar is exact when y = 0)."""
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(y, safe=True)
+    f = ppf.NegPoissonLogL(y, exact=True)
+    assert f.exact and f.eps == 0.0
     val = f(ybar)
 
     expected = float(
@@ -175,29 +172,29 @@ def test_neg_poisson_logl_safe_call_zero_bins(xp: ModuleType, dev: str):
     assert abs(val - expected) < 1e-5
 
 
-def test_neg_poisson_logl_safe_gradient_zero_bins(xp: ModuleType, dev: str):
-    """Bins with y = 0 and ybar = 0 must have gradient value = 1 (exact)."""
-    y = xp.asarray(_Y_SAFE_NP, device=dev)
-    ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
+def test_neg_poisson_logl_exact_gradient_zero_bins(xp: ModuleType, dev: str):
+    """Bins with y = 0 must have gradient value = 1 (exact), for ybar = 0
+    and ybar > 0 alike."""
+    y = xp.asarray(_np.asarray([3.0, 1.0, 0.0, 0.0]), device=dev)
+    ybar_np = _np.asarray([2.5, 1.5, 0.0, 0.5])  # y=0 bins: ybar 0 and > 0
+    ybar = xp.asarray(ybar_np, device=dev)
 
-    f = ppf.NegPoissonLogL(y, safe=True)
+    f = ppf.NegPoissonLogL(y, exact=True)
     grad = f.gradient(ybar)
 
-    expected_np = _np.concatenate(
-        [1.0 - _Y_SAFE_NP[:2] / _YBAR_SAFE_NP[:2], _np.asarray([1.0, 1.0])]
-    )
+    expected_np = _np.asarray([1.0 - 3.0 / 2.5, 1.0 - 1.0 / 1.5, 1.0, 1.0])
     expected = xp.asarray(expected_np, device=dev)
     assert allclose(grad, expected)
 
 
-def test_neg_poisson_logl_safe_hessian_diag_zero_bins(xp: ModuleType, dev: str):
+def test_neg_poisson_logl_exact_hessian_diag_zero_bins(xp: ModuleType, dev: str):
     """Bins with y = 0 and ybar = 0 must be zero in the diag Hessian-vector product."""
     v_np = _np.asarray([1.0, 1.0, 1.0, 1.0])
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
     v = xp.asarray(v_np, device=dev)
 
-    f = ppf.NegPoissonLogL(y, safe=True)
+    f = ppf.NegPoissonLogL(y, exact=True)
     hv = f.hessian_diag_vec_prod(ybar, v)
 
     expected_np = _np.concatenate(
@@ -210,23 +207,23 @@ def test_neg_poisson_logl_safe_hessian_diag_zero_bins(xp: ModuleType, dev: str):
     assert allclose(hv, expected)
 
 
-def test_neg_poisson_logl_safe_call_and_gradient(xp: ModuleType, dev: str):
+def test_neg_poisson_logl_exact_call_and_gradient(xp: ModuleType, dev: str):
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(y, safe=True)
+    f = ppf.NegPoissonLogL(y, exact=True)
     val, grad = f.call_and_gradient(ybar)
     assert abs(val - f(ybar)) < 1e-8
     assert allclose(grad, f.gradient(ybar))
 
 
-def test_neg_poisson_logl_safe_model_violation_yields_inf(xp: ModuleType, dev: str):
-    """y > 0 with ybar = 0 is a genuine model violation: f = +inf, grad = -inf,
-    even in safe mode (must not be masked)."""
+def test_neg_poisson_logl_exact_model_violation_yields_inf(xp: ModuleType, dev: str):
+    """y > 0 with ybar = 0 is a genuine model violation: f = +inf, grad = -inf
+    in exact mode (must not be masked)."""
     y = xp.asarray(_np.asarray([3.0, 1.0]), device=dev)
     ybar = xp.asarray(_np.asarray([2.5, 0.0]), device=dev)
 
-    f = ppf.NegPoissonLogL(y, safe=True)
+    f = ppf.NegPoissonLogL(y, exact=True)
     with warnings.catch_warnings():
         # numpy warns on log(0) / division by zero; inf is the intended result
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -236,37 +233,129 @@ def test_neg_poisson_logl_safe_model_violation_yields_inf(xp: ModuleType, dev: s
     assert math.isinf(float(grad[1])) and float(grad[1]) < 0
 
 
-def test_neg_poisson_logl_extra_checks_warn_unsafe(xp: ModuleType, dev: str):
-    """enable_extra_checks warns on zeros in x when safe=False."""
-    y = xp.asarray(_Y_SAFE_NP, device=dev)
-    ybar = xp.asarray(_YBAR_SAFE_NP, device=dev)  # contains zeros
+# ---------------------------------------------------------------------------
+# NegPoissonLogL default ("safe epsilon" / shifted Poisson) mode
+# ---------------------------------------------------------------------------
 
-    f = ppf.NegPoissonLogL(y, safe=False, enable_extra_checks=True)
-    # np.errstate silences numpy's own 0/0 warning without affecting the
-    # warnings module (no-op for other backends)
-    with pytest.warns(RuntimeWarning, match="contains zeros"), _np.errstate(
-        divide="ignore", invalid="ignore"
-    ):
-        f.gradient(ybar)
+
+def test_neg_poisson_logl_eps_finite_on_zero_bins(xp: ModuleType, dev: str):
+    """The default mode is finite for all ybar >= 0: gradient 0 at bins with
+    y = ybar = 0, gradient -y/eps at model-violation bins (y > 0, ybar = 0)."""
+    y_np = _np.asarray([3.0, 1.0, 0.0, 0.0])
+    ybar_np = _np.asarray([2.5, 0.0, 0.0, 0.5])  # bin 1: y > 0, ybar = 0!
+    y = xp.asarray(y_np, device=dev)
+    ybar = xp.asarray(ybar_np, device=dev)
+
+    f = ppf.NegPoissonLogL(y)
+    e = f.eps
+    assert not f.exact and e > 0
+
+    val = f(ybar)
+    grad = f.gradient(ybar)
+    hv = f.hessian_diag_vec_prod(ybar, xp.ones_like(ybar))
+    assert math.isfinite(val)
+    assert bool(xp.all(xp.isfinite(grad))) and bool(xp.all(xp.isfinite(hv)))
+
+    expected_np = (ybar_np - y_np) / (ybar_np + e)
+    assert allclose(grad, xp.asarray(expected_np, device=dev))
+    assert abs(float(grad[2]) - 0.0) < 1e-12  # y = ybar = 0 -> gradient 0
+    assert abs(float(grad[1]) + 1.0 / e) < 1e-6 / e  # violation -> -y/eps
+
+
+def test_neg_poisson_logl_eps_minimizer_at_data(xp: ModuleType, dev: str):
+    """The shifted-Poisson surrogate keeps the per-bin minimiser at ybar = y:
+    the gradient at ybar = y is exactly 0, including bins with y = 0."""
+    y = xp.asarray(_Y_SAFE_NP, device=dev)
+
+    f = ppf.NegPoissonLogL(y)
+    grad = f.gradient(xp.asarray(_Y_SAFE_NP, device=dev))
+    assert allclose(grad, xp.zeros_like(grad), atol=1e-12)
+
+
+def test_neg_poisson_logl_eps_shifted_poisson_identity(xp: ModuleType, dev: str):
+    """The default mode equals NegPoissonLogL(y + eps, exact=True) evaluated
+    at ybar + eps (values differ by the constant n * eps from the linear term)."""
+    e = 0.125  # exactly representable
+    y_np = _np.asarray([3.0, 1.0, 0.0, 2.0])
+    ybar_np = _np.asarray([2.5, 1.5, 0.5, 3.0])
+    v_np = _np.asarray([1.0, -1.0, 2.0, 0.5])
+
+    y = xp.asarray(y_np, device=dev)
+    ybar = xp.asarray(ybar_np, device=dev)
+    v = xp.asarray(v_np, device=dev)
+
+    f_eps = ppf.NegPoissonLogL(y, eps=e)
+    assert f_eps.eps == e
+    f_ref = ppf.NegPoissonLogL(xp.asarray(y_np + e, device=dev), exact=True)
+    ybar_shift = xp.asarray(ybar_np + e, device=dev)
+
+    n_eps = e * y_np.size
+    assert abs(f_eps(ybar) - (f_ref(ybar_shift) - n_eps)) < 1e-8
+    assert allclose(f_eps.gradient(ybar), f_ref.gradient(ybar_shift))
+    assert allclose(
+        f_eps.hessian_diag_vec_prod(ybar, v),
+        f_ref.hessian_diag_vec_prod(ybar_shift, v),
+    )
+
+
+def test_neg_poisson_logl_eps_derivation_and_override(xp: ModuleType, dev: str):
+    """eps defaults to rel_eps * mean(y); an absolute eps overrides it."""
+    y = xp.asarray(_Y_NP, device=dev)
+    mean_y = float(_np.mean(_Y_NP))
+
+    f = ppf.NegPoissonLogL(y)
+    assert abs(f.eps - 1e-6 * mean_y) < 1e-15
+
+    f2 = ppf.NegPoissonLogL(y, rel_eps=1e-3)
+    assert abs(f2.eps - 1e-3 * mean_y) < 1e-12
+
+    f3 = ppf.NegPoissonLogL(y, rel_eps=1e-3, eps=0.5)
+    assert f3.eps == 0.5
+
+
+def test_neg_poisson_logl_eps_validation(xp: ModuleType, dev: str):
+    """Invalid eps / rel_eps combinations raise ValueError."""
+    y = xp.asarray(_Y_NP, device=dev)
+    y_zero = xp.asarray(_np.zeros(4), device=dev)
+
+    with pytest.raises(ValueError, match="rel_eps"):
+        ppf.NegPoissonLogL(y, rel_eps=0.0)
+    with pytest.raises(ValueError, match="rel_eps"):
+        ppf.NegPoissonLogL(y, rel_eps=-1e-6)
+    with pytest.raises(ValueError, match="eps"):
+        ppf.NegPoissonLogL(y, eps=0.0)
+    with pytest.raises(ValueError, match="eps"):
+        ppf.NegPoissonLogL(y, eps=-0.1)
+    # all-zero data -> derived eps would be 0
+    with pytest.raises(ValueError, match="all-zero"):
+        ppf.NegPoissonLogL(y_zero)
+    # ... but exact mode and explicit eps work
+    ppf.NegPoissonLogL(y_zero, exact=True)
+    ppf.NegPoissonLogL(y_zero, eps=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# NegPoissonLogL extra checks
+# ---------------------------------------------------------------------------
 
 
 def test_neg_poisson_logl_extra_checks_warn_negative(xp: ModuleType, dev: str):
-    """enable_extra_checks warns on negative values in x."""
+    """enable_extra_checks warns on negative values in x (default mode)."""
     y = xp.asarray(_Y_NP, device=dev)
     ybar = xp.asarray(_np.asarray([2.5, -1.5, 4.0, 0.5]), device=dev)
 
-    f = ppf.NegPoissonLogL(y, safe=True, enable_extra_checks=True)
+    f = ppf.NegPoissonLogL(y, enable_extra_checks=True)
     with pytest.warns(RuntimeWarning, match="negative"):
         f.gradient(ybar)
 
 
-def test_neg_poisson_logl_extra_checks_safe_mode(xp: ModuleType, dev: str):
-    """In safe mode, zeros at bins with y == 0 are fine (no warning); zeros at
-    bins with y > 0 warn about the model violation."""
+def test_neg_poisson_logl_extra_checks_exact_mode(xp: ModuleType, dev: str):
+    """In exact mode, zeros at bins with y == 0 are fine (no warning); zeros
+    at bins with y > 0 warn about the model violation."""
     y = xp.asarray(_Y_SAFE_NP, device=dev)
     ybar_ok = xp.asarray(_YBAR_SAFE_NP, device=dev)  # zeros only where y == 0
 
-    f = ppf.NegPoissonLogL(y, safe=True, enable_extra_checks=True)
+    f = ppf.NegPoissonLogL(y, exact=True, enable_extra_checks=True)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         f.gradient(ybar_ok)  # must not warn
@@ -299,7 +388,7 @@ def test_neg_poisson_logl_extra_checks_off_by_default(xp: ModuleType, dev: str):
 
 # A is invertible, so the ML solution saturates the likelihood (ybar = y):
 #   x_ml = inv(A) y, with inv(A) = [[0, 1], [1, -1]]  ->  x_ml = [2, 0]
-#   ybar(x_ml) = y = [2, 2] > 0 everywhere -> unsafe mode is valid
+#   ybar(x_ml) = y = [2, 2] > 0 everywhere -> exact mode is valid
 #   f(x_ml)    = sum(ybar - y log(ybar)) = 4 - 4 log(2)
 #   grad(x_ml) = A^T (1 - y / ybar) = A^T 0 = 0
 _A_ML_NP = _np.asarray([[1.0, 1.0], [1.0, 0.0]])
@@ -308,40 +397,40 @@ _X_ML_NP = _np.asarray([2.0, 0.0])
 _F_ML = 4.0 - 4.0 * math.log(2.0)
 
 # same model with an extra all-zero row (third, virtual detector) measuring 0:
-#   ybar(x_ml) = [2, 2, 0] -> bin 3 has y = 0 and ybar = 0 -> needs safe mode
+#   ybar(x_ml) = [2, 2, 0] -> bin 3 has y = 0 and ybar = 0
 #   the virtual bin contributes 0 to f and (via the zero column of A^T)
 #   nothing to the gradient, so f(x_ml) and grad(x_ml) are unchanged
 _A_ML3_NP = _np.asarray([[1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
 _Y_ML3_NP = _np.asarray([2.0, 2.0, 0.0])
 
 
-def test_neg_poisson_logl_affine_ml_solution_unsafe(xp: ModuleType, dev: str):
+def test_neg_poisson_logl_affine_ml_solution_exact(xp: ModuleType, dev: str):
     """Function value and gradient at the analytic ML solution (no virtual
-    bins, plain fast mode): f(x_ml) = 4 - 4 log(2), grad(x_ml) = 0."""
+    bins, exact mode): f(x_ml) = 4 - 4 log(2), grad(x_ml) = 0."""
     A = xp.asarray(_A_ML_NP, device=dev)
     y = xp.asarray(_Y_ML_NP, device=dev)
     x_ml = xp.asarray(_X_ML_NP, device=dev)
 
     obj = ppf.C2AffineObjective(
-        ppf.NegPoissonLogL(y, safe=False), ppo.MatrixOperator(A)
+        ppf.NegPoissonLogL(y, exact=True), ppo.MatrixOperator(A)
     )
 
     assert abs(obj(x_ml) - _F_ML) < 1e-6
     assert allclose(obj.gradient(x_ml), xp.zeros_like(x_ml), atol=1e-6)
 
 
-def test_neg_poisson_logl_affine_ml_solution_safe_virtual_bin(
+def test_neg_poisson_logl_affine_ml_solution_exact_virtual_bin(
     xp: ModuleType, dev: str
 ):
-    """With an extra virtual bin (zero row in A, y = 0) and safe mode, the
-    function value and gradient at the ML solution are identical to the
+    """With an extra virtual bin (zero row in A, y = 0), exact mode gives a
+    function value and gradient at the ML solution identical to the
     virtual-bin-free model."""
     A3 = xp.asarray(_A_ML3_NP, device=dev)
     y3 = xp.asarray(_Y_ML3_NP, device=dev)
     x_ml = xp.asarray(_X_ML_NP, device=dev)
 
     obj3 = ppf.C2AffineObjective(
-        ppf.NegPoissonLogL(y3, safe=True), ppo.MatrixOperator(A3)
+        ppf.NegPoissonLogL(y3, exact=True), ppo.MatrixOperator(A3)
     )
 
     assert abs(obj3(x_ml) - _F_ML) < 1e-6
@@ -350,30 +439,91 @@ def test_neg_poisson_logl_affine_ml_solution_safe_virtual_bin(
     # explicit cross-check against the 2x2 model without virtual bins
     A = xp.asarray(_A_ML_NP, device=dev)
     y = xp.asarray(_Y_ML_NP, device=dev)
-    obj = ppf.C2AffineObjective(ppf.NegPoissonLogL(y), ppo.MatrixOperator(A))
+    obj = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y, exact=True), ppo.MatrixOperator(A)
+    )
     assert abs(obj3(x_ml) - obj(x_ml)) < 1e-8
     assert allclose(obj3.gradient(x_ml), obj.gradient(x_ml), atol=1e-8)
 
 
-def test_neg_poisson_logl_affine_ml_solution_unsafe_virtual_bin_nan(
+def test_neg_poisson_logl_affine_ml_solution_default_virtual_bin(
     xp: ModuleType, dev: str
 ):
-    """Negative control: the virtual-bin model evaluated WITHOUT safe mode
-    must produce nan in both the function value and the gradient."""
+    """The default (eps) mode on the virtual-bin model: everything finite,
+    gradient at the ML solution exactly 0 (ybar = y in every bin), and the
+    function value within ~eps of the exact one."""
     A3 = xp.asarray(_A_ML3_NP, device=dev)
     y3 = xp.asarray(_Y_ML3_NP, device=dev)
     x_ml = xp.asarray(_X_ML_NP, device=dev)
 
-    obj3 = ppf.C2AffineObjective(
-        ppf.NegPoissonLogL(y3, safe=False), ppo.MatrixOperator(A3)
-    )
+    loss = ppf.NegPoissonLogL(y3)
+    obj3 = ppf.C2AffineObjective(loss, ppo.MatrixOperator(A3))
 
+    val = obj3(x_ml)
+    grad = obj3.gradient(x_ml)
+    assert math.isfinite(val)
+    assert bool(xp.all(xp.isfinite(grad)))
+    # ybar(x_ml) = y -> surrogate gradient is exactly 0 (minimiser preserved)
+    assert allclose(grad, xp.zeros_like(grad), atol=1e-12)
+    # value deviates from the exact one only by O(eps * |log eps|)
+    assert abs(val - _F_ML) < 100 * loss.eps * abs(math.log(loss.eps))
+
+
+# ---------------------------------------------------------------------------
+# NegPoissonLogL: forward-model mismatch (point source, mismatched Gaussian)
+# ---------------------------------------------------------------------------
+
+
+def test_neg_poisson_logl_model_mismatch_point_source(xp: ModuleType, dev: str):
+    """y ~ G x_true with a wide Gaussian G, reconstruction model G' narrower
+    and truncated -> at a point-source-like iterate there are bins with
+    y > 0 but ybar = 0.  In exact mode the EM-preconditioned gradient is
+    poisoned by nan/inf; the default (eps) mode stays finite and the
+    objective does not blow up over a few EM-preconditioned steps."""
+    n = 41
+    c = n // 2
+
+    def conv_matrix(sig: float, trunc: float) -> _np.ndarray:
+        i = _np.arange(n, dtype=_np.float64)
+        dist = _np.abs(i[:, None] - i[None, :])
+        kern = _np.exp(-0.5 * (dist / sig) ** 2)
+        kern[dist > trunc * sig] = 0.0  # compact support -> exact zeros
+        return (kern / kern.sum(axis=0, keepdims=True)).astype(_np.float32)
+
+    G_true_np = conv_matrix(3.0, trunc=1e9)  # effectively untruncated
+    G_rec_np = conv_matrix(1.5, trunc=3.0)  # narrower AND truncated
+
+    x_true_np = _np.zeros(n, dtype=_np.float32)
+    x_true_np[c] = 100.0
+    y_np = (G_true_np @ x_true_np).astype(_np.float32)  # > 0 in every bin
+
+    y = xp.asarray(y_np, device=dev, dtype=xp.float32)
+    x0 = xp.asarray(x_true_np, device=dev, dtype=xp.float32)
+    op = ppo.MatrixOperator(xp.asarray(G_rec_np, device=dev, dtype=xp.float32))
+    sens = op.adjoint(xp.ones(op.out_shape, dtype=xp.float32, device=dev))
+
+    # sanity: the mismatch scenario is actually present
+    ybar0 = op(x0)
+    assert bool(xp.any((ybar0 == 0) & (y > 0)))
+
+    # exact mode: gradient at the point source is poisoned by nan/inf
+    obj_exact = ppf.C2AffineObjective(ppf.NegPoissonLogL(y, exact=True), op)
     with _np.errstate(divide="ignore", invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        val = obj3(x_ml)
-        grad = obj3.gradient(x_ml)
-    assert math.isnan(val)
-    assert bool(xp.any(xp.isnan(grad)))
+        g_exact = obj_exact.gradient(x0)
+    assert not bool(xp.all(xp.isfinite(g_exact)))
+
+    # default (eps) mode: finite gradient, finite and non-exploding iterates
+    obj_eps = ppf.C2AffineObjective(ppf.NegPoissonLogL(y), op)
+    assert bool(xp.all(xp.isfinite(obj_eps.gradient(x0))))
+
+    x = x0
+    val0 = obj_eps(x)
+    for _ in range(3):
+        x = x - x / sens * obj_eps.gradient(x)  # EM-preconditioned step
+        assert bool(xp.all(xp.isfinite(x)))
+    val3 = obj_eps(x)
+    assert math.isfinite(val3) and val3 <= val0 + 1e-3
 
 
 # ---------------------------------------------------------------------------
@@ -697,7 +847,7 @@ def test_c1_affine_objective_call(xp: ModuleType, dev: str):
     y = xp.asarray(_Y3_NP, device=dev)
 
     op = ppo.MatrixOperator(A)
-    loss = ppf.NegPoissonLogL(y)
+    loss = ppf.NegPoissonLogL(y, exact=True)
     obj = ppf.C1AffineObjective(loss, op, s)
 
     pred_np = _A_NP @ _X2_NP + _S_NP
@@ -741,7 +891,7 @@ def test_c1_affine_objective_no_contamination(xp: ModuleType, dev: str):
     y = xp.asarray(_Y3_NP, device=dev)
 
     op = ppo.MatrixOperator(A)
-    loss = ppf.NegPoissonLogL(y)
+    loss = ppf.NegPoissonLogL(y, exact=True)
     obj = ppf.C1AffineObjective(loss, op)  # no s
 
     pred_np = _A_NP @ _X2_NP
@@ -953,7 +1103,9 @@ def test_neg_poisson_logl_lm_matches_sinogram_value(xp: ModuleType, dev: str):
     A_sino = xp.asarray(_A_SINO_LM_NP, device=dev, dtype=xp.float32)
     y_sino = xp.asarray(_Y_LM_SINO_NP, device=dev, dtype=xp.float32)
     s_sino = xp.asarray(_S_SINO_LM_NP, device=dev, dtype=xp.float32)
-    f_sino = ppf.C2AffineObjective(ppf.NegPoissonLogL(y_sino), ppo.MatrixOperator(A_sino), s_sino)
+    f_sino = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y_sino, exact=True), ppo.MatrixOperator(A_sino), s_sino
+    )
 
     assert abs(f_lm(x) - f_sino(x)) < 1e-4
 
@@ -967,7 +1119,9 @@ def test_neg_poisson_logl_lm_matches_sinogram_gradient(xp: ModuleType, dev: str)
     A_sino = xp.asarray(_A_SINO_LM_NP, device=dev, dtype=xp.float32)
     y_sino = xp.asarray(_Y_LM_SINO_NP, device=dev, dtype=xp.float32)
     s_sino = xp.asarray(_S_SINO_LM_NP, device=dev, dtype=xp.float32)
-    f_sino = ppf.C2AffineObjective(ppf.NegPoissonLogL(y_sino), ppo.MatrixOperator(A_sino), s_sino)
+    f_sino = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y_sino, exact=True), ppo.MatrixOperator(A_sino), s_sino
+    )
 
     assert allclose(f_lm.gradient(x), f_sino.gradient(x), atol=1e-4, rtol=1e-4)
 
@@ -982,7 +1136,9 @@ def test_neg_poisson_logl_lm_matches_sinogram_hessian(xp: ModuleType, dev: str):
     A_sino = xp.asarray(_A_SINO_LM_NP, device=dev, dtype=xp.float32)
     y_sino = xp.asarray(_Y_LM_SINO_NP, device=dev, dtype=xp.float32)
     s_sino = xp.asarray(_S_SINO_LM_NP, device=dev, dtype=xp.float32)
-    f_sino = ppf.C2AffineObjective(ppf.NegPoissonLogL(y_sino), ppo.MatrixOperator(A_sino), s_sino)
+    f_sino = ppf.C2AffineObjective(
+        ppf.NegPoissonLogL(y_sino, exact=True), ppo.MatrixOperator(A_sino), s_sino
+    )
 
     assert allclose(
         f_lm.hessian_diag_vec_prod(x, v),
@@ -1254,13 +1410,13 @@ def test_mixed_l21_norm_beta_scaling(xp: ModuleType, dev: str):
 
 
 def test_neg_poisson_logl_prox_convex_conj_formula(xp: ModuleType, dev: str):
-    """prox_{sigma f*}(y) = 0.5*(y+1 - sqrt((y-1)^2 + 4*sigma*data)) (lines 518-519)."""
+    """Exact mode: prox_{sigma f*}(y) = 0.5*(y+1 - sqrt((y-1)^2 + 4*sigma*data))."""
     y_np = _np.asarray([0.5, 0.8, -0.2, 1.5])
     sigma = 0.7
     y = xp.asarray(y_np, device=dev)
     d = xp.asarray(_Y_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(d)
+    f = ppf.NegPoissonLogL(d, exact=True)
     result = f.prox_convex_conj(y, sigma)
 
     expected_np = 0.5 * (y_np + 1 - _np.sqrt((y_np - 1) ** 2 + 4 * sigma * _Y_NP))
@@ -1269,16 +1425,16 @@ def test_neg_poisson_logl_prox_convex_conj_formula(xp: ModuleType, dev: str):
 
 
 def test_neg_poisson_logl_prox_moreau_identity(xp: ModuleType, dev: str):
-    """Moreau: prox_f(x) + sigma * prox_{f*/sigma}(x/sigma) == x."""
+    """Moreau: prox_f(x) + sigma * prox_{f*/sigma}(x/sigma) == x (both modes)."""
     x_np = _np.asarray([2.5, 1.5, 2.0, 3.5])
     sigma = 1.2
     x = xp.asarray(x_np, device=dev)
     d = xp.asarray(_Y_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(d)
-    p = f.prox(x, sigma)
-    q = f.prox_convex_conj(x / sigma, 1.0 / sigma)
-    assert allclose(p + sigma * q, x, atol=1e-6, rtol=1e-6)
+    for f in (ppf.NegPoissonLogL(d, exact=True), ppf.NegPoissonLogL(d)):
+        p = f.prox(x, sigma)
+        q = f.prox_convex_conj(x / sigma, 1.0 / sigma)
+        assert allclose(p + sigma * q, x, atol=1e-6, rtol=1e-6)
 
 
 def test_neg_poisson_logl_prox_convex_conj_beta_scaling(xp: ModuleType, dev: str):
@@ -1300,19 +1456,19 @@ def test_neg_poisson_logl_prox_convex_conj_beta_scaling(xp: ModuleType, dev: str
 
 
 # ---------------------------------------------------------------------------
-# NegPoissonLogL safe mode: prox_convex_conj correctness
+# NegPoissonLogL: prox_convex_conj with zero-count bins and in eps mode
 # ---------------------------------------------------------------------------
 
 
-def test_neg_poisson_logl_safe_prox_convex_conj(xp: ModuleType, dev: str):
-    """prox_convex_conj needs no masking: with d_i = 0 the closed form already
+def test_neg_poisson_logl_exact_prox_convex_conj_zero_bins(xp: ModuleType, dev: str):
+    """Exact mode prox needs no masking: with d_i = 0 the closed form already
     yields min(y_i, 1), the prox of the conjugate of the linear loss."""
     y_np = _np.asarray([0.5, 0.8, 1.2, -0.3])
     sigma = 0.7
     y = xp.asarray(y_np, device=dev)
     d = xp.asarray(_Y_SAFE_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(d, safe=True)
+    f = ppf.NegPoissonLogL(d, exact=True)
     result = f.prox_convex_conj(y, sigma)
 
     expected_np = 0.5 * (
@@ -1324,17 +1480,38 @@ def test_neg_poisson_logl_safe_prox_convex_conj(xp: ModuleType, dev: str):
     assert allclose(result[2:], xp.asarray(_np.minimum(y_np[2:], 1.0), device=dev))
 
 
-def test_neg_poisson_logl_safe_prox_moreau_identity(xp: ModuleType, dev: str):
-    """Moreau identity holds in safe mode on bins with y > 0."""
-    x_np = _np.asarray([2.5, 1.5])
-    sigma = 0.8
-    d = xp.asarray(_Y_SAFE_NP[:2], device=dev)
-    x = xp.asarray(x_np, device=dev)
+def test_neg_poisson_logl_eps_prox_convex_conj_shifted(xp: ModuleType, dev: str):
+    """In the default mode the prox belongs to the shifted-Poisson surrogate:
+    same closed form with d -> d + eps evaluated at y + sigma*eps."""
+    e = 0.25
+    y_np = _np.asarray([0.5, 0.8, 1.2, -0.3])
+    sigma = 0.7
+    y = xp.asarray(y_np, device=dev)
+    d = xp.asarray(_Y_SAFE_NP, device=dev)
 
-    f = ppf.NegPoissonLogL(d, safe=True)
-    p = f.prox(x, sigma)
-    q = f.prox_convex_conj(x / sigma, 1.0 / sigma)
-    assert allclose(p + sigma * q, x, atol=1e-6, rtol=1e-6)
+    f = ppf.NegPoissonLogL(d, eps=e)
+    result = f.prox_convex_conj(y, sigma)
+
+    w_np = y_np + sigma * e
+    expected_np = 0.5 * (
+        w_np + 1 - _np.sqrt((w_np - 1) ** 2 + 4 * sigma * (_Y_SAFE_NP + e))
+    )
+    expected = xp.asarray(expected_np, device=dev)
+    assert allclose(result, expected)
+
+
+def test_neg_poisson_logl_eps_prox_gradient_fixed_point(xp: ModuleType, dev: str):
+    """prox and gradient of one instance refer to the same (surrogate)
+    objective: p = prox_f(z, sigma) satisfies p - z + sigma * grad f(p) = 0."""
+    z_np = _np.asarray([2.5, 1.5, 0.8, 3.5])
+    sigma = 0.6
+    z = xp.asarray(z_np, device=dev)
+    d = xp.asarray(_Y_NP, device=dev)
+
+    for f in (ppf.NegPoissonLogL(d, eps=0.3), ppf.NegPoissonLogL(d, exact=True)):
+        p = f.prox(z, sigma)
+        residual = p - z + sigma * f.gradient(p)
+        assert allclose(residual, xp.zeros_like(residual), atol=1e-6)
 
 
 # ---------------------------------------------------------------------------

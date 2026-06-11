@@ -488,35 +488,63 @@ class NegPoissonLogL(C2FunctionWithConjProx):
     independently of how they were computed. Use :class:`C2AffineObjective` to
     compose with a forward model :math:`\\bar{y}(x) = A x + s`.
 
-    **Safe mode** (``safe=True``) makes the evaluation robust for bins where
-    both :math:`y_i = 0` and :math:`\\bar{y}_i = 0`, which would otherwise
-    produce ``nan`` from :math:`0 \\cdot \\log 0`, :math:`0/0`, or
-    :math:`0/0^2`.  Such bins arise either as *virtual bins* (no image voxel
-    contributes and the contamination is zero, so :math:`\\bar{y}_i = 0` by
-    construction) or as active bins that observed zero counts due to Poisson
-    noise while :math:`\\bar{y}_i \\to 0` during optimization.  In both cases
-    the per-bin function is exactly linear, :math:`f_i(\\bar{y}_i) =
-    \\bar{y}_i`, so the exact values
+    **Evaluation modes**
 
-    ============================================  ===============
-    Expression                                    Value
-    ============================================  ===============
-    :math:`\\bar{y}_i - y_i \\log \\bar{y}_i`        :math:`\\bar{y}_i`
-    :math:`1 - y_i / \\bar{y}_i`                   :math:`1`
-    :math:`y_i / \\bar{y}_i^2`                     :math:`0`
-    ============================================  ===============
+    ``exact=False`` (default, "safe epsilon" mode)
+        All methods evaluate the *shifted Poisson* surrogate
 
-    are substituted on **all** bins with :math:`y_i = 0`.  This is exact (not
-    a limit approximation) for any :math:`\\bar{y}_i \\geq 0`, so no
-    user-supplied mask is needed -- the condition :math:`y_i = 0` is derived
-    from the data at init time.
+        .. math::
+
+            f_\\varepsilon(\\bar{y}) = \\sum_i \\bar{y}_i
+                - (y_i + \\varepsilon) \\log(\\bar{y}_i + \\varepsilon)
+
+        with gradient :math:`(\\bar{y} - y)/(\\bar{y} + \\varepsilon)` and
+        Hessian diagonal :math:`(y + \\varepsilon)/(\\bar{y} + \\varepsilon)^2`,
+        corresponding to a tiny known contamination :math:`\\varepsilon`
+        added to both the data and the expectation.  It is smooth and finite
+        for all :math:`\\bar{y} \\geq 0` (never ``nan`` / ``inf``), and the
+        per-bin minimiser remains exactly at :math:`\\bar{y}_i = y_i`: the
+        gradient error w.r.t. the unshifted log-likelihood is
+        :math:`\\varepsilon (y - \\bar{y}) / (\\bar{y} (\\bar{y} +
+        \\varepsilon))`, proportional to the residual and vanishing at the
+        fit.  By default :math:`\\varepsilon = \\texttt{rel_eps} \\cdot
+        \\operatorname{mean}(y)`.
+
+    ``exact=True``
+        The unmodified log-likelihood.  Bins with :math:`y_i = 0` (virtual
+        bins without geometric sensitivity, and active bins that measured
+        zero counts) are handled exactly via their analytic values
+        (:math:`f_i = \\bar{y}_i`, gradient :math:`1`, Hessian diagonal
+        :math:`0`), so this mode requires only :math:`\\bar{y}_i > 0` **in
+        bins with** :math:`y_i > 0` -- guaranteed e.g. by a strictly
+        positive contamination in all non-virtual bins.  If that requirement
+        is violated, the value is :math:`+\\infty` and the gradient
+        :math:`-\\infty` (mathematically correct: counts were observed where
+        the model predicts none; numpy emits a ``RuntimeWarning``, cupy and
+        torch produce the infinities silently).
+
+    Use ``exact=True`` whenever :math:`\\bar{y}_i = 0` can be ruled out in
+    every bin with counts; otherwise keep the default.
 
     .. note::
 
-        Bins with :math:`y_i > 0` and :math:`\\bar{y}_i = 0` deliberately
-        yield :math:`f = +\\infty` (and gradient :math:`-\\infty`) in both
-        modes: observing counts where the model predicts strictly zero counts
-        is a genuine model violation that should surface, not be masked.
+        Prox-driven algorithms (PDHG / SPDHG) never divide by
+        :math:`\\bar{y}` -- the closed-form dual prox is stable even for
+        zero-count bins -- so with a strictly positive contamination they
+        should use ``exact=True`` and solve the exact problem.  In the
+        default mode, :meth:`prox_convex_conj` is shifted consistently so
+        that *all* methods of an instance refer to the same (surrogate)
+        objective.
+
+    **Choosing eps.**  The default ``rel_eps = 1e-6`` is appropriate for
+    float32 data in units of counts (mean counts per bin roughly between
+    0.01 and 1000, covering TOF and non-TOF PET): the bias stays orders of
+    magnitude below Poisson noise while :math:`(y+\\varepsilon)/
+    \\varepsilon^2` stays far from float32 overflow.  When several
+    instances must sum exactly to a full objective (subset algorithms),
+    derive one global ``eps = rel_eps * float(xp.mean(y_full))`` and pass it
+    explicitly to every instance -- otherwise each subset derives a slightly
+    different :math:`\\varepsilon` from its own data mean.
 
     Parameters
     ----------
@@ -524,43 +552,72 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         Measured data :math:`y` (non-negative).
     beta : float, optional
         Multiplicative scale factor :math:`\\beta`.  Defaults to ``1.0``.
-    safe : bool, optional
-        If ``True`` (default), handle bins with :math:`y_i = 0` and
-        :math:`\\bar{y}_i = 0` exactly as described above, at the cost of
-        one extra ``where`` per evaluation.
-        With ``safe=False``, such bins produce ``nan`` -- numpy emits a
-        ``RuntimeWarning``, but cupy and torch fail *silently*.  Only
-        disable safe mode when :math:`\\bar{y}_i > 0` is guaranteed for all
-        bins (e.g. strictly positive contamination), to save the extra
-        ``where``.
+    exact : bool, optional
+        If ``True``, evaluate the unmodified log-likelihood (with exact
+        handling of bins where :math:`y_i = 0`).  Requires
+        :math:`\\bar{y}_i > 0` in every bin with :math:`y_i > 0`.
+        Defaults to ``False`` (shifted-Poisson surrogate, always finite).
+    rel_eps : float, optional
+        Relative epsilon used to derive
+        :math:`\\varepsilon = \\texttt{rel_eps} \\cdot \\operatorname{mean}(y)`
+        in the default mode.  Ignored when ``exact=True`` or when ``eps`` is
+        given.  Defaults to ``1e-6``.
+    eps : float, optional
+        Absolute :math:`\\varepsilon` override (must be > 0).  Useful to
+        share one global epsilon across subset objectives.  Ignored when
+        ``exact=True``.
     enable_extra_checks : bool, optional
         If ``True``, inspect ``x`` on every evaluation of the function value,
         gradient, or Hessian-diagonal product and emit a ``RuntimeWarning``
-        for problematic inputs (negative values; zeros that lead to ``nan``
-        in non-safe mode or to :math:`\\pm\\infty` at bins with
-        :math:`y_i > 0`).  Useful for debugging with cupy / torch, which --
-        unlike numpy -- produce ``nan`` / ``inf`` silently.  The checks cost
-        one reduction and a device-to-host sync per call, so they are off by
-        default.
+        for problematic inputs (negative values; in exact mode also
+        non-positive values at bins with counts, which yield
+        :math:`\\pm\\infty`).  Useful for debugging with cupy / torch, which
+        -- unlike numpy -- produce ``nan`` / ``inf`` silently.  The checks
+        cost one reduction and a device-to-host sync per call, so they are
+        off by default.
     """
 
     def __init__(
         self,
         data: Array,
         beta: float = 1.0,
-        safe: bool = True,
+        exact: bool = False,
+        rel_eps: float = 1e-6,
+        eps: float | None = None,
         enable_extra_checks: bool = False,
     ):
         super().__init__(beta)
         self._data = data
-        self._safe = safe
-        self._data_is_zero = (data == 0) if safe else None
+        self._exact = exact
         self._enable_extra_checks = enable_extra_checks
 
+        if exact:
+            self._eps = 0.0
+            self._data_is_zero = data == 0
+        else:
+            self._data_is_zero = None
+            if eps is None:
+                if rel_eps <= 0:
+                    raise ValueError("rel_eps must be > 0 in non-exact mode")
+                xp = get_namespace(data)
+                eps = rel_eps * float(xp.mean(data))
+            if eps <= 0:
+                raise ValueError(
+                    "effective eps must be > 0 in non-exact mode -- this can "
+                    "happen for all-zero data; pass eps explicitly or use "
+                    "exact=True"
+                )
+            self._eps = float(eps)
+
     @property
-    def safe(self) -> bool:
-        """Whether safe handling of bins with :math:`y_i = \\bar{y}_i = 0` is enabled."""
-        return self._safe
+    def exact(self) -> bool:
+        """Whether the unmodified (exact) log-likelihood is evaluated."""
+        return self._exact
+
+    @property
+    def eps(self) -> float:
+        """Effective epsilon of the shifted-Poisson surrogate (``0.0`` in exact mode)."""
+        return self._eps
 
     @property
     def enable_extra_checks(self) -> bool:
@@ -576,72 +633,76 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         if not self._enable_extra_checks:
             return
         xp = get_namespace(x)
-        xmin = float(xp.min(x))
-        if xmin < 0:
-            warnings.warn(
-                "x contains negative values: log/division are undefined and "
-                "will produce nan",
-                RuntimeWarning,
-                stacklevel=3,
-            )
-        elif xmin == 0:
-            if self._safe:
-                if bool(xp.any((x == 0) & ~self._data_is_zero)):
-                    warnings.warn(
-                        "x is 0 at bins with positive measured data: "
-                        "function value is +inf and gradient -inf there "
-                        "(model violation)",
-                        RuntimeWarning,
-                        stacklevel=3,
-                    )
-            else:
+        if self._exact:
+            if bool(xp.any((x <= 0) & ~self._data_is_zero)):
                 warnings.warn(
-                    "x contains zeros: bins with zero measured data produce "
-                    "nan (consider safe=True), bins with positive measured "
-                    "data produce +/-inf",
+                    "x is <= 0 at bins with positive measured data: function "
+                    "value is +inf and gradient -inf there (model violation)",
                     RuntimeWarning,
                     stacklevel=3,
                 )
-
-    def _safe_x(self, x: Array) -> Array:
-        """Return ``x`` with entries replaced by 1 where ``data == 0`` (safe mode only).
-
-        On those bins the numerator :math:`y_i = 0` already nullifies the
-        log / division terms, so substituting 1 in the denominator (or log
-        argument) yields the exact values while leaving all other bins
-        untouched.
-        """
-        if not self._safe:
-            return x
-        xp = get_namespace(x)
-        return xp.where(self._data_is_zero, xp.ones_like(x), x)
+        elif bool(xp.min(x) < 0):
+            warnings.warn(
+                "x contains negative values: expected counts must be "
+                "non-negative",
+                RuntimeWarning,
+                stacklevel=3,
+            )
 
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
         self._check_x(x)
-        return float(xp.sum(x - self._data * xp.log(self._safe_x(x))))
+        if self._exact:
+            safe_x = xp.where(self._data_is_zero, xp.ones_like(x), x)
+            return float(xp.sum(x - self._data * xp.log(safe_x)))
+        return float(xp.sum(x - (self._data + self._eps) * xp.log(x + self._eps)))
 
     def _gradient(self, x: Array) -> Array:
+        xp = get_namespace(x)
         self._check_x(x)
-        return 1 - self._data / self._safe_x(x)
+        if self._exact:
+            # residual form (x - y)/x is better conditioned than 1 - y/x near
+            # the fit (the subtraction of nearby floats is exact); bins with
+            # y = 0 get their exact gradient value 1 via the outer where
+            safe_x = xp.where(self._data_is_zero, xp.ones_like(x), x)
+            return xp.where(
+                self._data_is_zero, xp.ones_like(x), (x - self._data) / safe_x
+            )
+        return (x - self._data) / (x + self._eps)
 
     def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        xp = get_namespace(x)
         self._check_x(x)
-        return self._data / (self._safe_x(x) ** 2) * v
+        if self._exact:
+            safe_x = xp.where(self._data_is_zero, xp.ones_like(x), x)
+            return self._data / (safe_x**2) * v
+        return (self._data + self._eps) / ((x + self._eps) ** 2) * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of the negative Poisson log-likelihood.
+
+        In exact mode:
 
         .. math::
 
             \\left(\\operatorname{prox}_{\\sigma f^*}(y)\\right)_i
             = \\frac{1}{2}\\left(y_i + 1 - \\sqrt{(y_i - 1)^2 + 4 \\sigma d_i}\\right)
 
-        No special handling is needed in safe mode: the formula contains no
-        log or division.  For bins with :math:`d_i = 0` the loss is linear,
-        :math:`f_i(\\bar{y}_i) = \\bar{y}_i`, whose conjugate is the indicator
-        of :math:`(-\\infty, 1]` with prox :math:`\\min(y_i, 1)` -- which the
-        formula above already yields exactly when :math:`d_i = 0`.
+        The formula contains no log or division and is stable for any
+        :math:`d_i \\geq 0`.  For bins with :math:`d_i = 0` the loss is
+        linear, :math:`f_i(\\bar{y}_i) = \\bar{y}_i`, whose conjugate is the
+        indicator of :math:`(-\\infty, 1]` with prox :math:`\\min(y_i, 1)`
+        -- which the formula already yields exactly when :math:`d_i = 0`.
+
+        In the default mode the prox belongs to the shifted-Poisson
+        surrogate :math:`f_\\varepsilon(t) = t - (d + \\varepsilon)
+        \\log(t + \\varepsilon)`.  Writing :math:`f_\\varepsilon(t) =
+        g(t + \\varepsilon) + \\text{const}` with :math:`g` the standard
+        loss for data :math:`d + \\varepsilon`, the shift rule
+        :math:`\\operatorname{prox}_{\\sigma (g(\\cdot+\\varepsilon))^*}(v)
+        = \\operatorname{prox}_{\\sigma g^*}(v + \\sigma\\varepsilon)`
+        gives the same closed form evaluated at
+        :math:`v + \\sigma\\varepsilon` with data :math:`d + \\varepsilon`.
 
         Parameters
         ----------
@@ -656,7 +717,12 @@ class NegPoissonLogL(C2FunctionWithConjProx):
             :math:`\\operatorname{prox}_{\\sigma f^*}(y)`.
         """
         xp = get_namespace(y)
-        return 0.5 * (y + 1 - xp.sqrt((y - 1) ** 2 + 4 * sigma * self._data))
+        if self._exact:
+            return 0.5 * (y + 1 - xp.sqrt((y - 1) ** 2 + 4 * sigma * self._data))
+        w = y + sigma * self._eps
+        return 0.5 * (
+            w + 1 - xp.sqrt((w - 1) ** 2 + 4 * sigma * (self._data + self._eps))
+        )
 
 
 class HalfSquaredL2Deviation(C2FunctionWithConjProx):
@@ -1190,16 +1256,17 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> grad = aff_obj.gradient(x)                          # shape (4,), scaled by beta=0.5
     >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
 
-    Pure linear forward model with virtual bins (zero rows in :math:`A`)
-    handled via :class:`NegPoissonLogL` in safe mode (no mask needed --
-    bins with :math:`y_i = 0` are derived from the data):
+    Pure linear forward model with virtual bins (zero rows in :math:`A`),
+    handled by :class:`NegPoissonLogL` -- the default ("safe epsilon") mode
+    is finite everywhere; ``exact=True`` would also work here since the
+    virtual bins measure 0:
 
     >>> A2 = np.zeros((6, 4))
     >>> A2[:4, :] = np.random.rand(4, 4)   # last 2 rows are virtual (all zero)
     >>> op2   = MatrixOperator(A2)
     >>> data2 = np.array([2., 1., 3., 0., 0., 0.])  # virtual bins measure 0
     >>>
-    >>> loss2 = NegPoissonLogL(data2, safe=True)
+    >>> loss2 = NegPoissonLogL(data2)
     >>> aff_obj2 = C2AffineObjective(loss2, op2)            # no contamination s
     >>>
     >>> fx2   = aff_obj2(x)                                 # scalar function value, no nan

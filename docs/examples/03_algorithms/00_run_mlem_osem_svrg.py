@@ -343,23 +343,25 @@ del cyl_mask
 # and one for the full data (for MLEM and objective evaluation).
 #
 # .. note::
-#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
-#     handles bins where the measured **and** the expected data are both zero,
-#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
-#     (silently so with cupy / torch).  It costs one extra elementwise
-#     ``where`` per evaluation.  Since our contamination is strictly positive,
-#     the expected data ``A x + s`` is positive in every bin and we can
-#     disable safe mode for speed.  Keep ``safe=True`` whenever the expected
-#     data can reach zero, e.g. with zero contamination or "virtual" bins
-#     without geometric sensitivity.
+#     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
+#     (shifted Poisson) surrogate: a tiny ``eps = rel_eps * mean(y)`` is
+#     added to the measured and the expected data.  This is finite for any
+#     non-negative expectation (never ``nan`` / ``inf``), at the price of a
+#     tiny (~``rel_eps``) bias that vanishes at the fit.  Since our
+#     contamination is strictly positive, the expected data ``A x + s`` is
+#     positive in every bin and we can use ``exact=True`` to evaluate the
+#     unmodified log-likelihood instead (bins with ``y = 0`` are still
+#     handled exactly).  Keep the default whenever the expected data can
+#     reach zero in bins with counts, e.g. with zero contamination and a
+#     mismatched forward model.
 
-# safe mode is only needed if the expected data can be 0 in some bins,
-# which cannot happen if the contamination is strictly positive
-safe_mode = bool(xp.min(contamination) == 0)
+# the strictly positive contamination guarantees A x + s > 0 in every bin,
+# so the exact (unmodified) log-likelihood can be used
+exact_mode = bool(xp.min(contamination) > 0)
 
 subset_data_fidelities = [
     C2AffineObjective(
-        NegPoissonLogL(y[sl], safe=safe_mode),
+        NegPoissonLogL(y[sl], exact=exact_mode),
         pet_subset_linop_seq[k],
         contamination[sl],
     )
@@ -367,7 +369,7 @@ subset_data_fidelities = [
 ]
 
 full_data_fidelity = C2AffineObjective(
-    NegPoissonLogL(y, safe=safe_mode), pet_lin_op, contamination
+    NegPoissonLogL(y, exact=exact_mode), pet_lin_op, contamination
 )
 
 # run 1 OSEM epoch as a common warm-start for MLEM, OSEM and SVRG

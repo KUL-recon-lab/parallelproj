@@ -292,22 +292,23 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 # term, so :math:`\sum_e \log\bar{y}_{j_e} = \sum_i y_i\log\bar{y}_i`.
 #
 # .. note::
-#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
-#     handles bins where the measured **and** the expected data are both zero,
-#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
-#     (silently so with cupy / torch).  It costs one extra elementwise
-#     ``where`` per evaluation.  Since our contamination is strictly positive,
-#     the expected data ``A x + s`` are positive in every bin and we can
-#     disable safe mode for speed.  Keep ``safe=True`` whenever the expected
-#     data can reach zero, e.g. with zero contamination or "virtual" bins
-#     without geometric sensitivity.
+#     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
+#     (shifted Poisson) surrogate: a tiny ``eps = rel_eps * mean(y)`` is
+#     added to the measured and the expected data.  This is finite for any
+#     non-negative expectation (never ``nan`` / ``inf``), at the price of a
+#     tiny (~``rel_eps``) bias that vanishes at the fit.  Since our
+#     contamination is strictly positive, the expected data ``A x + s`` are
+#     positive in every bin and we can use ``exact=True`` to evaluate the
+#     unmodified log-likelihood instead (bins with ``y = 0`` are still
+#     handled exactly).  Keep the default whenever the expected data can
+#     reach zero in bins with counts.
 
-# safe mode is only needed if the expected data can be 0 in some bins,
-# which cannot happen if the contamination is strictly positive
-safe_mode = bool(xp.min(contamination) == 0)
+# the strictly positive contamination guarantees A x + s > 0 in every bin,
+# so the exact (unmodified) log-likelihood can be used
+exact_mode = bool(xp.min(contamination) > 0)
 
 sinogram_neg_logL = C2AffineObjective(
-    NegPoissonLogL(y, safe=safe_mode), pet_lin_op, contamination
+    NegPoissonLogL(y, exact=exact_mode), pet_lin_op, contamination
 )
 
 # The sensitivity image A^T 1 is required by NegPoissonLogLListmode.
@@ -377,7 +378,7 @@ for k, op in enumerate(sino_subset_linop_list):
 
 sino_subset_neg_logL = [
     C2AffineObjective(
-        NegPoissonLogL(y[sl], safe=safe_mode),
+        NegPoissonLogL(y[sl], exact=exact_mode),
         sino_subset_linop_list[k],
         contamination[sl],
     )
