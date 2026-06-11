@@ -435,20 +435,21 @@ del cyl_mask
 # meaningful from the very first epoch.
 #
 # .. note::
-#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
-#     handles bins where the measured **and** the expected data are both zero,
-#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
-#     (silently so with cupy / torch).  It costs one extra elementwise
-#     ``where`` per evaluation.  Since our contamination is strictly positive
-#     (in TOF and non-TOF form), the expected data ``A x + s`` are positive
-#     in every bin and we can disable safe mode for speed.  Keep
-#     ``safe=True`` whenever the expected data can reach zero, e.g. with zero
-#     contamination or "virtual" bins without geometric sensitivity.
+#     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
+#     (shifted Poisson) surrogate: a tiny ``eps = rel_eps * mean(y)`` is
+#     added to the measured and the expected data.  This is finite for any
+#     non-negative expectation (never ``nan`` / ``inf``), at the price of a
+#     tiny (~``rel_eps``) bias that vanishes at the fit.  Since our
+#     contamination is strictly positive (in TOF and non-TOF form), the
+#     expected data ``A x + s`` are positive in every bin and we can use
+#     ``exact=True`` to evaluate the unmodified log-likelihood instead
+#     (bins with ``y = 0`` are still handled exactly).  Keep the default
+#     whenever the expected data can reach zero in bins with counts.
 
-# safe mode is only needed if the expected data can be 0 in some bins,
-# which cannot happen if the contamination is strictly positive
-safe_mode_nt = bool(xp.min(contamination_non_tof) == 0)
-safe_mode_tof = bool(xp.min(contamination_tof) == 0)
+# the strictly positive contamination guarantees A x + s > 0 in every bin,
+# so the exact (unmodified) log-likelihood can be used
+exact_mode_nt = bool(xp.min(contamination_non_tof) > 0)
+exact_mode_tof = bool(xp.min(contamination_tof) > 0)
 
 proj_non_tof.clear_cached_lor_endpoints()
 subset_linops_nt = []
@@ -471,7 +472,7 @@ adjoint_ones_nt = xp.sum(subset_adj_ones_nt, axis=0)
 
 subset_fidelities_nt = [
     C2AffineObjective(
-        NegPoissonLogL(y_non_tof[subset_slices_nt[k]], safe=safe_mode_nt),
+        NegPoissonLogL(y_non_tof[subset_slices_nt[k]], exact=exact_mode_nt),
         subset_linops_nt[k],
         contamination_non_tof[subset_slices_nt[k]],
     )
@@ -556,7 +557,7 @@ adjoint_ones_tof = xp.sum(subset_adj_ones_tof, axis=0)
 
 subset_fidelities_tof = [
     C2AffineObjective(
-        NegPoissonLogL(y_tof[subset_slices_tof[k]], safe=safe_mode_tof),
+        NegPoissonLogL(y_tof[subset_slices_tof[k]], exact=exact_mode_tof),
         subset_linops_tof[k],
         contamination_tof[subset_slices_tof[k]],
     )

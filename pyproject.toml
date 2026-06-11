@@ -69,6 +69,8 @@ testpaths = ["tests"]
 #   pixi run -e test-py-latest test
 #                                # run the test suite (newest Python)
 #   pixi run -e docs docs        # build the documentation locally
+#   pixi run docs-gpu            # build the documentation on a GPU system
+#                                # (gallery examples run on the CUDA backend)
 #   pixi run -e cuda12 test      # run tests against a CUDA 12 stack
 #   pixi run -e cuda13 test      # run tests against a CUDA 13 stack
 #
@@ -181,6 +183,9 @@ pytorch = "*"
 # harmless (it just touches the runner's disposable local git config).
 test = { cmd = "pytest tests/ -v", depends-on = ["setup-hooks"] }
 test-cov = { cmd = "pytest tests/ --cov=parallelproj --cov-report=term-missing", depends-on = ["setup-hooks"] }
+# Same as test-cov, but additionally writes coverage.xml (with branch
+# coverage) for upload to Codecov -- used by the GitHub test workflow.
+test-cov-xml = { cmd = "pytest tests/ --cov=parallelproj --cov-branch --cov-report=term-missing --cov-report=xml", depends-on = ["setup-hooks"] }
 
 # ---- docs feature ----
 
@@ -197,6 +202,18 @@ pytorch = "*"       # docs/examples/05_torch/01_run_projection_layer.py uses tor
 # See note on ``depends-on = ["setup-hooks"]`` under the test feature.
 docs = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"] }
 docs-clean = "rm -rf docs/_build docs/auto_examples"
+
+# ---- docs-gpu feature ----
+#
+# Task-only feature: combined with the ``docs`` and ``cuda13`` features in
+# the ``docs-gpu`` environment below, it allows building the docs locally
+# on a system with a GPU (``pixi run docs-gpu``).  The gallery examples
+# then auto-select the CUDA backend via suggest_array_backend_and_device().
+# Defining the task in its own feature (instead of in ``docs``) makes
+# ``pixi run docs-gpu`` resolve uniquely to the GPU environment.
+
+[tool.pixi.feature.docs-gpu.tasks]
+docs-gpu = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"], description = "Build the docs on a GPU system (gallery examples run on the CUDA backend)." }
 
 # ---- examples feature ----
 #
@@ -259,6 +276,9 @@ cupy = "*"
 #                    Python 3.12.
 #   cuda12         - test + CUDA 12 (pytorch & cupy resolve to cuda-12 builds).
 #   cuda13         - test + CUDA 13 (pytorch & cupy resolve to cuda-13 builds).
+#   docs-gpu       - docs + CUDA 13: build the documentation on a system
+#                    with a GPU (``pixi run docs-gpu``); the gallery
+#                    examples auto-select the CUDA backend.
 #
 # Order matters when tasks are shared across envs: ``pixi run <task>``
 # picks the first env that has the task.  Putting ``test`` before
@@ -272,3 +292,4 @@ test-py-latest = { features = ["test", "py-latest", "examples"] }
 docs = { features = ["docs", "py312", "examples"] }
 cuda12 = { features = ["test", "cuda12", "py312", "examples"] }
 cuda13 = { features = ["test", "cuda13", "py312", "examples"] }
+docs-gpu = { features = ["docs", "docs-gpu", "cuda13", "py312", "examples"] }

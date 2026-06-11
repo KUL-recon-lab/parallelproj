@@ -204,10 +204,10 @@ print(f"  total:         {(y_np.nbytes + s_np.nbytes) / 1024**2:.1f} MB")
 y_mmap = to_subset_mmap(y_np, subset_slices, tmpdir / "y.bin")
 s_mmap = to_subset_mmap(s_np, subset_slices, tmpdir / "s.bin")
 
-# safe mode of NegPoissonLogL is only needed if the expected data can be 0
-# in some bins, which cannot happen if the contamination is strictly
-# positive -- evaluate before the full contamination array is freed
-safe_mode = bool(xp.min(contamination) == 0)
+# the strictly positive contamination guarantees positive expected data in
+# every bin, so the exact (unmodified) log-likelihood of NegPoissonLogL can
+# be used -- evaluate before the full contamination array is freed
+exact_mode = bool(xp.min(contamination) > 0)
 
 del y_np, s_np, y, contamination  # full arrays no longer in RAM
 
@@ -329,16 +329,18 @@ def em_update(
 # loading only one subset's data at a time.
 #
 # .. note::
-#     The ``safe`` mode of :class:`.NegPoissonLogL` (on by default) exactly
-#     handles bins where the measured **and** the expected data are both zero,
-#     which would otherwise produce ``nan`` from ``0 * log(0)`` and ``0 / 0``
-#     (silently so with cupy / torch).  It costs one extra elementwise
-#     ``where`` per evaluation.  Since our contamination is strictly positive,
-#     the expected data ``A x + s`` are positive in every bin and we can
-#     disable safe mode for speed (``safe_mode`` was derived from the
-#     contamination above).  Keep ``safe=True`` whenever the expected data
-#     can reach zero, e.g. with zero contamination or "virtual" bins without
-#     geometric sensitivity.
+#     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
+#     (shifted Poisson) surrogate: a tiny ``eps = rel_eps * mean(y)`` is
+#     added to the measured and the expected data.  This is finite for any
+#     non-negative expectation (never ``nan`` / ``inf``), at the price of a
+#     tiny (~``rel_eps``) bias that vanishes at the fit.  Since our
+#     contamination is strictly positive, the expected data ``A x + s`` are
+#     positive in every bin and we can use ``exact=True`` (``exact_mode``
+#     was derived from the contamination above).  Keep the default whenever
+#     the expected data can reach zero in bins with counts.  Note that each
+#     per-subset instance would derive its own ``eps`` from its subset mean
+#     -- pass one global ``eps`` explicitly if exact separability of the
+#     subset objectives matters.
 
 
 def full_objective_from_subsets(x: Array) -> float:
@@ -348,7 +350,7 @@ def full_objective_from_subsets(x: Array) -> float:
         y_sub = xp.asarray(y_mmap[subset_idx], device=dev, dtype=xp.float32)
         s_sub = xp.asarray(s_mmap[subset_idx], device=dev, dtype=xp.float32)
         total += C2AffineObjective(
-            NegPoissonLogL(y_sub, safe=safe_mode),
+            NegPoissonLogL(y_sub, exact=exact_mode),
             pet_subset_linop_seq[subset_idx],
             s_sub,
         )(x)
@@ -368,7 +370,7 @@ for k in range(num_subsets):
     y_k = xp.asarray(y_mmap[k], device=dev, dtype=xp.float32)
     s_k = xp.asarray(s_mmap[k], device=dev, dtype=xp.float32)
     df_k = C2AffineObjective(
-        NegPoissonLogL(y_k, safe=safe_mode), pet_subset_linop_seq[k], s_k
+        NegPoissonLogL(y_k, exact=exact_mode), pet_subset_linop_seq[k], s_k
     )
     x_osem = em_update(x_osem, df_k, subset_adjoint_ones[k], fov_mask)
     del df_k, y_k, s_k
@@ -395,7 +397,7 @@ for i in range(num_epochs):
         s_k = xp.asarray(s_mmap[k], device=dev, dtype=xp.float32)
 
         df_k = C2AffineObjective(
-            NegPoissonLogL(y_k, safe=safe_mode), pet_subset_linop_seq[k], s_k
+            NegPoissonLogL(y_k, exact=exact_mode), pet_subset_linop_seq[k], s_k
         )
         x_osem = em_update(x_osem, df_k, subset_adjoint_ones[k], fov_mask)
 

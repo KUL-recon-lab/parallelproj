@@ -70,14 +70,21 @@ New Features
   (``C1Function``, ``C2Function``, ``FunctionWithProx``, ``FunctionWithConjProx``) and
   concrete loss/regularisation implementations for optimisation:
 
-  - ``NegPoissonLogL`` — Poisson log-likelihood, with a ``safe`` mode (on by default)
-    that exactly handles bins where both the data and the expectation are zero (mask
-    derived from ``data == 0``, no user input needed; pass ``safe=False`` to skip the
-    extra ``where`` when the expectation is guaranteed positive, e.g. strictly positive
-    contamination), and optional ``enable_extra_checks=True`` debug mode that warns on
-    inputs producing ``nan`` / ``inf``
+  - ``NegPoissonLogL`` — Poisson log-likelihood with two evaluation modes.  The
+    default ("safe epsilon") mode evaluates a shifted-Poisson surrogate with
+    ``eps = rel_eps * mean(y)`` added to data and expectation: finite for any
+    non-negative expectation, per-bin minimiser unchanged, gradient bias
+    proportional to the residual; the dual prox is shifted consistently.
+    ``exact=True`` evaluates the unmodified log-likelihood (bins with ``y == 0``,
+    e.g. virtual bins, are handled exactly) and requires a positive expectation in
+    all bins with counts.  An optional absolute ``eps`` allows sharing one epsilon
+    across subset objectives, and ``enable_extra_checks=True`` warns on inputs
+    producing ``nan`` / ``inf``
   - ``NegPoissonLogLListmode`` — listmode Poisson log-likelihood with built-in forward
-    model
+    model; optional ``eps`` kwarg (default ``0.0``) smooths the per-event log /
+    division terms (expectation-only shift — the symmetric shifted-Poisson surrogate
+    of ``NegPoissonLogL`` would require full-sinogram projections and is not
+    listmode-compatible)
   - ``HalfSquaredL2Deviation`` — weighted least-squares deviation
   - ``SumC1Function`` / ``SumC2Function`` — also created via ``f1 + f2`` operator
     overloading

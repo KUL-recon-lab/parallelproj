@@ -1,4 +1,5 @@
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/KUL-recon-lab/parallelproj/main?labpath=examples)
+[![codecov](https://codecov.io/gh/KUL-recon-lab/parallelproj/graph/badge.svg)](https://codecov.io/gh/KUL-recon-lab/parallelproj)
 
 <p align="center">
 <img src="./docs/_static/parallelproj-logo.png" width="350">

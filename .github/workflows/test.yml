@@ -65,4 +65,15 @@ jobs:
         run: pixi run -e ${{ matrix.env }} python -c "import sys, parallelproj; print('Python', sys.version.split()[0]); print('parallelproj', parallelproj.__version__)"
 
       - name: Run tests
-        run: pixi run -e ${{ matrix.env }} test-cov
+        run: pixi run -e ${{ matrix.env }} test-cov-xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: KUL-recon-lab/parallelproj
+          files: ./coverage.xml
+          # one flag per matrix combination so Codecov can show coverage per
+          # OS / env; reports for the same commit are merged automatically
+          flags: ${{ matrix.os }}-${{ matrix.env }}
+          fail_ci_if_error: false
