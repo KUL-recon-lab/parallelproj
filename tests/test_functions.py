@@ -93,7 +93,9 @@ def test_neg_poisson_logl_call(xp: ModuleType, dev: str):
     # default (eps) mode evaluates the shifted-Poisson surrogate
     f_eps = ppf.NegPoissonLogL(y)
     e = f_eps.eps
-    expected_eps = float(_np.sum(_YBAR_NP - (_Y_NP + e) * _np.log(_YBAR_NP + e)))
+    expected_eps = float(
+        _np.sum((_YBAR_NP + e) - (_Y_NP + e) * _np.log(_YBAR_NP + e))
+    )
     assert abs(f_eps(ybar) - expected_eps) < 1e-5
 
 
@@ -274,7 +276,7 @@ def test_neg_poisson_logl_eps_minimizer_at_data(xp: ModuleType, dev: str):
 
 def test_neg_poisson_logl_eps_shifted_poisson_identity(xp: ModuleType, dev: str):
     """The default mode equals NegPoissonLogL(y + eps, exact=True) evaluated
-    at ybar + eps (values differ by the constant n * eps from the linear term)."""
+    at ybar + eps, in value, gradient, and Hessian."""
     e = 0.125  # exactly representable
     y_np = _np.asarray([3.0, 1.0, 0.0, 2.0])
     ybar_np = _np.asarray([2.5, 1.5, 0.5, 3.0])
@@ -289,8 +291,7 @@ def test_neg_poisson_logl_eps_shifted_poisson_identity(xp: ModuleType, dev: str)
     f_ref = ppf.NegPoissonLogL(xp.asarray(y_np + e, device=dev), exact=True)
     ybar_shift = xp.asarray(ybar_np + e, device=dev)
 
-    n_eps = e * y_np.size
-    assert abs(f_eps(ybar) - (f_ref(ybar_shift) - n_eps)) < 1e-8
+    assert abs(f_eps(ybar) - f_ref(ybar_shift)) < 1e-8
     assert allclose(f_eps.gradient(ybar), f_ref.gradient(ybar_shift))
     assert allclose(
         f_eps.hessian_diag_vec_prod(ybar, v),

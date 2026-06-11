@@ -22,7 +22,7 @@ Exact vs. "safe epsilon" mode of the negative Poisson log-likelihood
    is added to both the measured and the expected data:
 
    .. math::
-       f_\\varepsilon(\\bar{y}) = \\sum_i \\bar{y}_i
+       f_\\varepsilon(\\bar{y}) = \\sum_i (\\bar{y}_i + \\varepsilon)
             - (y_i + \\varepsilon) \\log(\\bar{y}_i + \\varepsilon),
        \\qquad
        \\nabla f_\\varepsilon = \\frac{\\bar{y} - y}{\\bar{y} + \\varepsilon}.

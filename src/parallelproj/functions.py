@@ -495,10 +495,12 @@ class NegPoissonLogL(C2FunctionWithConjProx):
 
         .. math::
 
-            f_\\varepsilon(\\bar{y}) = \\sum_i \\bar{y}_i
+            f_\\varepsilon(\\bar{y}) = \\sum_i (\\bar{y}_i + \\varepsilon)
                 - (y_i + \\varepsilon) \\log(\\bar{y}_i + \\varepsilon)
 
-        with gradient :math:`(\\bar{y} - y)/(\\bar{y} + \\varepsilon)` and
+        i.e. exactly the Poisson log-likelihood of the shifted data
+        evaluated at the shifted expectation, with gradient
+        :math:`(\\bar{y} - y)/(\\bar{y} + \\varepsilon)` and
         Hessian diagonal :math:`(y + \\varepsilon)/(\\bar{y} + \\varepsilon)^2`,
         corresponding to a tiny known contamination :math:`\\varepsilon`
         added to both the data and the expectation.  It is smooth and finite
@@ -653,7 +655,10 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         if self._exact:
             safe_x = xp.where(self._data_is_zero, xp.ones_like(x), x)
             return float(xp.sum(x - self._data * xp.log(safe_x)))
-        return float(xp.sum(x - (self._data + self._eps) * xp.log(x + self._eps)))
+        # including the constant n * eps in the linear term makes the value
+        # exactly the Poisson log-likelihood of the shifted data/expectation
+        x_shift = x + self._eps
+        return float(xp.sum(x_shift - (self._data + self._eps) * xp.log(x_shift)))
 
     def _gradient(self, x: Array) -> Array:
         xp = get_namespace(x)
@@ -693,10 +698,10 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         -- which the formula already yields exactly when :math:`d_i = 0`.
 
         In the default mode the prox belongs to the shifted-Poisson
-        surrogate :math:`f_\\varepsilon(t) = t - (d + \\varepsilon)
-        \\log(t + \\varepsilon)`.  Writing :math:`f_\\varepsilon(t) =
-        g(t + \\varepsilon) + \\text{const}` with :math:`g` the standard
-        loss for data :math:`d + \\varepsilon`, the shift rule
+        surrogate :math:`f_\\varepsilon(t) = (t + \\varepsilon) -
+        (d + \\varepsilon) \\log(t + \\varepsilon)`.  Writing
+        :math:`f_\\varepsilon(t) = g(t + \\varepsilon)` with :math:`g` the
+        standard loss for data :math:`d + \\varepsilon`, the shift rule
         :math:`\\operatorname{prox}_{\\sigma (g(\\cdot+\\varepsilon))^*}(v)
         = \\operatorname{prox}_{\\sigma g^*}(v + \\sigma\\varepsilon)`
         gives the same closed form evaluated at
