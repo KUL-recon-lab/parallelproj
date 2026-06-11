@@ -1150,6 +1150,89 @@ def test_neg_poisson_logl_lm_matches_sinogram_hessian(xp: ModuleType, dev: str):
 
 
 # ---------------------------------------------------------------------------
+# NegPoissonLogLListmode: optional eps smoothing
+# ---------------------------------------------------------------------------
+
+
+def test_neg_poisson_logl_lm_eps_matches_manual_surrogate(xp: ModuleType, dev: str):
+    """With eps > 0 the LM objective equals the expectation-only-shift
+    surrogate sum(ybar) - sum(y * log(ybar + eps)) in sinogram space, and
+    value / gradient stay mutually consistent (finite differences)."""
+    e = 0.25
+    x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
+
+    A_lm = xp.asarray(_A_LM_NP, device=dev, dtype=xp.float32)
+    s_lm = xp.asarray(_S_LM_NP, device=dev, dtype=xp.float32)
+    sens = xp.asarray(_SENS_LM_NP, device=dev, dtype=xp.float32)
+    f = ppf.NegPoissonLogLListmode(
+        ppo.MatrixOperator(A_lm), sens, s_lm, _CONT_SINO_SUM, eps=e
+    )
+    assert f.eps == e
+
+    pred_sino = _A_SINO_LM_NP @ _X_LM_NP + _S_SINO_LM_NP
+    expected = float(
+        _np.dot(_SENS_LM_NP, _X_LM_NP)
+        + _CONT_SINO_SUM
+        - _np.sum(_Y_LM_SINO_NP * _np.log(pred_sino + e))
+    )
+    assert abs(f(x) - expected) < 1e-4
+
+    grad_expected_np = _SENS_LM_NP - _A_LM_NP.T @ (
+        1.0 / (_A_LM_NP @ _X_LM_NP + _S_LM_NP + e)
+    )
+    assert allclose(
+        f.gradient(x), xp.asarray(grad_expected_np, device=dev), atol=1e-4, rtol=1e-4
+    )
+    fd_grad = finite_diff_gradient(f, _X_LM_NP, xp, dev)
+    assert allclose(f.gradient(x), fd_grad, atol=1e-3, rtol=1e-3)
+
+
+def test_neg_poisson_logl_lm_eps_finite_on_zero_pred(xp: ModuleType, dev: str):
+    """With zero contamination and x = 0 every per-event prediction is 0:
+    eps = 0 raises ValueError, eps > 0 stays finite."""
+    e = 0.5
+    A_lm = xp.asarray(_A_LM_NP, device=dev, dtype=xp.float32)
+    s_zero = xp.zeros(_A_LM_NP.shape[0], device=dev, dtype=xp.float32)
+    sens = xp.asarray(_SENS_LM_NP, device=dev, dtype=xp.float32)
+    x0 = xp.zeros(2, device=dev, dtype=xp.float32)
+    v = xp.ones(2, device=dev, dtype=xp.float32)
+
+    f_exact = ppf.NegPoissonLogLListmode(ppo.MatrixOperator(A_lm), sens, s_zero, 0.0)
+    with pytest.raises(ValueError, match="strictly positive"):
+        f_exact(x0)
+
+    f_eps = ppf.NegPoissonLogLListmode(
+        ppo.MatrixOperator(A_lm), sens, s_zero, 0.0, eps=e
+    )
+    val = f_eps(x0)
+    grad = f_eps.gradient(x0)
+    hv = f_eps.hessian_diag_vec_prod(x0, v)
+    assert math.isfinite(val)
+    assert bool(xp.all(xp.isfinite(grad))) and bool(xp.all(xp.isfinite(hv)))
+    # n_events * (-log(eps)) is the exact value at x = 0
+    assert abs(val - (-_A_LM_NP.shape[0] * math.log(e))) < 1e-5
+
+
+def test_neg_poisson_logl_lm_eps_validation(xp: ModuleType, dev: str):
+    """Negative eps raises; negative predictions raise even with eps > 0."""
+    A_lm = xp.asarray(_A_LM_NP, device=dev, dtype=xp.float32)
+    s_lm = xp.asarray(_S_LM_NP, device=dev, dtype=xp.float32)
+    sens = xp.asarray(_SENS_LM_NP, device=dev, dtype=xp.float32)
+
+    with pytest.raises(ValueError, match="eps"):
+        ppf.NegPoissonLogLListmode(
+            ppo.MatrixOperator(A_lm), sens, s_lm, _CONT_SINO_SUM, eps=-0.1
+        )
+
+    f = ppf.NegPoissonLogLListmode(
+        ppo.MatrixOperator(A_lm), sens, s_lm, _CONT_SINO_SUM, eps=0.5
+    )
+    x_neg = xp.asarray(_np.asarray([-10.0, -10.0]), device=dev, dtype=xp.float32)
+    with pytest.raises(ValueError, match="non-negative"):
+        f(x_neg)
+
+
+# ---------------------------------------------------------------------------
 # Gradient finite-difference consistency (random inputs)
 # ---------------------------------------------------------------------------
 

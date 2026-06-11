@@ -1084,19 +1084,58 @@ class NegPoissonLogLListmode(C2Function):
 
     .. note::
 
-        No analogue of the ``safe`` mode of :class:`NegPoissonLogL` is
+        No analogue of the ``safe`` handling of :class:`NegPoissonLogL` is
         needed here: bins with :math:`y_i = 0` cannot appear in the event
         list, so the indeterminate :math:`0 \\cdot \\log 0` / :math:`0/0`
         cases are excluded by construction.  The only remaining failure mode
         is a *detected* event with zero predicted counts
         (:math:`\\bar{y}_e = 0`, equivalent to :math:`y_i > 0`,
         :math:`\\bar{y}_i = 0` in sinogram space), which is a genuine model
-        violation.  Every call to :meth:`__call__`, :meth:`gradient`, or
+        violation.  With the default ``eps = 0``, every call to
+        :meth:`__call__`, :meth:`gradient`, or
         :meth:`hessian_diag_vec_prod` therefore requires that all per-event
         predicted counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly
-        positive**.  A :exc:`ValueError` is raised otherwise, so ensure that
-        ``contamination_list`` is positive whenever the image :math:`x` may
-        have zero-valued voxels.
+        positive** -- guaranteed by a strictly positive
+        ``contamination_list``, which is the normal situation in practice.
+        A :exc:`ValueError` is raised otherwise.
+
+    **Optional epsilon smoothing** (``eps > 0``).  When a strictly positive
+    per-event contamination cannot be guaranteed (e.g. no contamination and
+    a truncated / mismatched forward model), setting ``eps > 0`` evaluates
+    the smoothed objective
+
+    .. math::
+
+        f_\\varepsilon(x) = \\langle \\text{sens},\\, x \\rangle
+            + c_{\\text{sino}}
+            - \\sum_e \\log\\bigl(\\bar{y}_e + \\varepsilon\\bigr),
+
+    which in sinogram space equals :math:`\\sum_i \\bar{y}_i - y_i
+    \\log(\\bar{y}_i + \\varepsilon)` -- the epsilon shift applied to the
+    *expectation only*.  This is finite for all :math:`\\bar{y}_e \\geq 0`
+    and self-consistent (value, gradient, and Hessian derive from one
+    convex function).
+
+    .. note::
+
+        The *shifted Poisson* surrogate of :class:`NegPoissonLogL` (epsilon
+        added to the data **and** the expectation) cannot be implemented in
+        listmode: its data-shift term :math:`\\varepsilon \\sum_i
+        \\log(\\bar{y}_i + \\varepsilon)` sums over **all** sinogram bins
+        and would require a full sinogram forward/backprojection per
+        evaluation, defeating the purpose of listmode processing.  As a
+        consequence, the expectation-only shift used here has its per-bin
+        minimiser at :math:`\\bar{y}_i = y_i - \\varepsilon` (a bias of
+        :math:`-\\varepsilon`, negligible for small :math:`\\varepsilon`
+        since event bins have :math:`y_i \\geq 1`), and the listmode and
+        sinogram objectives differ at :math:`O(\\varepsilon)` when both use
+        their epsilon modes.
+
+    A good choice is ``eps = 1e-6 * n_events / num_data_bins`` (i.e.
+    :math:`10^{-6}` times the mean emission sinogram value), with
+    ``n_events = contamination_list.shape[0]`` and ``num_data_bins`` taken
+    from the projector / LOR descriptor of the full forward model used to
+    compute the sensitivity image (e.g. ``math.prod(proj.out_shape)``).
 
     Parameters
     ----------
@@ -1113,6 +1152,11 @@ class NegPoissonLogLListmode(C2Function):
     contamination_sinogram_sum : float
         Scalar sum of the contamination over all sinogram bins,
         :math:`c_{\\text{sino}} = \\sum_i s_i^{\\text{sino}}`.
+    eps : float, optional
+        Epsilon added to the per-event predicted counts in all log /
+        division terms (see above).  Defaults to ``0.0`` (exact
+        log-likelihood), assuming a strictly positive contamination for
+        every event.
     """
 
     def __init__(
@@ -1121,20 +1165,38 @@ class NegPoissonLogLListmode(C2Function):
         sensitivity_image: Array,
         contamination_list: Array,
         contamination_sinogram_sum: float,
+        eps: float = 0.0,
     ):
         super().__init__()
+        if eps < 0:
+            raise ValueError("eps must be >= 0")
         self._lm_op = lm_op
         self._sensitivity_image = sensitivity_image
         self._contamination_sinogram_sum = contamination_sinogram_sum
         self._contamination_list = contamination_list
+        self._eps = float(eps)
+
+    @property
+    def eps(self) -> float:
+        """Epsilon added to the per-event predicted counts (``0.0`` = exact mode)."""
+        return self._eps
 
     def _pred(self, x: Array) -> Array:
-        """Compute per-event predicted counts :math:`A_{\\text{LM}} x + s_{\\text{LM}}`."""
+        """Per-event predicted counts :math:`A_{\\text{LM}} x + s_{\\text{LM}}`
+        (plus :math:`\\varepsilon` when ``eps > 0``)."""
         pred = self._lm_op(x) + self._contamination_list
         xp = get_namespace(pred)
-        if float(xp.min(pred)) <= 0:
-            raise ValueError("Per-event predicted counts must be strictly positive. ")
-        return pred
+        if self._eps == 0.0:
+            if float(xp.min(pred)) <= 0:
+                raise ValueError(
+                    "Per-event predicted counts must be strictly positive. "
+                    "Ensure a strictly positive contamination_list, or set "
+                    "eps > 0."
+                )
+            return pred
+        if float(xp.min(pred)) < 0:
+            raise ValueError("Per-event predicted counts must be non-negative.")
+        return pred + self._eps
 
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)

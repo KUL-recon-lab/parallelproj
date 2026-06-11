@@ -81,7 +81,10 @@ New Features
     across subset objectives, and ``enable_extra_checks=True`` warns on inputs
     producing ``nan`` / ``inf``
   - ``NegPoissonLogLListmode`` — listmode Poisson log-likelihood with built-in forward
-    model
+    model; optional ``eps`` kwarg (default ``0.0``) smooths the per-event log /
+    division terms (expectation-only shift — the symmetric shifted-Poisson surrogate
+    of ``NegPoissonLogL`` would require full-sinogram projections and is not
+    listmode-compatible)
   - ``HalfSquaredL2Deviation`` — weighted least-squares deviation
   - ``SumC1Function`` / ``SumC2Function`` — also created via ``f1 + f2`` operator
     overloading
