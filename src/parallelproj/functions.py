@@ -507,8 +507,7 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         gradient error w.r.t. the unshifted log-likelihood is
         :math:`\\varepsilon (y - \\bar{y}) / (\\bar{y} (\\bar{y} +
         \\varepsilon))`, proportional to the residual and vanishing at the
-        fit.  By default :math:`\\varepsilon = \\texttt{rel_eps} \\cdot
-        \\operatorname{mean}(y)`.
+        fit.  By default :math:`\\varepsilon` = ``rel_eps * mean(y)``.
 
     ``exact=True``
         The unmodified log-likelihood.  Bins with :math:`y_i = 0` (virtual
@@ -558,10 +557,9 @@ class NegPoissonLogL(C2FunctionWithConjProx):
         :math:`\\bar{y}_i > 0` in every bin with :math:`y_i > 0`.
         Defaults to ``False`` (shifted-Poisson surrogate, always finite).
     rel_eps : float, optional
-        Relative epsilon used to derive
-        :math:`\\varepsilon = \\texttt{rel_eps} \\cdot \\operatorname{mean}(y)`
-        in the default mode.  Ignored when ``exact=True`` or when ``eps`` is
-        given.  Defaults to ``1e-6``.
+        Relative epsilon used to derive :math:`\\varepsilon` =
+        ``rel_eps * mean(y)`` in the default mode.  Ignored when
+        ``exact=True`` or when ``eps`` is given.  Defaults to ``1e-6``.
     eps : float, optional
         Absolute :math:`\\varepsilon` override (must be > 0).  Useful to
         share one global epsilon across subset objectives.  Ignored when

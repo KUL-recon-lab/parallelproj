@@ -18,9 +18,8 @@ Exact vs. "safe epsilon" mode of the negative Poisson log-likelihood
    algorithms (and cupy / torch produce these infinities *silently*).
 
 2. The **default** ("safe epsilon") mode evaluates a *shifted Poisson*
-   surrogate, where a tiny :math:`\\varepsilon =
-   \\texttt{rel_eps} \\cdot \\operatorname{mean}(y)` is added to both the
-   measured and the expected data:
+   surrogate, where a tiny :math:`\\varepsilon` = ``rel_eps * mean(y)``
+   is added to both the measured and the expected data:
 
    .. math::
        f_\\varepsilon(\\bar{y}) = \\sum_i \\bar{y}_i
