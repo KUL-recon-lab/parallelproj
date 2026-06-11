@@ -183,6 +183,9 @@ pytorch = "*"
 # harmless (it just touches the runner's disposable local git config).
 test = { cmd = "pytest tests/ -v", depends-on = ["setup-hooks"] }
 test-cov = { cmd = "pytest tests/ --cov=parallelproj --cov-report=term-missing", depends-on = ["setup-hooks"] }
+# Same as test-cov, but additionally writes coverage.xml (with branch
+# coverage) for upload to Codecov -- used by the GitHub test workflow.
+test-cov-xml = { cmd = "pytest tests/ --cov=parallelproj --cov-branch --cov-report=term-missing --cov-report=xml", depends-on = ["setup-hooks"] }
 
 # ---- docs feature ----
 
