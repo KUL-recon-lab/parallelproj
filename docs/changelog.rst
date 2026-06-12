@@ -135,6 +135,11 @@ New Features
   averaged-LOR z-position per plane (exact for span=1, standard approximation
   for span>1), with no loop over ring-pair multiplicities.
 - **``parallelproj.__version__``** is now exposed at the top level.
+- **New example: transmission reconstruction (MLTR / SPS / Convex)** — exact Poisson
+  transmission model with strictly positive scatter background, presenting MLTR
+  (Nuyts et al.), monotone SPS with optimal curvature (Erdoğan & Fessler), and the
+  MLEM-like Convex algorithm (Lange) as one preconditioned gradient ascent with
+  three diagonal preconditioners.
 
 1.10.2 (Aug 20, 2025)
 ----------------------
