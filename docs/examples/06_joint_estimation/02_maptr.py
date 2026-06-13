@@ -46,10 +46,9 @@ valid diagonal majorant, since :math:`\\tfrac{d^2}{dz^2}\\delta\\log\\cosh(z/\\d
 = \\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`.  This is exactly
 the curvature denominator of the MAPTR update in Nuyts' note.
 
-The same three algorithms as in ``01_os_mltr_svrg.py`` are run, now on the
+The subset algorithms of ``01_os_mltr_svrg.py`` are run, now on the
 penalised objective, with a converged **L-BFGS-B** reference:
 
-* **MLTR** -- full-data preconditioned ascent of :math:`L - \\beta R`.
 * **OS-MLTR** -- one subset per update; the prior is split ``beta/m`` per
   subset so the :math:`m` subset contributions sum to the full penalty.
 * **SVRG** -- the data term is variance-reduced across subsets; the cheap,
@@ -57,9 +56,9 @@ penalised objective, with a converged **L-BFGS-B** reference:
   at every inner step.
 
 .. note::
-    Each MLTR / OS-MLTR epoch is one full data pass; an SVRG epoch is
-    roughly two (anchor + subset sweep), so the epoch axis understates
-    SVRG's cost by about a factor of two.
+    Each OS-MLTR epoch is one full data pass; an SVRG epoch is roughly two
+    (anchor + subset sweep), so the epoch axis understates SVRG's cost by
+    about a factor of two.
 
 .. note::
 
@@ -241,30 +240,14 @@ def subset_grad(mu: Array, k: int) -> Array:
 
 
 # %%
-# MLTR (full-data baseline) on the penalised objective
-# ----------------------------------------------------
-#
-# Ascend :math:`L - \beta R` with the harmonic-mean preconditioner
-# ``D = 1 / (data curvature + prior curvature)``.
-
-mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
-cost: dict[str, np.ndarray] = {}
-mu_final: dict[str, Array] = {}
-
-c = [penalised_cost(mu)]
-for ep in range(num_epochs):
-    print(f"MLTR       epoch {ep + 1:03}/{num_epochs:03}", end="\r")
-    grad, denom = full_grad_and_curv(mu)
-    g_pen = grad - reg.gradient(mu)
-    mu = xp.clip(mu + _safe_ratio(g_pen, denom + prior_curv), 0, None)
-    c.append(penalised_cost(mu))
-print()
-cost["MLTR"] = np.asarray(c)
-mu_final["MLTR"] = mu
-
-# %%
 # OS-MLTR (one subset per update; prior split beta/m per subset)
 # --------------------------------------------------------------
+#
+# Ascend :math:`L - \beta R` with the harmonic-mean preconditioner
+# ``D = 1 / (data curvature + prior curvature)``, one subset at a time.
+
+cost: dict[str, np.ndarray] = {}
+mu_final: dict[str, Array] = {}
 
 mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
 c = [penalised_cost(mu)]
@@ -338,24 +321,23 @@ cost["L-BFGS-B"] = np.asarray(cost_lbfgs)
 phi_ref = float(res.fun)  # converged reference penalised cost
 print(f"L-BFGS-B reference: Phi = {phi_ref:.2f}")
 
-for name in ("MLTR", "OS-MLTR", "SVRG"):
+for name in ("OS-MLTR", "SVRG"):
     print(f"{name:8}: Phi after {num_epochs} epochs = {cost[name][-1]:.2f}")
 
 # %%
 # Convergence and reconstructions
 # -------------------------------
 #
-# All algorithms minimise the same penalised objective :math:`\Phi`.  As in
-# the unregularised case OS-MLTR and SVRG accelerate strongly per epoch; the
-# converged :math:`\mu` is now visibly smoother in the uniform regions while
-# the dense inserts (edges :math:`\gg \delta`) are preserved by the log-cosh
-# penalty.
+# OS-MLTR and SVRG minimise the same penalised objective :math:`\Phi` and
+# reach the L-BFGS-B reference within a few epochs.  The converged
+# :math:`\mu` is visibly smoother in the uniform regions while the dense
+# inserts (edges :math:`\gg \delta`) are preserved by the log-cosh penalty.
 
 c_min = float(min(c.min() for c in cost.values()))
 c_max = float(cost["SVRG"][2])
 
 fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), tight_layout=True)
-for name in ("MLTR", "OS-MLTR", "SVRG", "L-BFGS-B"):
+for name in ("OS-MLTR", "SVRG", "L-BFGS-B"):
     ax[0].plot(cost[name], label=name)
 ax[0].set_ylim(c_min, c_max)
 ax[0].set_xlabel("epoch (subset methods) / function evaluation (L-BFGS-B)")
@@ -367,7 +349,7 @@ sl = img_shape[2] // 2
 ax[1].plot(
     to_numpy_array(mu_true[:, img_shape[1] // 2, sl]), "k--", label=r"true $\mu$"
 )
-for name in ("MLTR", "OS-MLTR", "SVRG", "L-BFGS-B"):
+for name in ("OS-MLTR", "SVRG", "L-BFGS-B"):
     ax[1].plot(to_numpy_array(mu_final[name][:, img_shape[1] // 2, sl]), label=name)
 ax[1].set_xlabel("pixel")
 ax[1].set_ylabel(r"$\mu$ [1/mm]")
