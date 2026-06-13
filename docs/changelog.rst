@@ -140,6 +140,9 @@ New Features
   (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one
   preconditioned gradient ascent differing only in the diagonal preconditioner, and
   L-BFGS-B on the same smooth objective with a non-negativity box constraint.
+- **New example: accelerating MLTR with ordered subsets and SVRG** — OS-MLTR and a
+  preconditioned SVRG variant compared against full MLTR and a converged L-BFGS-B
+  reference, showing the per-epoch speed-up of subset-based transmission reconstruction.
 
 1.10.2 (Aug 20, 2025)
 ----------------------
