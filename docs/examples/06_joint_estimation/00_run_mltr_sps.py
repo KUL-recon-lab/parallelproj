@@ -1,6 +1,6 @@
 """
-Transmission reconstruction: MLTR, SPS and the Convex algorithm
-===============================================================
+Transmission reconstruction: MLTR, SPS and L-BFGS-B
+===================================================
 
 This example reconstructs a linear attenuation image :math:`\\mu` from
 transmission data using the **exact Poisson model** (no log-linearisation
@@ -19,9 +19,9 @@ where :math:`b_i` is the blank scan, :math:`P\\mu` are line integrals of
 that with the background :math:`s_i > 0` all expressions below are free of
 divisions by zero (:math:`\\bar{y}_i \\geq s_i > 0`).
 
-**Preconditioned gradient ascent.**  All three algorithms below are the
-*same* preconditioned gradient ascent on the log-likelihood, exactly
-analogous to MLEM for the emission problem
+**Preconditioned gradient ascent.**  Both algorithms below are the *same*
+preconditioned gradient ascent on the log-likelihood, exactly analogous to
+MLEM for the emission problem
 (:math:`x \\leftarrow x + \\tfrac{x}{A^T\\mathbf 1}\\nabla_x L`):
 
 .. math::
@@ -30,24 +30,23 @@ analogous to MLEM for the emission problem
     \\nabla_\\mu L = P^T\\!\\left[\\tfrac{\\bar\\psi}{\\bar y}(\\bar y - y)\\right].
 
 They share the gradient :math:`\\nabla_\\mu L` and differ **only** in the
-diagonal preconditioner :math:`D`, which is the inverse of a separable
-majorant of the curvature (the weight choice :math:`\\alpha_j` of Nuyts'
-note):
+diagonal preconditioner :math:`D`, the inverse of a separable majorant of
+the curvature (the weight choice :math:`\\alpha_j = 1` of Nuyts' note):
 
-* **MLTR** (Nuyts et al. [#f1]_, :math:`\\alpha_j = 1`) uses the Newton-type
-  curvature :math:`\\bar\\psi^2/\\bar y`:
+* **MLTR** (Nuyts et al. [#f1]_) uses the Newton-type curvature
+  :math:`\\bar\\psi^2/\\bar y`:
 
   .. math::
       D_j = 1 \\,/\\, P^T\\!\\left[(P\\mathbf 1)\\,
         \\tfrac{\\bar\\psi^2}{\\bar y}\\right]_j .
 
-  Derived from a quadratic *approximation* of :math:`L`, so monotonic
-  increase is **not guaranteed** (in practice it almost always holds).
+  Derived from a quadratic *approximation* of :math:`L`, so a monotone
+  increase of :math:`L` is **not guaranteed**.
 
-* **SPS** with optimal curvature (Erdogan and Fessler [#f2]_,
-  :math:`\\alpha_j = 1`) replaces :math:`\\bar\\psi^2/\\bar y` by the optimal
-  curvature :math:`c_i`, the smallest curvature whose parabola *majorises*
-  the per-ray negative log-likelihood on :math:`l \\geq 0`:
+* **SPS** with optimal curvature (Erdogan and Fessler [#f2]_) replaces
+  :math:`\\bar\\psi^2/\\bar y` by the optimal curvature :math:`c_i`, the
+  smallest curvature whose parabola *majorises* the per-ray negative
+  log-likelihood on :math:`l \\geq 0`:
 
   .. math::
       D_j = 1 \\,/\\, P^T\\!\\left[(P\\mathbf 1)\\, c\\right]_j,
@@ -63,20 +62,18 @@ note):
   the Newton curvature, so SPS takes more conservative steps but every
   update is **monotone** (under the concavity condition below).
 
-* **Convex** algorithm (Lange, :math:`\\alpha_j = \\mu_j`) uses a
-  *multiplicative* preconditioner -- the direct transmission analogue of
-  MLEM, updating each pixel in proportion to its current value:
-
-  .. math::
-      D_j = \\mu_j \\,/\\, P^T\\!\\left[(P\\mu)\\,
-        \\tfrac{\\bar\\psi^2}{\\bar y}\\right]_j .
-
-  Like MLEM, this requires a strictly **positive initial image** (a voxel
-  at exactly zero can never become non-zero).
-
 Each iteration costs two forward and one back projection (plus one
 precomputable :math:`P\\mathbf 1`), updates all voxels simultaneously, and
 enforces non-negativity by clipping.
+
+For comparison we additionally run **L-BFGS-B** -- a general-purpose
+bound-constrained quasi-Newton optimiser (SciPy) -- directly on the smooth
+objective :math:`-L(\\mu)` with the box constraint :math:`\\mu \\geq 0`.
+Because the transmission log-likelihood is smooth and (away from strong
+scatter) concave, no surrogate is needed: L-BFGS-B builds its own
+quasi-Newton metric from the gradient history.  Each function evaluation
+costs one forward and one back projection, so its x-axis below is roughly
+comparable to one MLTR / SPS iteration.
 
 .. note::
     With a scatter background the transmission log-likelihood is concave
@@ -86,14 +83,29 @@ enforces non-negativity by clipping.
     a problem -- see the discussions in [#f1]_ and [#f2]_.
 
 .. note::
-    MLTR is usually the fastest and is well behaved in typical regimes.
-    SPS trades a little speed for a guaranteed monotone increase of
-    :math:`L`, which matters in low-count / high-scatter data, automated
-    pipelines, ordered-subset schemes, or MAP with non-quadratic priors.
-    Faster variants not shown: ordered-subsets SPS and momentum-accelerated
-    OS-SQS, or -- since the objective is smooth -- generic solvers like
-    L-BFGS-B.  A penalised (MAPTR) extension adds a prior surrogate to the
-    same separable framework.
+    MLTR is derived from a quadratic *approximation* and carries no formal
+    monotonicity guarantee, whereas SPS is provably monotone.  In practice,
+    across the regimes tested for this example -- including low-count,
+    high-attenuation data -- MLTR remained monotone *and* reached a slightly
+    **higher** likelihood per iteration than SPS: its Newton-type curvature
+    is never larger than the SPS majorant, so it takes larger steps and
+    converges faster.  Comparing the two at equal iteration count can be
+    misleading in the presence of noise -- the ML solution differs from the
+    ground truth and may have voxels above the true :math:`\\mu`, so a
+    higher peak in the faster-converging method is not "overshoot".  The
+    fair comparison is the achieved likelihood after many iterations, where
+    MLTR was at least as good here.  SPS's guarantee is therefore best seen
+    as insurance for harder settings (strongly non-concave regions with high
+    scatter, fully automated pipelines, ordered subsets, or MAP with
+    non-quadratic priors).  On this unregularised problem L-BFGS-B actually
+    converges at least as fast as MLTR -- its quasi-Newton metric already
+    captures the curvature that the separable surrogates approximate with a
+    fixed diagonal.  MLTR / SPS nevertheless remain attractive for their
+    simplicity, guaranteed positivity without a constrained solver, trivial
+    parallelism, and natural extension to ordered subsets and MAP (a
+    penalised MAPTR adds a prior surrogate to the same separable framework).
+    Other accelerations not shown: ordered-subsets SPS and momentum-based
+    OS-SQS.
 
 .. rubric:: References
 
@@ -117,6 +129,7 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.optimize import minimize
 
 import parallelproj.pet_lors
 import parallelproj.pet_scanners
@@ -133,9 +146,9 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_iter = 300  # iterations for both algorithms
+num_iter = 100  # iterations for both algorithms
 blank_counts = 5000.0  # blank scan counts per LOR
-scatter_fraction = 0.9  # scatter relative to mean unscattered transmission
+scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
 # %%
 # Scanner, non-TOF projector, and ground-truth attenuation image
@@ -212,7 +225,7 @@ y = xp.asarray(
 # Shared ingredients
 # ------------------
 #
-# All algorithms use the same gradient of the log-likelihood
+# Both algorithms use the same gradient of the log-likelihood
 #
 # .. math::
 #     \nabla_\mu L = P^T\left[\frac{\bar{\psi}}{\bar{y}}(\bar{y} - y)\right]
@@ -243,25 +256,24 @@ def grad_logL(mu: Array) -> tuple[Array, Array, Array]:
     return grad, psi, ybar
 
 
-def _precond_from_denom(mu: Array, alpha_img: Array, curv_sino: Array) -> Array:
-    """Diagonal preconditioner ``alpha / P^T[(P alpha) * curv]`` (FOV-safe)."""
-    denom = proj.adjoint(proj(alpha_img) * curv_sino)
+def _precond(curv_sino: Array, mu: Array) -> Array:
+    """Diagonal preconditioner ``1 / P^T[(P 1) * curv]`` (FOV-safe).
+
+    Masked-out voxels have a zero denominator, so the denominator is set to
+    1 there and the preconditioner to 0 (no update outside the FOV).
+    """
+    denom = proj.adjoint(P1 * curv_sino)
     denom_safe = xp.where(fov_mask, denom, xp.ones_like(denom))
-    return xp.where(fov_mask, alpha_img / denom_safe, xp.zeros_like(mu))
+    return xp.where(fov_mask, 1.0 / denom_safe, xp.zeros_like(mu))
 
 
 def precond_mltr(mu: Array, psi: Array, ybar: Array) -> Array:
-    """MLTR preconditioner: alpha = 1, Newton curvature psi^2 / ybar."""
-    return _precond_from_denom(mu, ones_img, psi**2 / ybar)
-
-
-def precond_convex(mu: Array, psi: Array, ybar: Array) -> Array:
-    """Convex preconditioner: alpha = mu (multiplicative, MLEM-like)."""
-    return _precond_from_denom(mu, mu, psi**2 / ybar)
+    """MLTR preconditioner: inverse Newton curvature psi^2 / ybar."""
+    return _precond(psi**2 / ybar, mu)
 
 
 def precond_sps(mu: Array, psi: Array, ybar: Array) -> Array:
-    """SPS preconditioner: alpha = 1, Erdogan & Fessler optimal curvature."""
+    """SPS preconditioner: inverse Erdogan & Fessler optimal curvature."""
     l = proj(mu)
     # optimal curvature of f(l) = (b e^-l + s) - y log(b e^-l + s)
     f_l = ybar - y * xp.log(ybar)
@@ -275,38 +287,27 @@ def precond_sps(mu: Array, psi: Array, ybar: Array) -> Array:
         fddot_0,
         xp.clip(2 * (f_0 - f_l + fdot_l * l) / l_safe**2, 0, None),
     )
-    return _precond_from_denom(mu, ones_img, curv)
+    return _precond(curv, mu)
 
 
 # %%
-# Run all three algorithms as preconditioned gradient ascent
-# ----------------------------------------------------------
+# Run both algorithms as preconditioned gradient ascent
+# -----------------------------------------------------
 #
-# Identical update skeleton ``mu <- [mu + D * grad]_+``; only the
-# preconditioner ``D`` differs.  MLTR / SPS start from zero, the Convex
-# algorithm needs a strictly positive start (its preconditioner is
-# proportional to the current image).
+# Identical update skeleton ``mu <- [mu + D * grad]_+`` from a zero
+# initialisation; only the preconditioner ``D`` differs.
 
-algorithms = {
-    "MLTR": precond_mltr,
-    "SPS": precond_sps,
-    "Convex": precond_convex,
-}
-
-# Convex must start > 0; MLTR / SPS are happy at 0
-mu0_zero = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
-mu0_pos = xp.where(fov_mask, xp.full_like(mu0_zero, mu_water), mu0_zero)
-init = {"MLTR": mu0_zero, "SPS": mu0_zero, "Convex": mu0_pos}
+algorithms = {"MLTR": precond_mltr, "SPS": precond_sps}
 
 mu_final: dict[str, Array] = {}
 cost: dict[str, np.ndarray] = {}
 
 for name, precond in algorithms.items():
-    mu = init[name]
+    mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
     c = np.zeros(num_iter + 1)
     c[0] = neg_logL(mu)
     for it in range(num_iter):
-        print(f"{name:6} iteration {it + 1:03}/{num_iter:03}", end="\r")
+        print(f"{name:4} iteration {it + 1:03}/{num_iter:03}", end="\r")
         grad, psi, ybar = grad_logL(mu)
         mu = xp.clip(mu + precond(mu, psi, ybar) * grad, 0, None)
         c[it + 1] = neg_logL(mu)
@@ -320,24 +321,69 @@ c_min = min(c.min() for c in cost.values())
 tol = float(np.finfo(np.float32).eps) * abs(c_min)
 for name in algorithms:
     viol = int(np.sum(np.diff(cost[name]) > tol))
-    print(f"{name:6}: final -L = {cost[name][-1]:.2f}, non-monotone steps = {viol}")
+    print(f"{name:4}: final -L = {cost[name][-1]:.2f}, non-monotone steps = {viol}")
+
+# %%
+# L-BFGS-B on the exact objective
+# -------------------------------
+#
+# We minimise :math:`-L(\mu)` directly with SciPy's L-BFGS-B and the box
+# constraint :math:`\mu \geq 0`.  The objective works on a flat float64
+# vector (SciPy's convention); inside it we reshape, cast to the array-API
+# backend, and return the value together with the gradient of :math:`-L`.
+# A callback records :math:`-L` at every function evaluation so the
+# convergence can be plotted on the same axis as MLTR / SPS.
+
+n_vox = int(np.prod(proj.in_shape))
+cost_lbfgs: list[float] = []
+
+
+def neg_logL_and_grad(mu_flat: np.ndarray) -> tuple[float, np.ndarray]:
+    mu = xp.asarray(
+        mu_flat.reshape(proj.in_shape), dtype=xp.float32, device=dev
+    )
+    psi = b * xp.exp(-proj(mu))
+    ybar = psi + s
+    val = float(xp.sum(xp.astype(ybar - y * xp.log(ybar), xp.float64)))
+    # gradient of -L (note the sign flip vs. grad_logL)
+    grad = proj.adjoint(psi / ybar * (y - ybar))
+    cost_lbfgs.append(val)
+    return val, np.asarray(to_numpy_array(grad)).ravel().astype(np.float64)
+
+
+res = minimize(
+    neg_logL_and_grad,
+    np.zeros(n_vox),
+    jac=True,
+    method="L-BFGS-B",
+    bounds=[(0.0, None)] * n_vox,
+    options={"maxiter": num_iter, "maxfun": num_iter}, #"ftol": 1e-12, "gtol": 1e-10},
+)
+mu_final["L-BFGS-B"] = xp.asarray(
+    res.x.reshape(proj.in_shape), dtype=xp.float32, device=dev
+)
+cost["L-BFGS-B"] = np.asarray(cost_lbfgs)
+print(f"L-BFGS-B: final -L = {cost['L-BFGS-B'][-1]:.2f}, function evals = {len(cost_lbfgs)}")
 
 # %%
 # Results
 # -------
 #
-# All three algorithms converge to the same maximum-likelihood solution.
-# MLTR is typically the fastest; SPS additionally *guarantees* a monotone
-# increase of :math:`L` (its optimal curvature is never smaller than the
-# Newton curvature, hence the slightly more conservative steps); the Convex
-# algorithm is the multiplicative, MLEM-like variant.
+# All three reach essentially the same maximum-likelihood solution.  MLTR
+# is the faster of the two surrogate methods; SPS additionally *guarantees*
+# a monotone increase of :math:`L`.  On this unregularised problem L-BFGS-B
+# converges at least as fast as MLTR -- its quasi-Newton metric captures the
+# curvature that the separable surrogates approximate with a fixed diagonal.
+
+c_min = float(min(c.min() for c in cost.values()))
+c_max = float(cost['MLTR'][50])
 
 fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), tight_layout=True)
-for name in algorithms:
+for name in cost:
     ax[0].plot(cost[name], label=name)
-ax[0].set_xlabel("iteration")
+ax[0].set_ylim(c_min, c_max)
+ax[0].set_xlabel("iteration (MLTR / SPS) or function evaluation (L-BFGS-B)")
 ax[0].set_ylabel(r"$-L(\mu) - \min(-L) + 1$")
-ax[0].set_ylim(cost["MLTR"].min(), cost["MLTR"][10:].max())
 ax[0].grid(ls=":")
 ax[0].legend()
 
@@ -345,7 +391,7 @@ sl = img_shape[2] // 2
 ax[1].plot(
     to_numpy_array(mu_true[:, img_shape[1] // 2, sl]), "k--", label=r"true $\mu$"
 )
-for name in algorithms:
+for name in mu_final:
     ax[1].plot(
         to_numpy_array(mu_final[name][:, img_shape[1] // 2, sl]), label=name
     )
@@ -359,10 +405,10 @@ fig.show()
 fig2 = show_vol_cuts(
     np.concatenate(
         [to_numpy_array(mu_true)[None]]
-        + [to_numpy_array(mu_final[name])[None] for name in algorithms]
+        + [to_numpy_array(mu_final[name])[None] for name in mu_final]
     ),
     voxel_size=voxel_size,
-    fig_title=r"$\mu$: true / " + " / ".join(algorithms),
+    fig_title=r"$\mu$: true / " + " / ".join(mu_final),
     vmin=0,
     vmax=2.5 * mu_water,
 )

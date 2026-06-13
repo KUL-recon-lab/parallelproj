@@ -135,10 +135,11 @@ New Features
   averaged-LOR z-position per plane (exact for span=1, standard approximation
   for span>1), with no loop over ring-pair multiplicities.
 - **``parallelproj.__version__``** is now exposed at the top level.
-- **New example: transmission reconstruction (MLTR vs SPS)** — exact Poisson
+- **New example: transmission reconstruction (MLTR / SPS / L-BFGS-B)** — exact Poisson
   transmission model with strictly positive scatter background, presenting MLTR
   (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one
-  preconditioned gradient ascent differing only in the diagonal preconditioner.
+  preconditioned gradient ascent differing only in the diagonal preconditioner, and
+  L-BFGS-B on the same smooth objective with a non-negativity box constraint.
 
 1.10.2 (Aug 20, 2025)
 ----------------------
