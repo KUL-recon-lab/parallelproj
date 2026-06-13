@@ -94,14 +94,14 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_epochs = 20  # epochs (full data passes) for the subset algorithms
+num_epochs = 50  # epochs (full data passes) for the subset algorithms
 num_subsets = 28  # number of ordered view subsets (divides the 168 views evenly)
 num_lbfgs = 500  # L-BFGS-B iterations for the reference solution
-blank_counts = 50.0  # blank scan counts per LOR
+blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
 mu_water = 0.0096  # 1/mm at 511 keV
-beta = 3e1  # prior weight
+beta = 1e2  # prior weight
 # log-cosh transition scale: edges (dense inserts) >> delta are preserved,
 # background noise << delta is smoothed
 delta = mu_water / 2
@@ -352,7 +352,7 @@ for name in ("MLTR", "OS-MLTR", "SVRG"):
 # penalty.
 
 c_min = float(min(c.min() for c in cost.values()))
-c_max = float(cost["MLTR"][num_epochs // 2])
+c_max = float(cost["SVRG"][2])
 
 fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), tight_layout=True)
 for name in ("MLTR", "OS-MLTR", "SVRG", "L-BFGS-B"):
