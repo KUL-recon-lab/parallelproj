@@ -74,16 +74,21 @@ enforces non-negativity by clipping.
     a problem -- see the discussions in [#f1]_ and [#f2]_.
 
 .. note::
-    MLTR is usually the fastest and is well behaved in typical regimes.
-    Its lack of a guarantee shows up in **dense regions at low counts**:
-    on near-blocked rays :math:`\\bar\\psi \\to 0` the Newton curvature
-    :math:`\\bar\\psi^2/\\bar y` collapses faster than the gradient, so the
-    effective step in the hottest voxels grows and MLTR increasingly
-    *overshoots* (amplifies noise) there -- in extreme cases the peak
-    :math:`\\mu` runs away even while the global :math:`L` still increases
-    monotonically.  SPS's majorising curvature stays bounded and keeps the
-    update stable, which is exactly when its monotonicity guarantee earns
-    its (small) extra cost.  Faster variants not shown: ordered-subsets SPS
+    MLTR is derived from a quadratic *approximation* and carries no formal
+    monotonicity guarantee, whereas SPS is provably monotone.  In practice,
+    across the regimes tested for this example -- including low-count,
+    high-attenuation data -- MLTR remained monotone *and* reached a slightly
+    **higher** likelihood per iteration than SPS: its Newton-type curvature
+    is never larger than the SPS majorant, so it takes larger steps and
+    converges faster.  Comparing the two at equal iteration count can be
+    misleading in the presence of noise -- the ML solution differs from the
+    ground truth and may have voxels above the true :math:`\\mu`, so a
+    higher peak in the faster-converging method is not "overshoot".  The
+    fair comparison is the achieved likelihood after many iterations, where
+    MLTR was at least as good here.  SPS's guarantee is therefore best seen
+    as insurance for harder settings (strongly non-concave regions with high
+    scatter, fully automated pipelines, ordered subsets, or MAP with
+    non-quadratic priors).  Faster variants not shown: ordered-subsets SPS
     and momentum-accelerated OS-SQS; since the objective is smooth, generic
     solvers like L-BFGS-B also apply.  A penalised (MAPTR) extension adds a
     prior surrogate to the same separable framework.
