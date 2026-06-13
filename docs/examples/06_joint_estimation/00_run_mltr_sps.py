@@ -146,8 +146,8 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_iter = 100  # iterations for both algorithms
-blank_counts = 5000.0  # blank scan counts per LOR
+num_iter = 50  # iterations for both algorithms
+blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
 # %%
@@ -161,19 +161,26 @@ scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 # become dense / air-like regions.
 
 num_rings = 3
+ring_spacing = 5.3  # mm, axial distance between rings
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
-    radius=65.0,
-    num_sides=16,
-    num_lor_endpoints_per_side=12,
-    lor_spacing=2.3,
-    ring_positions=xp.linspace(-6, 6, num_rings, device=dev),
+    radius=300.0,
+    num_sides=56,
+    num_lor_endpoints_per_side=6,
+    lor_spacing=5.3,
+    # rings centred on the origin, spacing = ring_spacing -> [-5.3, 0, 5.3]
+    ring_positions=(
+        xp.arange(num_rings, dtype=xp.float32, device=dev) - (num_rings - 1) / 2
+    )
+    * ring_spacing,
     symmetry_axis=2,
 )
 
-img_shape = (55, 55, 4)
-voxel_size = (2.0, 2.0, 2.0)
+# transaxial 100 x 100 @ 4 mm; axially one slice per ring (5.3 mm),
+# so the image slices are aligned with the ring positions
+img_shape = (100, 100, num_rings)
+voxel_size = (4.0, 4.0, ring_spacing)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
