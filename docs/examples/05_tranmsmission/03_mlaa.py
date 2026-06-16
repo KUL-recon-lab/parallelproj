@@ -109,14 +109,12 @@ count_factor = 5.0  # scales the activity (sets the count level / noise)
 
 mu_water = 0.0096  # 1/mm at 511 keV
 
-# edge-preserving log-cosh priors (harmonic-mean preconditioner as in
-# 02_maptr).  The prior weights are auto-scaled below so the prior curvature
-# is a fixed fraction (rel_*) of the data curvature; this keeps the smoothing
-# strength sensible independently of the count level and scanner geometry.
-rel_lam = 0.001  # activity: prior curvature / data curvature
-rel_mu = 0.1  # attenuation: prior curvature / data curvature
+# edge-preserving log-cosh prior weights (harmonic-mean preconditioner as in
+# 02_maptr)
+beta_lam = 0.05  # activity prior weight
+beta_mu = 500.0  # attenuation prior weight
 delta_mu = mu_water / 2  # mu edges (inserts) >> delta are preserved
-# delta_lam, beta_lam, beta_mu are derived from the warm-start scales below
+# delta_lam (the activity log-cosh scale) is derived from the warm-start below
 
 # %%
 # Scanner (large transmission geometry), TOF + non-TOF projectors, phantoms
@@ -232,7 +230,6 @@ y_k = [y[subset_slices[k]] for k in range(num_subsets)]
 s_k = [s[subset_slices[k]] for k in range(num_subsets)]
 
 ones_img = xp.ones(img_shape, dtype=xp.float32, device=dev)
-Pnt1 = proj_nt(ones_img)  # full non-TOF attenuation sensitivity
 Pnt1_k = [proj_nt_k[k](ones_img) for k in range(num_subsets)]  # subset att sensitivity
 
 G = parallelproj.operators.FiniteForwardDifference(img_shape)
@@ -290,32 +287,19 @@ water_roi_np[nx // 2 - 6 : nx // 2 + 6, ny // 2 - 6 : ny // 2 + 6, :] = True
 water_roi = xp.asarray(water_roi_np, device=dev) & support
 
 # %%
-# Auto-scaled log-cosh priors
-# ---------------------------
+# Log-cosh priors
+# ---------------
 #
-# Set each prior weight so its (log-cosh max) curvature equals ``rel_*``
-# times the median data curvature at the warm-start state -- the activity
-# EM curvature :math:`A^T\mathbf 1 / \lambda` and the attenuation MLTR
-# curvature :math:`P_\text{nt}^T[(P_\text{nt}\mathbf 1)\sum_t\bar\psi^2/\bar y]`.
+# The log-cosh transition scale for the activity is tied to the warm-start
+# activity level; the attenuation scale ``delta_mu`` was set above.  The
+# (log-cosh max) prior curvature :math:`\beta\,\kappa/\delta` enters the
+# harmonic-mean preconditioner.
 
 delta_lam = 0.3 * float(xp.mean(lam[lam > 0]))
-
-sens_full = proj.adjoint(xp.ones(proj.out_shape, dtype=xp.float32, device=dev))
-dcurv_lam = float(
-    xp.median((sens_full / xp.where(lam > 0, lam, xp.ones_like(lam)))[support])
-)
-psi0 = xp.exp(-proj_nt(mu0))[..., None] * proj(lam)
-dcurv_mu = float(
-    xp.median(proj_nt.adjoint(Pnt1 * xp.sum(psi0**2 / (psi0 + s), axis=-1))[support])
-)
-
-prior_curv_lam = rel_lam * dcurv_lam
-prior_curv_mu = rel_mu * dcurv_mu
-beta_lam = prior_curv_lam * delta_lam / kappa
-beta_mu = prior_curv_mu * delta_mu / kappa
 reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), G)
 reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
-print(f"auto-scaled prior weights: beta_lam={beta_lam:.3g}, beta_mu={beta_mu:.3g}")
+prior_curv_lam = beta_lam * kappa / delta_lam
+prior_curv_mu = beta_mu * kappa / delta_mu
 
 # %%
 # Baseline: OS-MLEM activity with the fixed 0th-order attenuation image
