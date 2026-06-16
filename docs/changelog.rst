@@ -146,6 +146,10 @@ New Features
 - **New example: penalised transmission reconstruction (MAPTR)** — MLTR / OS-MLTR / SVRG
   on the penalised objective with an edge-preserving log-cosh prior, using the
   transmission "harmonic-mean" preconditioner (inverse of data plus prior curvature).
+- **New example: joint activity/attenuation reconstruction (MLAA) for TOF PET** —
+  interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
+  forward projection as the transmission blank scan), NAC warm-start, support-constrained
+  attenuation update, and a known-water region to fix the TOF scale ambiguity.
 
 1.10.2 (Aug 20, 2025)
 ----------------------
