@@ -92,9 +92,9 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_epochs = 50  # epochs (full data passes) for the subset algorithms
+num_epochs = 30  # epochs (full data passes) for the subset algorithms
 num_subsets = 28  # number of ordered view subsets (divides the 168 views evenly)
-num_lbfgs = 500  # L-BFGS-B iterations for the reference solution
+num_lbfgs = 80  # L-BFGS-B iterations for the reference solution
 blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
