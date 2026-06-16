@@ -111,8 +111,8 @@ mu_water = 0.0096  # 1/mm at 511 keV
 
 # edge-preserving log-cosh prior weights (harmonic-mean preconditioner as in
 # 02_maptr)
-beta_lam = 0.05  # activity prior weight
-beta_mu = 500.0  # attenuation prior weight
+beta_lam = 0.01  # activity prior weight
+beta_mu = 5.0  # attenuation prior weight
 delta_mu = mu_water / 2  # mu edges (inserts) >> delta are preserved
 # delta_lam (the activity log-cosh scale) is derived from the warm-start below
 
