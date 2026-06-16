@@ -81,6 +81,7 @@ from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import binary_fill_holes
 
 import parallelproj.operators
 import parallelproj.pet_lors
@@ -90,7 +91,7 @@ import parallelproj.tof
 from parallelproj import Array, to_numpy_array
 from parallelproj.functions import C2AffineObjective, LogCosh
 
-from example_utils import elliptic_cylinder_phantom, show_vol_cuts
+from example_utils import elliptic_cylinder_phantom
 
 # %%
 from example_utils import suggest_array_backend_and_device
@@ -269,7 +270,19 @@ print(f"NAC OSEM done (lam max = {float(xp.max(lam)):.1f})")
 
 # 0th-order attenuation: water inside the thresholded support, air outside
 support = lam > 0.1 * float(xp.mean(lam[lam > 0]))
-mu = xp.where(support, xp.asarray(mu_water, dtype=xp.float32), xp.zeros_like(lam))
+# Fill interior holes (low-/no-activity regions inside the body, e.g. the
+# activity's cold inserts) per transaxial slice, so the 0th-order
+# attenuation is a *solid* water blob.  Holes would leave attenuation-free
+# pockets inside the body that bias and slow the MLAA attenuation update.
+support_np = to_numpy_array(support)
+support_np = np.stack(
+    [binary_fill_holes(support_np[:, :, z]) for z in range(support_np.shape[2])],
+    axis=2,
+)
+support = xp.asarray(support_np, device=dev) & fov_mask
+
+# 0th-order attenuation image: uniform water inside the filled support
+mu0 = xp.where(support, xp.asarray(mu_water, dtype=xp.float32), xp.zeros_like(lam))
 
 # small central water-attenuation calibration region (away from the inserts)
 water_roi_np = np.zeros(img_shape, dtype=bool)
@@ -291,7 +304,7 @@ sens_full = proj.adjoint(xp.ones(proj.out_shape, dtype=xp.float32, device=dev))
 dcurv_lam = float(
     xp.median((sens_full / xp.where(lam > 0, lam, xp.ones_like(lam)))[support])
 )
-psi0 = xp.exp(-proj_nt(mu))[..., None] * proj(lam)
+psi0 = xp.exp(-proj_nt(mu0))[..., None] * proj(lam)
 dcurv_mu = float(
     xp.median(proj_nt.adjoint(Pnt1 * xp.sum(psi0**2 / (psi0 + s), axis=-1))[support])
 )
@@ -305,9 +318,32 @@ reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
 print(f"auto-scaled prior weights: beta_lam={beta_lam:.3g}, beta_mu={beta_mu:.3g}")
 
 # %%
+# Baseline: OS-MLEM activity with the fixed 0th-order attenuation image
+# ---------------------------------------------------------------------
+#
+# Reconstruct the activity with attenuation correction based on the crude
+# uniform-water :math:`\mu_0` (held fixed, no joint estimation).  Wherever
+# the true attenuation differs from water (the dense / air inserts), this
+# baseline shows attenuation-correction artefacts that MLAA removes.
+
+a0_k = [xp.exp(-proj_nt_k[k](mu0))[..., None] for k in range(num_subsets)]
+lam_ac = lam  # start from the NAC activity
+for it in range(num_outer):
+    print(f"OSEM (mu0) epoch {it + 1:03}/{num_outer:03}", end="\r")
+    for k in range(num_subsets):
+        ybar = a0_k[k] * proj_k[k](lam_ac) + s_k[k]
+        grad = proj_k[k].adjoint(a0_k[k] * (y_k[k] / ybar - 1.0))
+        sens = proj_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
+        g_pen = grad - reg_lam.gradient(lam_ac) / num_subsets
+        D = _safe(lam_ac, sens + lam_ac * prior_curv_lam / num_subsets, fov_mask)
+        lam_ac = xp.clip(lam_ac + D * g_pen, 0, None)
+print()
+
+# %%
 # MLAA: interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation)
 # ------------------------------------------------------------------------
 
+mu = mu0  # attenuation initialised at the 0th-order water blob
 cost = np.zeros(num_outer + 1)
 cost[0] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
 
@@ -350,71 +386,54 @@ print()
 print(f"final penalised cost = {cost[-1]:.2f}")
 
 # %%
-# Results
-# -------
-#
-# Left: the joint penalised objective decreases over the outer iterations.
-# Middle/right: activity and attenuation reconstructions next to the truth.
-# Because the two phantoms have different inserts, little crosstalk means
-# each reconstruction shows only its own structure (the activity inserts do
-# not appear in :math:`\mu`, and the dense/air attenuation inserts do not
-# appear in :math:`\lambda`).
+# Convergence of the joint objective
+# ----------------------------------
 
-sl = img_shape[2] // 2
-
-fig, ax = plt.subplots(1, 3, figsize=(13, 4.2), tight_layout=True)
-ax[0].plot(cost)
-ax[0].set_xlabel("outer iteration")
-ax[0].set_ylabel(r"penalised $-L + \beta_\lambda R(\lambda) + \beta_\mu R(\mu)$")
-ax[0].set_title("joint objective")
-ax[0].grid(ls=":")
-
-am = ax[1].imshow(
-    to_numpy_array(lam[:, :, sl]).T,
-    origin="lower",
-    cmap="Greys",
-    vmin=0,
-    vmax=float(xp.max(act_true)),
-)
-ax[1].set_title(r"activity $\lambda$ (MLAA)")
-fig.colorbar(am, ax=ax[1], fraction=0.046)
-
-mm = ax[2].imshow(
-    to_numpy_array(mu[:, :, sl]).T,
-    origin="lower",
-    cmap="Greys",
-    vmin=0,
-    vmax=2.5 * mu_water,
-)
-ax[2].set_title(r"attenuation $\mu$ (MLAA)")
-fig.colorbar(mm, ax=ax[2], fraction=0.046)
-fig.show()
+fig0, ax0 = plt.subplots(figsize=(5, 4), tight_layout=True)
+ax0.plot(cost)
+ax0.set_xlabel("outer iteration")
+ax0.set_ylabel(r"$-L + \beta_\lambda R(\lambda) + \beta_\mu R(\mu)$")
+ax0.set_title("MLAA joint objective")
+ax0.grid(ls=":")
+fig0.show()
 
 # %%
-fig2 = show_vol_cuts(
-    np.stack(
-        [
-            to_numpy_array(act_true),
-            to_numpy_array(lam),
-        ]
-    ),
-    voxel_size=voxel_size,
-    fig_title=r"activity: true / MLAA",
-    vmin=0,
-    vmax=float(xp.max(act_true)),
-)
+# Comparison: ground truth vs. 0th-order / baseline vs. MLAA
+# ----------------------------------------------------------
+#
+# Top row -- attenuation: truth, the 0th-order water blob, and the MLAA
+# estimate (which recovers the dense / air inserts).  Bottom row --
+# activity: truth, OS-MLEM with the fixed 0th-order attenuation (artefacts
+# where the true attenuation differs from water), and the MLAA activity.
+# Because the activity and attenuation phantoms have different inserts,
+# little crosstalk means each MLAA image shows only its own structure.
 
-fig3 = show_vol_cuts(
-    np.stack(
-        [
-            to_numpy_array(mu_true),
-            to_numpy_array(mu),
-        ]
-    ),
-    voxel_size=voxel_size,
-    fig_title=r"attenuation: true / MLAA",
-    vmin=0,
-    vmax=2.5 * mu_water,
-)
+sl = img_shape[2] // 2
+vmax_mu = 2.5 * mu_water
+vmax_lam = float(xp.max(act_true))
+
+
+def _show(ax, vol, vmax, title):
+    h = ax.imshow(
+        to_numpy_array(vol[:, :, sl]).T, origin="lower", cmap="Greys",
+        vmin=0, vmax=vmax,
+    )
+    ax.set_title(title)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return h
+
+
+fig, ax = plt.subplots(2, 3, figsize=(11, 7.5), tight_layout=True)
+_show(ax[0, 0], mu_true, vmax_mu, r"true $\mu$")
+_show(ax[0, 1], mu0, vmax_mu, r"0th-order $\mu$ (water blob)")
+h_mu = _show(ax[0, 2], mu, vmax_mu, r"MLAA $\mu$")
+fig.colorbar(h_mu, ax=ax[0, :], fraction=0.046, location="right")
+
+_show(ax[1, 0], act_true, vmax_lam, r"true activity")
+_show(ax[1, 1], lam_ac, vmax_lam, r"OS-MLEM (0th-order $\mu$)")
+h_lam = _show(ax[1, 2], lam, vmax_lam, r"MLAA activity")
+fig.colorbar(h_lam, ax=ax[1, :], fraction=0.046, location="right")
+fig.show()
 
 plt.show()
