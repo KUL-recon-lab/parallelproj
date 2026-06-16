@@ -101,7 +101,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
 num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
-num_outer = 40  # MLAA outer iterations
+num_outer = 20  # MLAA outer iterations
 num_mltr_epochs = 3  # OS-MLTR epochs per outer iteration (MLTR is slower than MLEM)
 scatter_fraction = 0.3  # contamination relative to mean true emission
 count_factor = 1.0  # scales the activity (sets the count level / noise)
@@ -113,7 +113,7 @@ mu_water = 0.0096  # 1/mm at 511 keV
 # is a fixed fraction (rel_*) of the data curvature; this keeps the smoothing
 # strength sensible independently of the count level and scanner geometry.
 rel_lam = 0.001  # activity: prior curvature / data curvature
-rel_mu = 0.001  # attenuation: prior curvature / data curvature
+rel_mu = 0.1  # attenuation: prior curvature / data curvature
 delta_mu = mu_water / 2  # mu edges (inserts) >> delta are preserved
 # delta_lam, beta_lam, beta_mu are derived from the warm-start scales below
 
@@ -157,7 +157,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 proj.tof_parameters = parallelproj.tof.TOFParameters(
-    num_tofbins=61, tofbin_width=10.0, sigma_tof=30.0 / 2.355
+    num_tofbins=31, tofbin_width=20.0, sigma_tof=60.0 / 2.355
 )
 
 fov_mask = proj_nt.fov_mask()
@@ -257,8 +257,7 @@ def _safe(num: Array, denom: Array, mask: Array) -> Array:
 #
 # One OSEM epoch without an attenuation model (but with the known
 # contamination) gives a fast, attenuation-biased activity image used to
-# (a) initialise the activity and (b) define the object support and a
-# water-attenuation calibration region.
+# (a) initialise the activity and (b) define the object support
 
 lam = xp.where(fov_mask, ones_img, xp.zeros_like(ones_img))
 for k in range(num_subsets):
@@ -269,7 +268,7 @@ for k in range(num_subsets):
 print(f"NAC OSEM done (lam max = {float(xp.max(lam)):.1f})")
 
 # 0th-order attenuation: water inside the thresholded support, air outside
-support = lam > 0.5 * float(xp.mean(lam[lam > 0]))
+support = lam > 0.1 * float(xp.mean(lam[lam > 0]))
 mu = xp.where(support, xp.asarray(mu_water, dtype=xp.float32), xp.zeros_like(lam))
 
 # small central water-attenuation calibration region (away from the inserts)
