@@ -31,7 +31,7 @@ MLEM for the emission problem
 
 They share the gradient :math:`\\nabla_\\mu L` and differ **only** in the
 diagonal preconditioner :math:`D`, the inverse of a separable majorant of
-the curvature (the weight choice :math:`\\alpha_j = 1` of Nuyts' note):
+the curvature (the weight choice :math:`\\alpha_j = 1` for MLTR):
 
 * **MLTR** (Nuyts et al. [#f1]_) uses the Newton-type curvature
   :math:`\\bar\\psi^2/\\bar y`:
@@ -62,7 +62,7 @@ the curvature (the weight choice :math:`\\alpha_j = 1` of Nuyts' note):
   the Newton curvature, so SPS takes more conservative steps but every
   update is **monotone** (under the concavity condition below).
 
-Each iteration costs two forward and one back projection (plus one
+Each iteration costs one forward and two back projections (plus one
 precomputable :math:`P\\mathbf 1`), updates all voxels simultaneously, and
 enforces non-negativity by clipping.
 
@@ -87,25 +87,14 @@ comparable to one MLTR / SPS iteration.
     monotonicity guarantee, whereas SPS is provably monotone.  In practice,
     across the regimes tested for this example -- including low-count,
     high-attenuation data -- MLTR remained monotone *and* reached a slightly
-    **higher** likelihood per iteration than SPS: its Newton-type curvature
+    **higher** likelihood than SPS (at same iteratoion): its Newton-type curvature
     is never larger than the SPS majorant, so it takes larger steps and
-    converges faster.  Comparing the two at equal iteration count can be
-    misleading in the presence of noise -- the ML solution differs from the
-    ground truth and may have voxels above the true :math:`\\mu`, so a
-    higher peak in the faster-converging method is not "overshoot".  The
-    fair comparison is the achieved likelihood after many iterations, where
-    MLTR was at least as good here.  SPS's guarantee is therefore best seen
-    as insurance for harder settings (strongly non-concave regions with high
-    scatter, fully automated pipelines, ordered subsets, or MAP with
-    non-quadratic priors).  On this unregularised problem L-BFGS-B actually
+    converges faster. On this unregularised problem L-BFGS-B actually
     converges at least as fast as MLTR -- its quasi-Newton metric already
     captures the curvature that the separable surrogates approximate with a
     fixed diagonal.  MLTR / SPS nevertheless remain attractive for their
     simplicity, guaranteed positivity without a constrained solver, trivial
-    parallelism, and natural extension to ordered subsets and MAP (a
-    penalised MAPTR adds a prior surrogate to the same separable framework).
-    Other accelerations not shown: ordered-subsets SPS and momentum-based
-    OS-SQS.
+    parallelism, and natural extension to ordered subsets. 
 
 .. rubric:: References
 
@@ -146,7 +135,7 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_iter = 50  # iterations for both algorithms
+num_iter = 500  # iterations for both algorithms
 blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
@@ -184,9 +173,7 @@ voxel_size = (4.0, 4.0, ring_spacing)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(
-        scanner.num_rings, max_ring_difference=2, span=1
-    ),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=10,
     sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
@@ -346,9 +333,7 @@ cost_lbfgs: list[float] = []
 
 
 def neg_logL_and_grad(mu_flat: np.ndarray) -> tuple[float, np.ndarray]:
-    mu = xp.asarray(
-        mu_flat.reshape(proj.in_shape), dtype=xp.float32, device=dev
-    )
+    mu = xp.asarray(mu_flat.reshape(proj.in_shape), dtype=xp.float32, device=dev)
     psi = b * xp.exp(-proj(mu))
     ybar = psi + s
     val = float(xp.sum(xp.astype(ybar - y * xp.log(ybar), xp.float64)))
@@ -364,13 +349,15 @@ res = minimize(
     jac=True,
     method="L-BFGS-B",
     bounds=[(0.0, None)] * n_vox,
-    options={"maxiter": num_iter, "maxfun": num_iter}, #"ftol": 1e-12, "gtol": 1e-10},
+    options={"maxiter": num_iter, "maxfun": num_iter},  # "ftol": 1e-12, "gtol": 1e-10},
 )
 mu_final["L-BFGS-B"] = xp.asarray(
     res.x.reshape(proj.in_shape), dtype=xp.float32, device=dev
 )
 cost["L-BFGS-B"] = np.asarray(cost_lbfgs)
-print(f"L-BFGS-B: final -L = {cost['L-BFGS-B'][-1]:.2f}, function evals = {len(cost_lbfgs)}")
+print(
+    f"L-BFGS-B: final -L = {cost['L-BFGS-B'][-1]:.2f}, function evals = {len(cost_lbfgs)}"
+)
 
 # %%
 # Results
@@ -383,7 +370,7 @@ print(f"L-BFGS-B: final -L = {cost['L-BFGS-B'][-1]:.2f}, function evals = {len(c
 # curvature that the separable surrogates approximate with a fixed diagonal.
 
 c_min = float(min(c.min() for c in cost.values()))
-c_max = float(cost['MLTR'][50])
+c_max = float(cost["MLTR"][50])
 
 fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), tight_layout=True)
 for name in cost:
@@ -399,9 +386,7 @@ ax[1].plot(
     to_numpy_array(mu_true[:, img_shape[1] // 2, sl]), "k--", label=r"true $\mu$"
 )
 for name in mu_final:
-    ax[1].plot(
-        to_numpy_array(mu_final[name][:, img_shape[1] // 2, sl]), label=name
-    )
+    ax[1].plot(to_numpy_array(mu_final[name][:, img_shape[1] // 2, sl]), label=name)
 ax[1].set_xlabel("pixel")
 ax[1].set_ylabel(r"$\mu$ [1/mm]")
 ax[1].grid(ls=":")
@@ -417,7 +402,7 @@ fig2 = show_vol_cuts(
     voxel_size=voxel_size,
     fig_title=r"$\mu$: true / " + " / ".join(mu_final),
     vmin=0,
-    vmax=2.5 * mu_water,
+    vmax=3.4 * mu_water,
 )
 
 plt.show()

@@ -53,13 +53,12 @@ subset projectors :math:`P_k`.  Three accelerations are compared against
   past the point shown here.
 
 * **L-BFGS-B** (≈ 100 iterations, no subsets) provides the converged
-  maximum-likelihood reference solution :math:`\\hat\\mu` against which the
-  per-epoch suboptimality :math:`-L(\\mu) + L(\\hat\\mu)` is plotted.
+  maximum-likelihood reference solution :math:`\\hat\\mu`.
 
 .. note::
     Each MLTR / OS-MLTR epoch is one full data pass; an SVRG epoch is
-    roughly two (anchor + subset sweep), so the epoch axis understates
-    SVRG's cost by about a factor of two.
+    roughly 1.5 (anchor + subset sweep), so the epoch axis understates
+    SVRG's computation cost by about a factor of 1.5.
 
 .. note::
 
@@ -92,7 +91,7 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_epochs = 50  # epochs (full data passes) for the subset algorithms
+num_epochs = 80  # epochs (full data passes) for the subset algorithms
 num_subsets = 28  # number of ordered view subsets (divides the 168 views evenly)
 num_lbfgs = 500  # L-BFGS-B iterations for the reference solution
 blank_counts = 500.0  # blank scan counts per LOR
@@ -126,9 +125,7 @@ voxel_size = (4.0, 4.0, ring_spacing)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(
-        scanner.num_rings, max_ring_difference=2, span=1
-    ),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=10,
     sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
@@ -275,10 +272,13 @@ mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
 c = [neg_logL(mu)]
 for ep in range(num_epochs):
     print(f"SVRG       epoch {ep + 1:03}/{num_epochs:03}", end="\r")
-    anchor = mu
-    g_full, denom_full = full_grad_and_curv(anchor)
-    precond = _safe_ratio(xp.ones_like(mu), denom_full)  # MLTR diagonal at anchor
-    gk_anchor = [subset_grad(anchor, k) for k in range(num_subsets)]
+
+    if ep % 2 == 0:
+        anchor = mu
+        g_full, denom_full = full_grad_and_curv(anchor)
+        gk_anchor = [subset_grad(anchor, k) for k in range(num_subsets)]
+        precond = _safe_ratio(xp.ones_like(mu), denom_full)  # MLTR diagonal at anchor
+
     for k in rng.permutation(num_subsets):
         g_vr = g_full + num_subsets * (subset_grad(mu, k) - gk_anchor[k])
         mu = xp.clip(mu + precond * g_vr, 0, None)
@@ -369,7 +369,7 @@ fig2 = show_vol_cuts(
     voxel_size=voxel_size,
     fig_title=r"$\mu$: true / " + " / ".join(mu_final),
     vmin=0,
-    vmax=2.5 * mu_water,
+    vmax=3.4 * mu_water,
 )
 
 plt.show()

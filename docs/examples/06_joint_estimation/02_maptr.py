@@ -43,8 +43,7 @@ diagonal majorant of the data Hessian (the analogue of :math:`A^T\\mathbf 1
 where :math:`\\beta\\,\\kappa/\\delta` (with :math:`\\kappa = \\operatorname{diag}(G^TG)
 \\approx 2\\,n_\\text{dim}`) is the log-cosh prior's maximal curvature -- a
 valid diagonal majorant, since :math:`\\tfrac{d^2}{dz^2}\\delta\\log\\cosh(z/\\delta)
-= \\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`.  This is exactly
-the curvature denominator of the MAPTR update in Nuyts' note.
+= \\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`.
 
 The subset algorithms of ``01_os_mltr_svrg.py`` are run, now on the
 penalised objective, with a converged **L-BFGS-B** reference:
@@ -56,9 +55,9 @@ penalised objective, with a converged **L-BFGS-B** reference:
   at every inner step.
 
 .. note::
-    Each OS-MLTR epoch is one full data pass; an SVRG epoch is roughly two
+    Each OS-MLTR epoch is one full data pass; an SVRG epoch is roughly 1.5
     (anchor + subset sweep), so the epoch axis understates SVRG's cost by
-    about a factor of two.
+    about a factor of 1.5.
 
 .. note::
 
@@ -100,7 +99,7 @@ blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
 mu_water = 0.0096  # 1/mm at 511 keV
-beta = 1e2  # prior weight
+beta = 2e2  # prior weight
 # log-cosh transition scale: edges (dense inserts) >> delta are preserved,
 # background noise << delta is smoothed
 delta = mu_water / 2
@@ -133,9 +132,7 @@ voxel_size = (4.0, 4.0, ring_spacing)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(
-        scanner.num_rings, max_ring_difference=2, span=1
-    ),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=10,
     sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
@@ -274,10 +271,13 @@ mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
 c = [penalised_cost(mu)]
 for ep in range(num_epochs):
     print(f"SVRG       epoch {ep + 1:03}/{num_epochs:03}", end="\r")
-    anchor = mu
-    g_full, denom_full = full_grad_and_curv(anchor)
-    precond = _safe_ratio(xp.ones_like(mu), denom_full + prior_curv)
-    gk_anchor = [subset_grad(anchor, k) for k in range(num_subsets)]
+
+    if ep % 2 == 0:
+        anchor = mu
+        g_full, denom_full = full_grad_and_curv(anchor)
+        gk_anchor = [subset_grad(anchor, k) for k in range(num_subsets)]
+        precond = _safe_ratio(xp.ones_like(mu), denom_full + prior_curv)
+
     for k in rng.permutation(num_subsets):
         # variance-reduced data gradient + full (deterministic) prior gradient
         g_data = g_full + num_subsets * (subset_grad(mu, k) - gk_anchor[k])
@@ -334,7 +334,7 @@ for name in ("OS-MLTR", "SVRG"):
 # inserts (edges :math:`\gg \delta`) are preserved by the log-cosh penalty.
 
 c_min = float(min(c.min() for c in cost.values()))
-c_max = float(cost["SVRG"][2])
+c_max = float(cost["SVRG"][4])
 
 fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), tight_layout=True)
 for name in ("OS-MLTR", "SVRG", "L-BFGS-B"):
@@ -366,7 +366,7 @@ fig2 = show_vol_cuts(
     voxel_size=voxel_size,
     fig_title=r"$\mu$: true / " + " / ".join(mu_final),
     vmin=0,
-    vmax=2.5 * mu_water,
+    vmax=3.4 * mu_water,
 )
 
 plt.show()
