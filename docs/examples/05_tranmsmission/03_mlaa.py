@@ -151,8 +151,8 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 proj_nt = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
-# TOF projector for the activity; 31 bins x 20 mm = 620 mm cover the ~600 mm
-# LORs, FWHM 60 mm (sigma = FWHM / 2.355)
+# TOF projector for the activity; 51 bins x 10 mm = 510 mm cover the ~510 mm
+# LORs, FWHM 30 mm (200ps)
 proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
