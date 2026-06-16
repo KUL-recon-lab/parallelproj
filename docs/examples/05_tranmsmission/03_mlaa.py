@@ -157,7 +157,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 proj.tof_parameters = parallelproj.tof.TOFParameters(
-    num_tofbins=31, tofbin_width=20.0, sigma_tof=60.0 / 2.355
+    num_tofbins=51, tofbin_width=10.0, sigma_tof=30.0 / 2.355
 )
 
 fov_mask = proj_nt.fov_mask()
@@ -277,7 +277,7 @@ print(f"NAC OSEM done (lam max = {float(xp.max(lam)):.1f})")
 #   2. threshold relative to the mean object activity,
 #   3. keep only the largest connected component (drops background islands),
 #   4. fill interior holes per slice -> a solid water blob.
-nac_smooth = gaussian_filter(to_numpy_array(lam), sigma=(2.0, 2.0, 0.0))
+nac_smooth = gaussian_filter(to_numpy_array(lam), sigma=(1.0, 1.0, 0.0))
 mask = nac_smooth > support_threshold * float(nac_smooth[nac_smooth > 0].mean())
 
 labels, n_labels = label(mask)  # connected components (background = 0)
