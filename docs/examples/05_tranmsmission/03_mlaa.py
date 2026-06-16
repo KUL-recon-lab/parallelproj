@@ -81,7 +81,7 @@ from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.ndimage import binary_fill_holes
+from scipy.ndimage import binary_fill_holes, gaussian_filter, label
 
 import parallelproj.operators
 import parallelproj.pet_lors
@@ -106,6 +106,7 @@ num_outer = 20  # MLAA outer iterations
 num_mltr_epochs = 3  # OS-MLTR epochs per outer iteration (MLTR is slower than MLEM)
 scatter_fraction = 0.3  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
+support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
 
 mu_water = 0.0096  # 1/mm at 511 keV
 
@@ -253,9 +254,10 @@ def _safe(num: Array, denom: Array, mask: Array) -> Array:
 # Non-attenuation-corrected (NAC) OSEM warm-start
 # -----------------------------------------------
 #
-# One OSEM epoch without an attenuation model (but with the known
-# contamination) gives a fast, attenuation-biased activity image used to
-# (a) initialise the activity and (b) define the object support
+# One OSEM epoch without an attenuation model and without scatter modelling
+# (scatter is typically not available before the attenuation is known) gives
+# a fast, high-contrast, attenuation-biased activity image used only to
+# segment the object support.  A tiny constant keeps the ratios finite.
 
 lam = xp.where(fov_mask, ones_img, xp.zeros_like(ones_img))
 for k in range(num_subsets):
@@ -268,21 +270,25 @@ for k in range(num_subsets):
 print(f"NAC OSEM done (lam max = {float(xp.max(lam)):.1f})")
 
 
-# 0th-order attenuation: water inside the thresholded support, air outside
-support = lam > 1.0 * float(xp.mean(lam[lam > 0]))
-# Fill interior holes (low-/no-activity regions inside the body, e.g. the
-# activity's cold inserts) per transaxial slice, so the 0th-order
-# attenuation is a *solid* water blob.  Holes would leave attenuation-free
-# pockets inside the body that bias and slow the MLAA attenuation update.
-support_np = to_numpy_array(support)
+# Segment the body support from the NAC image.  Because the NAC
+# reconstruction omits the scatter contamination it has high contrast and
+# noisy background "junk", so a plain threshold is not robust.  We instead:
+#   1. smooth in-plane to suppress background noise,
+#   2. threshold relative to the mean object activity,
+#   3. keep only the largest connected component (drops background islands),
+#   4. fill interior holes per slice -> a solid water blob.
+nac_smooth = gaussian_filter(to_numpy_array(lam), sigma=(2.0, 2.0, 0.0))
+mask = nac_smooth > support_threshold * float(nac_smooth[nac_smooth > 0].mean())
+
+labels, n_labels = label(mask)  # connected components (background = 0)
+if n_labels > 0:
+    largest = 1 + int(np.argmax(np.bincount(labels.ravel())[1:]))
+    mask = labels == largest
+
 support_np = np.stack(
-    [binary_fill_holes(support_np[:, :, z]) for z in range(support_np.shape[2])],
-    axis=2,
+    [binary_fill_holes(mask[:, :, z]) for z in range(mask.shape[2])], axis=2
 )
 support = xp.asarray(support_np, device=dev) & fov_mask
-
-a, b, c = show_vol_cuts(to_numpy_array(support_np))
-plt.show()
 
 # 0th-order attenuation image: uniform water inside the filled support
 mu0 = xp.where(support, xp.asarray(mu_water, dtype=xp.float32), xp.zeros_like(lam))
