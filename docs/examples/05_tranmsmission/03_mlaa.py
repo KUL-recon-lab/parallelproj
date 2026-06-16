@@ -104,7 +104,7 @@ num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
 num_outer = 40  # MLAA outer iterations
 num_mltr_epochs = 3  # OS-MLTR epochs per outer iteration (MLTR is slower than MLEM)
 scatter_fraction = 0.3  # contamination relative to mean true emission
-count_factor = 50.0  # scales the activity (sets the count level / noise)
+count_factor = 1.0  # scales the activity (sets the count level / noise)
 
 mu_water = 0.0096  # 1/mm at 511 keV
 
@@ -112,8 +112,8 @@ mu_water = 0.0096  # 1/mm at 511 keV
 # 02_maptr).  The prior weights are auto-scaled below so the prior curvature
 # is a fixed fraction (rel_*) of the data curvature; this keeps the smoothing
 # strength sensible independently of the count level and scanner geometry.
-rel_lam = 0.05  # activity: prior curvature / data curvature
-rel_mu = 0.05  # attenuation: prior curvature / data curvature
+rel_lam = 0.001  # activity: prior curvature / data curvature
+rel_mu = 0.001  # attenuation: prior curvature / data curvature
 delta_mu = mu_water / 2  # mu edges (inserts) >> delta are preserved
 # delta_lam, beta_lam, beta_mu are derived from the warm-start scales below
 
@@ -142,9 +142,7 @@ voxel_size = (4.0, 4.0, ring_spacing)
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(
-        scanner.num_rings, max_ring_difference=2, span=1
-    ),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=2, span=1),
     radial_trim=10,
     sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
 )
@@ -159,7 +157,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 proj.tof_parameters = parallelproj.tof.TOFParameters(
-    num_tofbins=31, tofbin_width=20.0, sigma_tof=60.0 / 2.355
+    num_tofbins=61, tofbin_width=10.0, sigma_tof=30.0 / 2.355
 )
 
 fov_mask = proj_nt.fov_mask()
@@ -296,9 +294,7 @@ dcurv_lam = float(
 )
 psi0 = xp.exp(-proj_nt(mu))[..., None] * proj(lam)
 dcurv_mu = float(
-    xp.median(
-        proj_nt.adjoint(Pnt1 * xp.sum(psi0**2 / (psi0 + s), axis=-1))[support]
-    )
+    xp.median(proj_nt.adjoint(Pnt1 * xp.sum(psi0**2 / (psi0 + s), axis=-1))[support])
 )
 
 prior_curv_lam = rel_lam * dcurv_lam
@@ -342,15 +338,15 @@ for it in range(num_outer):
             w_num = xp.sum(psi / ybar * (ybar - y_k[k]), axis=-1)
             w_den = xp.sum(psi**2 / ybar, axis=-1)
             grad = proj_nt_k[k].adjoint(w_num) - reg_mu.gradient(mu) / num_subsets
-            denom = proj_nt_k[k].adjoint(Pnt1_k[k] * w_den) + prior_curv_mu / num_subsets
+            denom = (
+                proj_nt_k[k].adjoint(Pnt1_k[k] * w_den) + prior_curv_mu / num_subsets
+            )
             # mu is estimated only inside the object support
             mu = xp.clip(mu + _safe(grad, denom, support), 0, None)
         # fix the global scale ambiguity: anchor the known-water region
         mu = mu * (mu_water / float(xp.mean(mu[water_roi])))
 
-    cost[it + 1] = (
-        emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
-    )
+    cost[it + 1] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
 print()
 print(f"final penalised cost = {cost[-1]:.2f}")
 
@@ -375,15 +371,21 @@ ax[0].set_title("joint objective")
 ax[0].grid(ls=":")
 
 am = ax[1].imshow(
-    to_numpy_array(lam[:, :, sl]).T, origin="lower", cmap="Greys",
-    vmin=0, vmax=float(xp.max(act_true)),
+    to_numpy_array(lam[:, :, sl]).T,
+    origin="lower",
+    cmap="Greys",
+    vmin=0,
+    vmax=float(xp.max(act_true)),
 )
 ax[1].set_title(r"activity $\lambda$ (MLAA)")
 fig.colorbar(am, ax=ax[1], fraction=0.046)
 
 mm = ax[2].imshow(
-    to_numpy_array(mu[:, :, sl]).T, origin="lower", cmap="Greys",
-    vmin=0, vmax=2.5 * mu_water,
+    to_numpy_array(mu[:, :, sl]).T,
+    origin="lower",
+    cmap="Greys",
+    vmin=0,
+    vmax=2.5 * mu_water,
 )
 ax[2].set_title(r"attenuation $\mu$ (MLAA)")
 fig.colorbar(mm, ax=ax[2], fraction=0.046)
