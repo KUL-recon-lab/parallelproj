@@ -259,14 +259,17 @@ def _safe(num: Array, denom: Array, mask: Array) -> Array:
 
 lam = xp.where(fov_mask, ones_img, xp.zeros_like(ones_img))
 for k in range(num_subsets):
-    ybar = proj_k[k](lam) + s_k[k]
+    # ybar = proj_k[k](lam) + s_k[k]
+    ybar = proj_k[k](lam) + 1e-2
     sens = proj_k[k].adjoint(xp.ones_like(ybar))
-    update = proj_k[k].adjoint(y_k[k] / ybar)
+    # update = proj_k[k].adjoint(y_k[k] / ybar)
+    update = proj_k[k].adjoint((y_k[k] + 1e-2) / ybar)
     lam = _safe(lam * update, sens, fov_mask)
 print(f"NAC OSEM done (lam max = {float(xp.max(lam)):.1f})")
 
+
 # 0th-order attenuation: water inside the thresholded support, air outside
-support = lam > 0.1 * float(xp.mean(lam[lam > 0]))
+support = lam > 1.0 * float(xp.mean(lam[lam > 0]))
 # Fill interior holes (low-/no-activity regions inside the body, e.g. the
 # activity's cold inserts) per transaxial slice, so the 0th-order
 # attenuation is a *solid* water blob.  Holes would leave attenuation-free
@@ -277,6 +280,9 @@ support_np = np.stack(
     axis=2,
 )
 support = xp.asarray(support_np, device=dev) & fov_mask
+
+a, b, c = show_vol_cuts(to_numpy_array(support_np))
+plt.show()
 
 # 0th-order attenuation image: uniform water inside the filled support
 mu0 = xp.where(support, xp.asarray(mu_water, dtype=xp.float32), xp.zeros_like(lam))
