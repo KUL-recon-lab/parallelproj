@@ -91,7 +91,7 @@ import parallelproj.tof
 from parallelproj import Array, to_numpy_array
 from parallelproj.functions import C2AffineObjective, LogCosh
 
-from example_utils import elliptic_cylinder_phantom
+from example_utils import elliptic_cylinder_phantom, show_vol_cuts
 
 # %%
 from example_utils import suggest_array_backend_and_device
@@ -287,15 +287,24 @@ water_roi_np[nx // 2 - 6 : nx // 2 + 6, ny // 2 - 6 : ny // 2 + 6, :] = True
 water_roi = xp.asarray(water_roi_np, device=dev) & support
 
 # %%
-# Log-cosh priors
-# ---------------
+# Warm-start activity (with the 0th-order attenuation) and log-cosh priors
+# ------------------------------------------------------------------------
 #
-# The log-cosh transition scale for the activity is tied to the warm-start
-# activity level; the attenuation scale ``delta_mu`` was set above.  The
-# (log-cosh max) prior curvature :math:`\beta\,\kappa/\delta` enters the
-# harmonic-mean preconditioner.
+# One OSEM epoch *with* the 0th-order attenuation produces a correctly
+# scaled (attenuation-corrected) activity image.  Its level sets the
+# activity log-cosh scale ``delta_lam`` -- a far better basis than the
+# mis-scaled NAC image -- and serves as the common warm start for both the
+# OSEM baseline and MLAA.
 
-delta_lam = 0.3 * float(xp.mean(lam[lam > 0]))
+a0_k = [xp.exp(-proj_nt_k[k](mu0))[..., None] for k in range(num_subsets)]
+lam_warm = lam  # NAC activity
+for k in range(num_subsets):
+    ybar = a0_k[k] * proj_k[k](lam_warm) + s_k[k]
+    sens = proj_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
+    update = proj_k[k].adjoint(a0_k[k] * y_k[k] / ybar)
+    lam_warm = _safe(lam_warm * update, sens, fov_mask)
+
+delta_lam = 0.3 * float(xp.mean(lam_warm[lam_warm > 0]))
 reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), G)
 reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
 prior_curv_lam = beta_lam * kappa / delta_lam
@@ -310,8 +319,7 @@ prior_curv_mu = beta_mu * kappa / delta_mu
 # the true attenuation differs from water (the dense / air inserts), this
 # baseline shows attenuation-correction artefacts that MLAA removes.
 
-a0_k = [xp.exp(-proj_nt_k[k](mu0))[..., None] for k in range(num_subsets)]
-lam_ac = lam  # start from the NAC activity
+lam_ac = lam_warm  # start from the warm (attenuation-corrected) activity
 for it in range(num_outer):
     print(f"OSEM (mu0) epoch {it + 1:03}/{num_outer:03}", end="\r")
     for k in range(num_subsets):
@@ -327,9 +335,14 @@ print()
 # MLAA: interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation)
 # ------------------------------------------------------------------------
 
+lam = lam_warm  # activity initialised at the warm-start
 mu = mu0  # attenuation initialised at the 0th-order water blob
 cost = np.zeros(num_outer + 1)
 cost[0] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
+
+# keep every intermediate estimate to visualise the convergence
+lam_hist = [lam]
+mu_hist = [mu]
 
 for it in range(num_outer):
     print(f"MLAA outer {it + 1:03}/{num_outer:03}", end="\r")
@@ -366,6 +379,8 @@ for it in range(num_outer):
         mu = mu * (mu_water / float(xp.mean(mu[water_roi])))
 
     cost[it + 1] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
+    lam_hist.append(lam)
+    mu_hist.append(mu)
 print()
 print(f"final penalised cost = {cost[-1]:.2f}")
 
@@ -422,5 +437,31 @@ _show(ax[1, 1], lam_ac, vmax_lam, r"OS-MLEM (0th-order $\mu$)")
 h_lam = _show(ax[1, 2], lam, vmax_lam, r"MLAA activity")
 fig.colorbar(h_lam, ax=ax[1, :], fraction=0.04, location="right")
 fig.show()
+
+# %%
+# Convergence of the MLAA estimates over the outer iterations
+# -----------------------------------------------------------
+#
+# The intermediate attenuation and activity estimates are stacked into 4D
+# arrays (leading axis = outer iteration); ``show_vol_cuts`` adds a slider
+# over that axis so the convergence can be stepped through.
+
+mu_hist_4d = np.stack([to_numpy_array(m) for m in mu_hist])
+lam_hist_4d = np.stack([to_numpy_array(li) for li in lam_hist])
+
+fig_mu = show_vol_cuts(
+    mu_hist_4d,
+    voxel_size=voxel_size,
+    fig_title=r"MLAA $\mu$ vs. outer iteration",
+    vmin=0,
+    vmax=vmax_mu,
+)
+fig_lam = show_vol_cuts(
+    lam_hist_4d,
+    voxel_size=voxel_size,
+    fig_title=r"MLAA activity vs. outer iteration",
+    vmin=0,
+    vmax=vmax_lam,
+)
 
 plt.show()
