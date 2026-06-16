@@ -105,7 +105,7 @@ num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
 num_outer = 20  # MLAA outer iterations
 num_mltr_epochs = 3  # OS-MLTR epochs per outer iteration (MLTR is slower than MLEM)
 scatter_fraction = 0.3  # contamination relative to mean true emission
-count_factor = 1.0  # scales the activity (sets the count level / noise)
+count_factor = 5.0  # scales the activity (sets the count level / noise)
 
 mu_water = 0.0096  # 1/mm at 511 keV
 
@@ -415,8 +415,11 @@ vmax_lam = float(xp.max(act_true))
 
 def _show(ax, vol, vmax, title):
     h = ax.imshow(
-        to_numpy_array(vol[:, :, sl]).T, origin="lower", cmap="Greys",
-        vmin=0, vmax=vmax,
+        to_numpy_array(vol[:, :, sl]).T,
+        origin="lower",
+        cmap="Greys",
+        vmin=0,
+        vmax=vmax,
     )
     ax.set_title(title)
     ax.set_xticks([])
@@ -424,16 +427,16 @@ def _show(ax, vol, vmax, title):
     return h
 
 
-fig, ax = plt.subplots(2, 3, figsize=(11, 7.5), tight_layout=True)
+fig, ax = plt.subplots(2, 3, figsize=(11, 7.5), layout="constrained")
 _show(ax[0, 0], mu_true, vmax_mu, r"true $\mu$")
 _show(ax[0, 1], mu0, vmax_mu, r"0th-order $\mu$ (water blob)")
 h_mu = _show(ax[0, 2], mu, vmax_mu, r"MLAA $\mu$")
-fig.colorbar(h_mu, ax=ax[0, :], fraction=0.046, location="right")
+fig.colorbar(h_mu, ax=ax[0, :], fraction=0.04, location="right")
 
 _show(ax[1, 0], act_true, vmax_lam, r"true activity")
 _show(ax[1, 1], lam_ac, vmax_lam, r"OS-MLEM (0th-order $\mu$)")
 h_lam = _show(ax[1, 2], lam, vmax_lam, r"MLAA activity")
-fig.colorbar(h_lam, ax=ax[1, :], fraction=0.046, location="right")
+fig.colorbar(h_lam, ax=ax[1, :], fraction=0.04, location="right")
 fig.show()
 
 plt.show()
