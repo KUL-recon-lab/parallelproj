@@ -191,7 +191,7 @@ A = parallelproj.operators.CompositeLinearOperator([proj, res_model])
 
 # %%
 # Ground-truth activity and attenuation -- DIFFERENT insert patterns
-# -------------------------------------------------------------------
+# ------------------------------------------------------------------
 #
 # The activity uses the standard elliptic-cylinder phantom (its hot/cold
 # inserts).  The attenuation is a water cylinder with its **own** dense and
@@ -218,7 +218,7 @@ mu_true = xp.asarray(mu_np.astype(np.float32), device=dev)
 
 # %%
 # Simulate TOF emission data
-# ---------------------------
+# --------------------------
 
 att_true = xp.exp(-proj_nt(mu_true))  # (R, V, P) attenuation factors
 emis_true = att_true[..., None] * A(act_true)  # PSF-blurred, broadcast over TOF
@@ -357,7 +357,7 @@ def penalised_cost(lam: Array, mu: Array) -> float:
 
 # %%
 # Baseline: OS-MAPEM activity with the fixed 0th-order attenuation image
-# ---------------------------------------------------------------------
+# ----------------------------------------------------------------------
 #
 # Reconstruct the activity with attenuation correction based on the crude
 # uniform-water :math:`\mu_0` (held fixed, no joint estimation).  Wherever
@@ -378,7 +378,7 @@ print()
 
 # %%
 # Reference: OS-MAPEM activity with the TRUE attenuation image
-# -----------------------------------------------------------
+# ------------------------------------------------------------ 
 #
 # The activity we would reconstruct if the attenuation were known exactly --
 # the gold standard against which MLAA is judged.
@@ -398,7 +398,7 @@ print()
 
 # %%
 # MLAA: interleaved penalised OS-MAPEM (activity) and OS-MAPTR (attenuation)
-# ------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 lam = lam_warm  # activity initialised at the warm-start
 mu = mu0  # attenuation initialised at the 0th-order water blob

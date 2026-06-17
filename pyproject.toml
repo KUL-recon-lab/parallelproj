@@ -70,7 +70,8 @@ testpaths = ["tests"]
 #                                # run the test suite (newest Python)
 #   pixi run -e docs docs        # build the documentation locally
 #   pixi run -e docs docs-fast   # build the docs without running any example
-#   pixi run docs-gpu            # build the docs on a GPU box, running ALL examples
+#   pixi run -e docs-gpu docs-gpu  # build the docs on a GPU box, running ALL examples
+#                                  # (run `pixi install` first if the env is new)
 #                                # (gallery examples run on the CUDA backend)
 #   pixi run -e cuda12 test      # run tests against a CUDA 12 stack
 #   pixi run -e cuda13 test      # run tests against a CUDA 13 stack
