@@ -344,6 +344,7 @@ def penalised_cost(lam: Array, mu: Array) -> float:
     """Penalised joint objective Phi = -L + beta_lam R(lam) + beta_mu R(mu)."""
     return emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
 
+
 # %%
 # Baseline: OS-MLEM activity with the fixed 0th-order attenuation image
 # ---------------------------------------------------------------------
@@ -455,7 +456,7 @@ print()
 # images themselves are correct (see the comparison figure).
 
 print(f"penalised cost  OS-MLEM (true mu): {penalised_cost(lam_ref, mu_true):.2f}")
-print(f"penalised cost  MLAA            : {penalised_cost(lam, mu):.2f}")
+print(f"penalised cost  MLAA             : {penalised_cost(lam, mu):.2f}")
 
 # %%
 # Comparison: ground truth vs. 0th-order / baseline vs. MLAA
