@@ -108,7 +108,11 @@ import parallelproj.tof
 from parallelproj import Array, to_numpy_array
 from parallelproj.functions import C2AffineObjective, LogCosh
 
-from example_utils import elliptic_cylinder_phantom, show_vol_cuts
+from example_utils import (
+    elliptic_cylinder_phantom,
+    poisson_transmission_terms,
+    show_vol_cuts,
+)
 
 # %%
 from example_utils import suggest_array_backend_and_device
@@ -431,18 +435,22 @@ for it in range(num_outer):
         lam = xp.clip(lam + D * g_pen, 0, None)
 
         # --- num_mltr_epochs attenuation (OS-MAPTR) subset updates ---
+        # the transmission update with the blank scan replaced by the current
+        # activity forward projection P lam (TOF terms summed over TOF bins)
         for _ in range(num_mltr_epochs):
             kt = att_k % num_subsets
             att_k += 1
-            a_t = xp.exp(-proj_nt_k[kt](mu))[..., None]
-            psi = a_t * A_k[kt](lam)  # blank = current activity projection
-            ybar = psi + s_k[kt]
-            # per-TOF-bin MLTR weights, summed over the TOF axis
-            w_num = xp.sum(psi / ybar * (ybar - y_k[kt]), axis=-1)
-            w_den = xp.sum(psi**2 / ybar, axis=-1)
-            grad = proj_nt_k[kt].adjoint(w_num) - reg_mu.gradient(mu) / num_subsets
+            _, grad_sino, curv_sino = poisson_transmission_terms(
+                proj_nt_k[kt](mu),
+                blank=A_k[kt](lam),
+                contamination=s_k[kt],
+                data=y_k[kt],
+                tof_sum=True,
+            )
+            grad = proj_nt_k[kt].adjoint(grad_sino) - reg_mu.gradient(mu) / num_subsets
             denom = (
-                proj_nt_k[kt].adjoint(Pnt1_k[kt] * w_den) + prior_curv_mu / num_subsets
+                proj_nt_k[kt].adjoint(Pnt1_k[kt] * curv_sino)
+                + prior_curv_mu / num_subsets
             )
             # mu is estimated only inside the object support
             mu = xp.clip(mu + _safe(grad, denom, support), 0, None)

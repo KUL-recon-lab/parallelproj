@@ -81,7 +81,11 @@ import parallelproj.pet_scanners
 import parallelproj.projectors
 from parallelproj import Array, to_numpy_array
 
-from example_utils import elliptic_cylinder_phantom, show_vol_cuts
+from example_utils import (
+    elliptic_cylinder_phantom,
+    poisson_transmission_terms,
+    show_vol_cuts,
+)
 
 # %%
 from example_utils import suggest_array_backend_and_device
@@ -212,18 +216,16 @@ def _safe_ratio(num: Array, denom: Array) -> Array:
 
 def full_grad_and_curv(mu: Array) -> tuple[Array, Array]:
     """Full-data gradient of L and the MLTR curvature denominator."""
-    psi = b * xp.exp(-proj(mu))
-    ybar = psi + s
-    grad = proj.adjoint(psi / ybar * (ybar - y))
-    denom = proj.adjoint(P1 * psi**2 / ybar)
-    return grad, denom
+    _, grad_sino, curv_sino = poisson_transmission_terms(proj(mu), b, s, y)
+    return proj.adjoint(grad_sino), proj.adjoint(P1 * curv_sino)
 
 
 def subset_grad(mu: Array, k: int) -> Array:
     """Gradient of the subset log-likelihood L_k (no 1/m scaling)."""
-    psi = b_k[k] * xp.exp(-subset_proj[k](mu))
-    ybar = psi + s_k[k]
-    return subset_proj[k].adjoint(psi / ybar * (ybar - y_k[k]))
+    _, grad_sino, _ = poisson_transmission_terms(
+        subset_proj[k](mu), b_k[k], s_k[k], y_k[k]
+    )
+    return subset_proj[k].adjoint(grad_sino)
 
 
 # %%
@@ -253,10 +255,11 @@ c = [neg_logL(mu)]
 for ep in range(num_epochs):
     print(f"OS-MLTR    epoch {ep + 1:03}/{num_epochs:03}", end="\r")
     for k in range(num_subsets):
-        psi = b_k[k] * xp.exp(-subset_proj[k](mu))
-        ybar = psi + s_k[k]
-        num = subset_proj[k].adjoint(psi / ybar * (ybar - y_k[k]))
-        denom = subset_proj[k].adjoint(Pk1[k] * psi**2 / ybar)
+        _, grad_sino, curv_sino = poisson_transmission_terms(
+            subset_proj[k](mu), b_k[k], s_k[k], y_k[k]
+        )
+        num = subset_proj[k].adjoint(grad_sino)
+        denom = subset_proj[k].adjoint(Pk1[k] * curv_sino)
         mu = xp.clip(mu + _safe_ratio(num, denom), 0, None)
     c.append(neg_logL(mu))
 print()
