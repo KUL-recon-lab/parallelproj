@@ -12,11 +12,16 @@ measurement.  The TOF emission model is
     \\qquad
     a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
 
-where :math:`P` is the **TOF** emission projector, :math:`P_\\text{nt}` the
-**non-TOF** projector used for the attenuation line integrals (the
-attenuation factor :math:`a_i` is the same for every TOF bin :math:`t` of a
-given LOR :math:`i`), and :math:`s` is a known, smooth, strictly positive
-contamination (scatter + randoms).
+where :math:`P` is the **TOF** emission projector -- here composed with an
+image-based Gaussian **resolution model** (PSF), so :math:`P\\lambda` really
+means (TOF projector) :math:`\\circ` (PSF) applied to :math:`\\lambda`.
+:math:`P_\\text{nt}` is the **non-TOF** projector used for the attenuation
+line integrals: the attenuation factor :math:`a_i` is the same for every TOF
+bin :math:`t` of a given LOR :math:`i` and carries **no** resolution model --
+the PET resolution loss (positron range, non-collinearity, detector
+response) blurs the apparent *activity*, not the bulk attenuation of the
+medium.  Finally :math:`s` is a strictly positive contamination (scatter +
+randoms); here it is assumed known and fixed (see the warning below).
 
 MLAA alternates two block updates of the penalised log-likelihood
 :math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`:
@@ -64,11 +69,16 @@ crosstalk = each image shows only its own structure).
     TOF reconstruction with many subsets and outer iterations is slow on the
     CPU.  Run it locally, ideally on a GPU backend.
 
-.. note::
-    Keeping the contamination :math:`s` known/fixed is a simplification --
-    in practice the scatter estimate depends on :math:`\\mu` and is
-    re-estimated.  Likewise the NAC warm-start keeps the known :math:`s`
-    while omitting attenuation, which is mild "cheating" for a clean start.
+.. warning::
+    For simplicity the contamination :math:`s` (scatter + randoms) is treated
+    as **known and fixed** throughout.  This is not realistic: the scatter
+    distribution depends on *both* the activity :math:`\\lambda` **and** the
+    attenuation :math:`\\mu`, so a real MLAA pipeline must **re-estimate it
+    iteratively** (e.g. a single-scatter simulation refreshed as
+    :math:`\\lambda` and :math:`\\mu` evolve).  Holding it fixed here -- and
+    reusing the known :math:`s` in the non-attenuation-corrected warm-start
+    while omitting attenuation -- is a deliberate idealisation that keeps the
+    example focused on the joint activity/attenuation update itself.
 
 .. [Rezaei2012] A. Rezaei et al., "Simultaneous reconstruction of activity
    and attenuation in time-of-flight PET", IEEE TMI 31(12), 2012.
