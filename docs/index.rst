@@ -18,6 +18,35 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
   
   * G. Schramm, K. Thielemans: "**PARALLELPROJ - An open-source framework for fast calculation of projections in tomography**", Front. Nucl. Med., Volume 3 - 2023, doi: 10.3389/fnume.2023.1324562, `link to paper <https://www.frontiersin.org/articles/10.3389/fnume.2023.1324562/abstract>`_, `link to arxiv version <https://arxiv.org/abs/2212.12519>`_
 
+.. admonition:: parallelproj, STIR & CASToR -- which to use when
+
+  * **parallelproj** is a fast, GPU-native, `python array API <https://data-apis.org/array-api/latest/>`_
+    projection library -- a *building block*, not a full pipeline. Reach for it
+    when you want to **prototype your own reconstruction algorithms** in Python,
+    or build **differentiable, deep-learning-integrated** reconstruction
+    (PyTorch autograd) with the same code on CPU and GPU.
+
+  * **Easy to install and get started.** parallelproj is available on
+    `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
+    (single-command install) and ships with many worked examples, so you can go
+    from install to a running reconstruction quickly.
+
+  * `STIR <https://stir.sourceforge.net>`_ and `CASToR <https://castor-project.org>`_
+    are mature, full reconstruction *frameworks* with built-in scanner models,
+    established algorithms, data I/O and corrections. Reach for them when you
+    want a **complete, validated end-to-end reconstruction** out of the box
+    across many scanners and modalities.
+
+  * **They are complementary, not competing.** parallelproj deliberately focuses
+    on algorithm prototyping; it does not aim to replace
+    STIR or CASToR -- and can even serve as a GPU projection backend for
+    higher-level frameworks.
+
+  * **Out of scope for parallelproj (by design).** No vendor-specific raw data
+    format readers, and currently no built-in randoms or scatter estimation. If
+    your workflow needs these, use a full framework -- optionally with
+    parallelproj as the projection backend.
+
 .. toctree::
     :maxdepth: 1
     :titlesonly:
