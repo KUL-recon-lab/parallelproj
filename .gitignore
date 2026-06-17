@@ -73,8 +73,10 @@ instance/
 
 # Sphinx documentation
 docs/_build/
-docs/source/auto_examples
-docs/source/gen_modules
+# sphinx-gallery / autodoc generated output (regenerated on every build)
+docs/auto_examples/
+docs/gen_modules/
+docs/sg_execution_times.rst
 docs/source/sg_execution_times.rst
 
 # PyBuilder

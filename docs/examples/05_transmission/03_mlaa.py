@@ -31,7 +31,7 @@ MLAA alternates two block updates of the penalised log-likelihood
   EM/harmonic-mean preconditioner :math:`D_\\lambda = \\lambda /
   (A^T\\mathbf 1 + \\lambda\\,\\beta_\\lambda\\kappa/\\delta_\\lambda)`;
 * **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- this is
-  exactly the transmission reconstruction of the ``05_tranmsmission``
+  exactly the transmission reconstruction of the ``05_transmission``
   examples, with the *blank scan* replaced by the current activity forward
   projection :math:`b = P\\lambda` (and, with TOF, the per-TOF-bin MLTR
   weights summed over the TOF axis before back-projecting through the
@@ -57,7 +57,7 @@ known (water) attenuation after each attenuation update.
   region makes the joint problem unstable;
 * both images carry an edge-preserving **log-cosh** prior with the
   harmonic-mean (data + prior curvature) preconditioner of
-  ``05_tranmsmission/02_maptr.py``.
+  ``05_transmission/02_run_maptr.py``.
 
 The activity and attenuation phantoms have **different** inserts on purpose,
 so the reconstructions reveal how well MLAA separates the two (little
