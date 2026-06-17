@@ -32,6 +32,12 @@ MLAA alternates two block updates of the penalised log-likelihood
   weights summed over the TOF axis before back-projecting through the
   non-TOF projector).
 
+The two blocks are interleaved at the **subset** level: every activity
+subset update is immediately followed by ``num_mltr_epochs`` attenuation
+subset updates, so the two images improve together rather than in separate
+full passes (the total number of activity and attenuation updates is
+unchanged).
+
 **Why TOF is essential.**  Non-TOF MLAA is ill-posed: activity and
 attenuation trade off against each other (crosstalk), and the joint problem
 is non-unique.  TOF data determine :math:`\\lambda` and :math:`\\mu` up to a
@@ -356,37 +362,46 @@ cost[0] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
 lam_hist = [lam]
 mu_hist = [mu]
 
+# Updates are interleaved at the *subset* level: each activity (OS-MLEM)
+# subset update is immediately followed by ``num_mltr_epochs`` attenuation
+# (OS-MLTR) subset updates.  Over one outer iteration this still amounts to
+# one activity pass (``num_subsets`` updates) and ``num_mltr_epochs``
+# attenuation passes, but the two images now improve in lock-step.  The
+# attenuation "blank scan" is the activity forward projection ``P lam``,
+# recomputed from the just-updated activity for every attenuation update.
+
+att_k = 0  # persistent attenuation subset pointer (cycles through subsets)
 for it in range(num_outer):
     print(f"MLAA outer {it + 1:03}/{num_outer:03}", end="\r")
 
-    # --- activity update: 1 penalised OSEM epoch (attenuation fixed) ---
-    for k in range(num_subsets):
-        a_k = xp.exp(-proj_nt_k[k](mu))[..., None]  # subset attenuation factors
-        ybar = a_k * proj_k[k](lam) + s_k[k]
-        grad = proj_k[k].adjoint(a_k * (y_k[k] / ybar - 1.0))  # emission gradient
-        sens = proj_k[k].adjoint(a_k * xp.ones_like(ybar))  # A^T 1 (attenuated)
+    for ka in range(num_subsets):
+        # --- 1 activity (OS-MLEM) subset update (attenuation fixed) ---
+        a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
+        ybar = a_k * proj_k[ka](lam) + s_k[ka]
+        grad = proj_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
+        sens = proj_k[ka].adjoint(a_k * xp.ones_like(ybar))  # A^T 1 (attenuated)
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
         lam = xp.clip(lam + D * g_pen, 0, None)
 
-    # --- attenuation update: OS-MLTR with blank = P lam (lam fixed) ---
-    # the activity forward projection is the transmission "blank scan"
-    blank_k = [proj_k[k](lam) for k in range(num_subsets)]
-    for _ in range(num_mltr_epochs):
-        for k in range(num_subsets):
-            a_k = xp.exp(-proj_nt_k[k](mu))[..., None]
-            psi = a_k * blank_k[k]  # attenuated activity projection
-            ybar = psi + s_k[k]
+        # --- num_mltr_epochs attenuation (OS-MLTR) subset updates ---
+        for _ in range(num_mltr_epochs):
+            kt = att_k % num_subsets
+            att_k += 1
+            a_t = xp.exp(-proj_nt_k[kt](mu))[..., None]
+            psi = a_t * proj_k[kt](lam)  # blank = current activity projection
+            ybar = psi + s_k[kt]
             # per-TOF-bin MLTR weights, summed over the TOF axis
-            w_num = xp.sum(psi / ybar * (ybar - y_k[k]), axis=-1)
+            w_num = xp.sum(psi / ybar * (ybar - y_k[kt]), axis=-1)
             w_den = xp.sum(psi**2 / ybar, axis=-1)
-            grad = proj_nt_k[k].adjoint(w_num) - reg_mu.gradient(mu) / num_subsets
+            grad = proj_nt_k[kt].adjoint(w_num) - reg_mu.gradient(mu) / num_subsets
             denom = (
-                proj_nt_k[k].adjoint(Pnt1_k[k] * w_den) + prior_curv_mu / num_subsets
+                proj_nt_k[kt].adjoint(Pnt1_k[kt] * w_den) + prior_curv_mu / num_subsets
             )
             # mu is estimated only inside the object support
             mu = xp.clip(mu + _safe(grad, denom, support), 0, None)
+
         # fix the global scale ambiguity: anchor the known-water region
         mu = mu * (mu_water / float(xp.mean(mu[water_roi])))
 
