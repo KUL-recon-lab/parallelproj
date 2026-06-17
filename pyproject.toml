@@ -225,7 +225,7 @@ docs-gpu = { cmd = "sphinx-build -b html docs docs/_build/html", env = { BUILD_A
 #
 # Adds IPython and a convenience task for running the docs/examples
 # interactively.  The task pre-sets PYTHONPATH so that the shared helpers
-# in docs/examples/ (array_utils.py, img.py, vis.py) are importable.
+# in docs/examples/ (example_utils.py) are importable.
 # This feature is included in every environment so that
 # ``pixi run ipython-examples`` and
 # ``pixi run -e cuda12 ipython-examples`` both work out of the box.

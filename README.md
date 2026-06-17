@@ -22,7 +22,40 @@ array libraries (e.g. numpy, cupy, **pytorch**) and devices (CPU and CUDA GPUs).
 
 ## Installation, Documentation & Examples
 
-**Please refer to the official documentation [here](https://parallelproj.readthedocs.io/en/stable/).**
+`parallelproj` is distributed through **conda-forge**, which automatically pulls in
+the correct pre-compiled backend (CPU or CUDA) for your system:
+
+```bash
+mamba create -n parallelproj -c conda-forge parallelproj
+```
+
+> **Note:** `parallelproj` cannot be installed with `pip` alone — its compiled backend
+> (`libparallelproj` / `parallelproj-core`) is only on conda-forge, not on PyPI.
+
+A minimal forward / back projection (see the
+[Quickstart](https://parallelproj.readthedocs.io/en/stable/quickstart.html) for details):
+
+```python
+import array_api_compat.numpy as xp  # swap for array_api_compat.torch / .cupy
+from parallelproj.pet_scanners import DemoPETScannerGeometry
+from parallelproj.pet_lors import Michelogram, RegularPolygonPETLORDescriptor
+from parallelproj.projectors import RegularPolygonPETProjector
+
+scanner = DemoPETScannerGeometry(xp, "cpu", num_rings=4)  # or dev="cuda"
+lor_desc = RegularPolygonPETLORDescriptor(
+    scanner, Michelogram(scanner.num_rings, max_ring_difference=3, span=1)
+)
+proj = RegularPolygonPETProjector(
+    lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
+)
+
+img = xp.ones(proj.in_shape, dtype=xp.float32)
+sino = proj(img)            # forward projection
+back = proj.adjoint(sino)   # back projection
+```
+
+**For full installation instructions, the API reference and the example gallery, see the
+official documentation [here](https://parallelproj.readthedocs.io/en/stable/).**
 
 </br>
 
@@ -132,9 +165,9 @@ This makes `import parallelproj` pick up your local clone instead of any install
 
 **4. Run the examples**
 
-The examples in `docs/examples/` share small helper modules (`array_utils.py`,
-`img.py`, `vis.py`) that live in `docs/examples/` itself and are not part of
-the installed package.  Add that directory to `PYTHONPATH` as well:
+The examples in `docs/examples/` share a small helper module (`example_utils.py`)
+that lives in `docs/examples/` itself and is not part of the installed package.
+Add that directory to `PYTHONPATH` as well:
 
 ```bash
 export PYTHONPATH=/path/to/parallelproj/docs/examples:$PYTHONPATH
