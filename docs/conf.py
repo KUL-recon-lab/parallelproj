@@ -39,12 +39,22 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "examples/README.rst"]
 bibtex_bibfiles = ["refs.bib"]
 
+# Which examples are *executed*?  Non-matching examples are still rendered
+# (their source is shown) but not run, which keeps the Read the Docs build
+# under its 15 min limit.  By default only files named ``<NN>_run_*.py`` run.
+# Set ``BUILD_ALL_EXAMPLES=1`` (e.g. locally on a GPU machine) to execute
+# *every* example.
+_build_all_examples = os.environ.get("BUILD_ALL_EXAMPLES", "0") == "1"
+_example_filename_pattern = (
+    r".*\.py$" if _build_all_examples else r"[\\/]\d{2,3}_run_.*\.py$"
+)
+
 sphinx_gallery_conf = {
     "examples_dirs": ["examples"],
     "gallery_dirs": ["auto_examples"],
     "backreferences_dir": "auto_examples/backreferences",
     "doc_module": ("parallelproj",),
-    "filename_pattern": r"[\\/]\d{2,3}_run_.*\.py$",
+    "filename_pattern": _example_filename_pattern,
     "ignore_pattern": r"(^|[\\/])(utils|example_utils)\.py$",
     "plot_gallery": True,
     "within_subsection_order": FileNameSortKey,

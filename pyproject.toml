@@ -69,7 +69,7 @@ testpaths = ["tests"]
 #   pixi run -e test-py-latest test
 #                                # run the test suite (newest Python)
 #   pixi run -e docs docs        # build the documentation locally
-#   pixi run docs-gpu            # build the documentation on a GPU system
+#   pixi run docs-gpu            # build the docs on a GPU box, running ALL examples
 #                                # (gallery examples run on the CUDA backend)
 #   pixi run -e cuda12 test      # run tests against a CUDA 12 stack
 #   pixi run -e cuda13 test      # run tests against a CUDA 13 stack
@@ -209,11 +209,13 @@ docs-clean = "rm -rf docs/_build docs/auto_examples"
 # the ``docs-gpu`` environment below, it allows building the docs locally
 # on a system with a GPU (``pixi run docs-gpu``).  The gallery examples
 # then auto-select the CUDA backend via suggest_array_backend_and_device().
+# ``BUILD_ALL_EXAMPLES=1`` makes sphinx-gallery execute *every* example (not
+# only the ``_run_`` ones that Read the Docs runs within its time limit).
 # Defining the task in its own feature (instead of in ``docs``) makes
 # ``pixi run docs-gpu`` resolve uniquely to the GPU environment.
 
 [tool.pixi.feature.docs-gpu.tasks]
-docs-gpu = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"], description = "Build the docs on a GPU system (gallery examples run on the CUDA backend)." }
+docs-gpu = { cmd = "sphinx-build -b html docs docs/_build/html", env = { BUILD_ALL_EXAMPLES = "1" }, depends-on = ["setup-hooks"], description = "Build the docs on a GPU system, executing ALL examples on the CUDA backend." }
 
 # ---- examples feature ----
 #
