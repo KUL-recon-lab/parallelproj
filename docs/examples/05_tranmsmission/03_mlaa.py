@@ -30,7 +30,7 @@ MLAA alternates two block updates of the penalised log-likelihood
   the system matrix -- preconditioned gradient ascent with the
   EM/harmonic-mean preconditioner :math:`D_\\lambda = \\lambda /
   (A^T\\mathbf 1 + \\lambda\\,\\beta_\\lambda\\kappa/\\delta_\\lambda)`;
-* **attenuation** (fix :math:`\\lambda`): penalised **OS-MLTR** -- this is
+* **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- this is
   exactly the transmission reconstruction of the ``05_tranmsmission``
   examples, with the *blank scan* replaced by the current activity forward
   projection :math:`b = P\\lambda` (and, with TOF, the per-TOF-bin MLTR
@@ -120,7 +120,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # %%
 num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
 num_outer = 10  # MLAA outer iterations
-num_mltr_epochs = 5  # OS-MLTR updates per OS-MLEM updates (MLTR is slower than MLEM)
+num_mltr_epochs = 5  # OS-MAPTR updates per OS-MAPEM updates (MLTR is slower than MLEM)
 scatter_fraction = 0.6  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
 support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
@@ -329,7 +329,7 @@ water_roi = xp.asarray(water_roi_np, device=dev) & support
 # Warm-start activity (with the 0th-order attenuation) and log-cosh priors
 # ------------------------------------------------------------------------
 #
-# One OSEM epoch *with* the 0th-order attenuation produces a correctly
+# One OS-MLEM epoch *with* the 0th-order attenuation produces a correctly
 # scaled (attenuation-corrected) activity image.  Its level sets the
 # activity log-cosh scale ``delta_lam`` -- a far better basis than the
 # mis-scaled NAC image -- and serves as the common warm start for both the
@@ -356,7 +356,7 @@ def penalised_cost(lam: Array, mu: Array) -> float:
 
 
 # %%
-# Baseline: OS-MLEM activity with the fixed 0th-order attenuation image
+# Baseline: OS-MAPEM activity with the fixed 0th-order attenuation image
 # ---------------------------------------------------------------------
 #
 # Reconstruct the activity with attenuation correction based on the crude
@@ -377,7 +377,7 @@ for it in range(num_outer):
 print()
 
 # %%
-# Reference: OS-MLEM activity with the TRUE attenuation image
+# Reference: OS-MAPEM activity with the TRUE attenuation image
 # -----------------------------------------------------------
 #
 # The activity we would reconstruct if the attenuation were known exactly --
@@ -397,7 +397,7 @@ for it in range(num_outer):
 print()
 
 # %%
-# MLAA: interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation)
+# MLAA: interleaved penalised OS-MAPEM (activity) and OS-MAPTR (attenuation)
 # ------------------------------------------------------------------------
 
 lam = lam_warm  # activity initialised at the warm-start
@@ -407,9 +407,9 @@ mu = mu0  # attenuation initialised at the 0th-order water blob
 lam_hist = [lam]
 mu_hist = [mu]
 
-# Updates are interleaved at the *subset* level: each activity (OS-MLEM)
+# Updates are interleaved at the *subset* level: each activity (OS-MAPEM)
 # subset update is immediately followed by ``num_mltr_epochs`` attenuation
-# (OS-MLTR) subset updates.  Over one outer iteration this still amounts to
+# (OS-MAPTR) subset updates.  Over one outer iteration this still amounts to
 # one activity pass (``num_subsets`` updates) and ``num_mltr_epochs``
 # attenuation passes, but the two images now improve in lock-step.  The
 # attenuation "blank scan" is the activity forward projection ``P lam``,
@@ -420,7 +420,7 @@ for it in range(num_outer):
     print(f"MLAA outer {it + 1:03}/{num_outer:03}", end="\r")
 
     for ka in range(num_subsets):
-        # --- 1 activity (OS-MLEM) subset update (attenuation fixed) ---
+        # --- 1 activity (OS-MAPEM) subset update (attenuation fixed) ---
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
@@ -430,7 +430,7 @@ for it in range(num_outer):
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
         lam = xp.clip(lam + D * g_pen, 0, None)
 
-        # --- num_mltr_epochs attenuation (OS-MLTR) subset updates ---
+        # --- num_mltr_epochs attenuation (OS-MAPTR) subset updates ---
         for _ in range(num_mltr_epochs):
             kt = att_k % num_subsets
             att_k += 1
@@ -460,13 +460,13 @@ print()
 #
 # Compare the *full* penalised cost
 # :math:`\Phi = -L + \beta_\lambda R(\lambda) + \beta_\mu R(\mu)` of the MLAA
-# solution with that of the OS-MLEM reference that used the true attenuation.
+# solution with that of the OS-MAPEM reference that used the true attenuation.
 # MLAA estimates :math:`\mu` jointly, so on noisy data it can even reach a
 # slightly *lower* :math:`\Phi` -- the meaningful question is whether the
 # images themselves are correct (see the comparison figure).
 
-print(f"penalised cost  OS-MLEM (true mu): {penalised_cost(lam_ref, mu_true):.2f}")
-print(f"penalised cost  MLAA             : {penalised_cost(lam, mu):.2f}")
+print(f"penalised cost  OS-MAPEM (true mu): {penalised_cost(lam_ref, mu_true):.2f}")
+print(f"penalised cost  MLAA              : {penalised_cost(lam, mu):.2f}")
 
 # %%
 # Comparison: ground truth vs. 0th-order / baseline vs. MLAA
@@ -505,9 +505,9 @@ h_mu = _show(ax[0, 3], mu_true, vmax_mu, r"true $\mu$ (reference)")
 fig.colorbar(h_mu, ax=ax[0, :], fraction=0.04, location="right")
 
 _show(ax[1, 0], act_true, vmax_lam, r"true activity")
-_show(ax[1, 1], lam_ac, vmax_lam, r"OS-MLEM (0th-order $\mu$)")
+_show(ax[1, 1], lam_ac, vmax_lam, r"OS-MAPEM (0th-order $\mu$)")
 _show(ax[1, 2], lam, vmax_lam, r"MLAA activity")
-h_lam = _show(ax[1, 3], lam_ref, vmax_lam, r"OS-MLEM (true $\mu$)")
+h_lam = _show(ax[1, 3], lam_ref, vmax_lam, r"OS-MAPEM (true $\mu$)")
 fig.colorbar(h_lam, ax=ax[1, :], fraction=0.04, location="right")
 fig.show()
 
