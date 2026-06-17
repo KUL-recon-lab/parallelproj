@@ -14,16 +14,14 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
   * available on `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
 
 .. hint::
-  *If you are using parallelproj, we highly recommend to read and cite our publication* :cite:`Schramm2023`
+  *If you are using parallelproj, we highly recommend to read and cite our publication:*
   
   * G. Schramm, K. Thielemans: "**PARALLELPROJ - An open-source framework for fast calculation of projections in tomography**", Front. Nucl. Med., Volume 3 - 2023, doi: 10.3389/fnume.2023.1324562, `link to paper <https://www.frontiersin.org/articles/10.3389/fnume.2023.1324562/abstract>`_, `link to arxiv version <https://arxiv.org/abs/2212.12519>`_
-
-Content
--------
 
 .. toctree::
     :maxdepth: 1
     :titlesonly:
+    :hidden:
     :caption: Getting started
 
     Installation <installation>
@@ -31,12 +29,14 @@ Content
 
 .. toctree::
     :maxdepth: 1
+    :hidden:
     :caption: Examples
 
     Examples <auto_examples/index>
 
 .. toctree::
     :maxdepth: 1
+    :hidden:
     :caption: API
 
     Linear operators <api_operators>
@@ -48,9 +48,3 @@ Content
     PET TOF parameters <api_tof>
     PET LM Unlisting <api_pet_unlist>
     Data <api_data>
-
-References
-----------
-
-.. rubric:: References
-.. bibliography::

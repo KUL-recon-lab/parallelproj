@@ -250,7 +250,7 @@ def cost_function(img):
 #   |     **Update** :math:`w \gets w^+`
 #   | **Return** :math:`x`
 #
-# See :cite:p:`Ehrhardt2019` :cite:p:`Schramm2022` for more details.
+# See :footcite:p:`Ehrhardt2019` :footcite:p:`Schramm2022` for more details.
 #
 # .. admonition:: Proximal operator of the convex dual of the negative Poisson log-likelihood
 #
@@ -601,3 +601,8 @@ if track_cost:
     ax2[1].set_title("cost (zoom)", fontsize="medium")
     ax2[2].set_title("PSNR LM-SPDHG vs ref", fontsize="medium")
     fig2.show()
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::

@@ -124,7 +124,7 @@ def cost_function(x):
 #
 # to calculate the minimizer of :math:`f(x)` iteratively.
 #
-# See :cite:p:`DePierro1995` for more details.
+# See :footcite:p:`DePierro1995` for more details.
 
 cost = xp.zeros(num_iter, dtype=xp.float64, device=dev)
 
@@ -166,3 +166,8 @@ ax.set_xlabel("iteration")
 ax.set_ylabel("cost function")
 ax.grid(ls=":")
 fig.show()
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::
