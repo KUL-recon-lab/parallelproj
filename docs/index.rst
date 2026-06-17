@@ -27,8 +27,13 @@ Content
     :caption: Getting started
 
     Installation <installation>
-    Examples <auto_examples/index>
     Changelog <changelog>
+
+.. toctree::
+    :maxdepth: 1
+    :caption: Examples
+
+    Examples <auto_examples/index>
 
 .. toctree::
     :maxdepth: 1
