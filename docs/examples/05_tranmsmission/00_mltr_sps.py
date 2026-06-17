@@ -33,7 +33,7 @@ They share the gradient :math:`\\nabla_\\mu L` and differ **only** in the
 diagonal preconditioner :math:`D`, the inverse of a separable majorant of
 the curvature (the weight choice :math:`\\alpha_j = 1` for MLTR):
 
-* **MLTR** (Nuyts et al. [#f1]_) uses the Newton-type curvature
+* **MLTR** (Nuyts et al. :footcite:p:`Nuyts1998`) uses the Newton-type curvature
   :math:`\\bar\\psi^2/\\bar y`:
 
   .. math::
@@ -43,7 +43,7 @@ the curvature (the weight choice :math:`\\alpha_j = 1` for MLTR):
   Derived from a quadratic *approximation* of :math:`L`, so a monotone
   increase of :math:`L` is **not guaranteed**.
 
-* **SPS** with optimal curvature (Erdogan and Fessler [#f2]_) replaces
+* **SPS** with optimal curvature (Erdogan and Fessler :footcite:p:`Erdogan1999`) replaces
   :math:`\\bar\\psi^2/\\bar y` by the optimal curvature :math:`c_i`, the
   smallest curvature whose parabola *majorises* the per-ray negative
   log-likelihood on :math:`l \\geq 0`:
@@ -80,7 +80,8 @@ comparable to one MLTR / SPS iteration.
     only where :math:`y_i s_i \\leq \\bar{y}_i^2`.  Close to the solution
     this holds (:math:`\\bar{y}_i \\to y_i` and :math:`s_i < y_i` for
     reasonable scatter fractions), and experience shows convergence is not
-    a problem -- see the discussions in [#f1]_ and [#f2]_.
+    a problem -- see the discussions in :footcite:p:`Nuyts1998` and
+    :footcite:p:`Erdogan1999`.
 
 .. note::
     MLTR is derived from a quadratic *approximation* and carries no formal
@@ -95,16 +96,6 @@ comparable to one MLTR / SPS iteration.
     fixed diagonal.  MLTR / SPS nevertheless remain attractive for their
     simplicity, guaranteed positivity without a constrained solver, trivial
     parallelism, and natural extension to ordered subsets. 
-
-.. rubric:: References
-
-.. [#f1] J. Nuyts, B. De Man, P. Dupont, M. Defrise, P. Suetens, L. Mortelmans,
-   "Iterative reconstruction for helical CT: a simulation study",
-   Phys. Med. Biol. 43 (1998) 729-737.
-
-.. [#f2] H. Erdogan, J. A. Fessler,
-   "Monotonic algorithms for transmission tomography",
-   IEEE Trans. Med. Imaging 18 (1999) 801-814.
 
 .. note::
 
@@ -406,3 +397,8 @@ fig2 = show_vol_cuts(
 )
 
 plt.show()
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::

@@ -46,7 +46,7 @@ unchanged).
 **Why TOF is essential.**  Non-TOF MLAA is ill-posed: activity and
 attenuation trade off against each other (crosstalk), and the joint problem
 is non-unique.  TOF data determine :math:`\\lambda` and :math:`\\mu` up to a
-single global scalar [Rezaei2012]_, which we fix by anchoring a region of
+single global scalar :footcite:p:`Rezaei2012`, which we fix by anchoring a region of
 known (water) attenuation after each attenuation update.
 
 **Two further practical ingredients used here:**
@@ -79,9 +79,6 @@ crosstalk = each image shows only its own structure).
     reusing the known :math:`s` in the non-attenuation-corrected warm-start
     while omitting attenuation -- is a deliberate idealisation that keeps the
     example focused on the joint activity/attenuation update itself.
-
-.. [Rezaei2012] A. Rezaei et al., "Simultaneous reconstruction of activity
-   and attenuation in time-of-flight PET", IEEE TMI 31(12), 2012.
 
 .. note::
 
@@ -546,3 +543,8 @@ fig_lam = show_vol_cuts(
 )
 
 plt.show()
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::
