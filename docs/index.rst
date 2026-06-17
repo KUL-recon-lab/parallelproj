@@ -54,6 +54,7 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
     :caption: Getting started
 
     Installation <installation>
+    Quickstart <quickstart>
     Changelog <changelog>
 
 .. toctree::
