@@ -108,8 +108,8 @@ xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
 num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
-num_outer = 20  # MLAA outer iterations
-num_mltr_epochs = 3  # OS-MLTR epochs per outer iteration (MLTR is slower than MLEM)
+num_outer = 10  # MLAA outer iterations
+num_mltr_epochs = 5  # OS-MLTR updates per OS-MLEM updates (MLTR is slower than MLEM)
 scatter_fraction = 0.3  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
 support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
@@ -119,7 +119,7 @@ mu_water = 0.0096  # 1/mm at 511 keV
 # edge-preserving log-cosh prior weights (harmonic-mean preconditioner as in
 # 02_maptr)
 beta_lam = 0.01  # activity prior weight
-beta_mu = 5.0  # attenuation prior weight
+beta_mu = 10.0  # attenuation prior weight
 delta_mu = mu_water / 2  # mu edges (inserts) >> delta are preserved
 # delta_lam (the activity log-cosh scale) is derived from the warm-start below
 
