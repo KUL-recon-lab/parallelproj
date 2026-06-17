@@ -113,6 +113,7 @@ num_mltr_epochs = 5  # OS-MLTR updates per OS-MLEM updates (MLTR is slower than 
 scatter_fraction = 0.3  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
 support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
+psf_fwhm = 4.5  # mm, emission image-based resolution model (Gaussian PSF)
 
 mu_water = 0.0096  # 1/mm at 511 keV
 
@@ -168,6 +169,15 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(
 
 fov_mask = proj_nt.fov_mask()
 
+# Image-based Gaussian resolution model (PSF) for the *emission* path only.
+# Composing it with the TOF projector into a single operator means the
+# adjoint (used in every activity update) is assembled automatically in the
+# right order -- no chance of forgetting R^T.  The attenuation path keeps the
+# bare geometric non-TOF projector (no PSF; see the module docstring).
+psf_sigma = tuple(psf_fwhm / 2.355 / vs for vs in voxel_size)  # voxels
+res_model = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
+A = parallelproj.operators.CompositeLinearOperator([proj, res_model])
+
 # %%
 # Ground-truth activity and attenuation -- DIFFERENT insert patterns
 # -------------------------------------------------------------------
@@ -200,7 +210,7 @@ mu_true = xp.asarray(mu_np.astype(np.float32), device=dev)
 # ---------------------------
 
 att_true = xp.exp(-proj_nt(mu_true))  # (R, V, P) attenuation factors
-emis_true = att_true[..., None] * proj(act_true)  # broadcast over TOF bins
+emis_true = att_true[..., None] * A(act_true)  # PSF-blurred, broadcast over TOF
 s = xp.full(
     proj.out_shape,
     scatter_fraction * float(xp.mean(emis_true)),
@@ -223,12 +233,12 @@ subset_views, subset_slices = lor_desc.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)  # 4D (TOF) slices
 )
 
-proj_k = []  # TOF subset projectors (activity)
 proj_nt_k = []  # non-TOF subset projectors (attenuation)
+A_k = []  # subset emission operators: TOF projector composed with the PSF
 for k in range(num_subsets):
     p = copy(proj)
     p.views = subset_views[k]
-    proj_k.append(p)
+    A_k.append(parallelproj.operators.CompositeLinearOperator([p, res_model]))
     q = copy(proj_nt)
     q.views = subset_views[k]
     proj_nt_k.append(q)
@@ -245,7 +255,7 @@ kappa = 2.0 * len(img_shape)  # diag(G^T G) for forward differences
 
 def emission_neg_logL(lam: Array, mu: Array) -> float:
     """Negative TOF emission Poisson log-likelihood (float64 accumulation)."""
-    ybar = xp.exp(-proj_nt(mu))[..., None] * proj(lam) + s
+    ybar = xp.exp(-proj_nt(mu))[..., None] * A(lam) + s
     return float(xp.sum(xp.astype(ybar - y * xp.log(ybar), xp.float64)))
 
 
@@ -267,11 +277,11 @@ def _safe(num: Array, denom: Array, mask: Array) -> Array:
 
 lam = xp.where(fov_mask, ones_img, xp.zeros_like(ones_img))
 for k in range(num_subsets):
-    # ybar = proj_k[k](lam) + s_k[k]
-    ybar = proj_k[k](lam) + 1e-2
-    sens = proj_k[k].adjoint(xp.ones_like(ybar))
-    # update = proj_k[k].adjoint(y_k[k] / ybar)
-    update = proj_k[k].adjoint((y_k[k] + 1e-2) / ybar)
+    # ybar = A_k[k](lam) + s_k[k]
+    ybar = A_k[k](lam) + 1e-2
+    sens = A_k[k].adjoint(xp.ones_like(ybar))
+    # update = A_k[k].adjoint(y_k[k] / ybar)
+    update = A_k[k].adjoint((y_k[k] + 1e-2) / ybar)
     lam = _safe(lam * update, sens, fov_mask)
 print(f"NAC OSEM done (lam max = {float(xp.max(lam)):.1f})")
 
@@ -317,9 +327,9 @@ water_roi = xp.asarray(water_roi_np, device=dev) & support
 a0_k = [xp.exp(-proj_nt_k[k](mu0))[..., None] for k in range(num_subsets)]
 lam_warm = lam  # NAC activity
 for k in range(num_subsets):
-    ybar = a0_k[k] * proj_k[k](lam_warm) + s_k[k]
-    sens = proj_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
-    update = proj_k[k].adjoint(a0_k[k] * y_k[k] / ybar)
+    ybar = a0_k[k] * A_k[k](lam_warm) + s_k[k]
+    sens = A_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
+    update = A_k[k].adjoint(a0_k[k] * y_k[k] / ybar)
     lam_warm = _safe(lam_warm * update, sens, fov_mask)
 
 delta_lam = 0.3 * float(xp.mean(lam_warm[lam_warm > 0]))
@@ -341,9 +351,9 @@ lam_ac = lam_warm  # start from the warm (attenuation-corrected) activity
 for it in range(num_outer):
     print(f"OSEM (mu0) epoch {it + 1:03}/{num_outer:03}", end="\r")
     for k in range(num_subsets):
-        ybar = a0_k[k] * proj_k[k](lam_ac) + s_k[k]
-        grad = proj_k[k].adjoint(a0_k[k] * (y_k[k] / ybar - 1.0))
-        sens = proj_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
+        ybar = a0_k[k] * A_k[k](lam_ac) + s_k[k]
+        grad = A_k[k].adjoint(a0_k[k] * (y_k[k] / ybar - 1.0))
+        sens = A_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
         g_pen = grad - reg_lam.gradient(lam_ac) / num_subsets
         D = _safe(lam_ac, sens + lam_ac * prior_curv_lam / num_subsets, fov_mask)
         lam_ac = xp.clip(lam_ac + D * g_pen, 0, None)
@@ -377,9 +387,9 @@ for it in range(num_outer):
     for ka in range(num_subsets):
         # --- 1 activity (OS-MLEM) subset update (attenuation fixed) ---
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
-        ybar = a_k * proj_k[ka](lam) + s_k[ka]
-        grad = proj_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = proj_k[ka].adjoint(a_k * xp.ones_like(ybar))  # A^T 1 (attenuated)
+        ybar = a_k * A_k[ka](lam) + s_k[ka]
+        grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
+        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # A^T 1 (attenuated)
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
@@ -390,7 +400,7 @@ for it in range(num_outer):
             kt = att_k % num_subsets
             att_k += 1
             a_t = xp.exp(-proj_nt_k[kt](mu))[..., None]
-            psi = a_t * proj_k[kt](lam)  # blank = current activity projection
+            psi = a_t * A_k[kt](lam)  # blank = current activity projection
             ybar = psi + s_k[kt]
             # per-TOF-bin MLTR weights, summed over the TOF axis
             w_num = xp.sum(psi / ybar * (ybar - y_k[kt]), axis=-1)
