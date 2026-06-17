@@ -339,6 +339,11 @@ reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
 prior_curv_lam = beta_lam * kappa / delta_lam
 prior_curv_mu = beta_mu * kappa / delta_mu
 
+
+def penalised_cost(lam: Array, mu: Array) -> float:
+    """Penalised joint objective Phi = -L + beta_lam R(lam) + beta_mu R(mu)."""
+    return emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
+
 # %%
 # Baseline: OS-MLEM activity with the fixed 0th-order attenuation image
 # ---------------------------------------------------------------------
@@ -361,13 +366,31 @@ for it in range(num_outer):
 print()
 
 # %%
+# Reference: OS-MLEM activity with the TRUE attenuation image
+# -----------------------------------------------------------
+#
+# The activity we would reconstruct if the attenuation were known exactly --
+# the gold standard against which MLAA is judged.
+
+aT_k = [xp.exp(-proj_nt_k[k](mu_true))[..., None] for k in range(num_subsets)]
+lam_ref = lam_warm  # start from the warm (attenuation-corrected) activity
+for it in range(num_outer):
+    print(f"OSEM (true mu) epoch {it + 1:03}/{num_outer:03}", end="\r")
+    for k in range(num_subsets):
+        ybar = aT_k[k] * A_k[k](lam_ref) + s_k[k]
+        grad = A_k[k].adjoint(aT_k[k] * (y_k[k] / ybar - 1.0))
+        sens = A_k[k].adjoint(aT_k[k] * xp.ones_like(ybar))
+        g_pen = grad - reg_lam.gradient(lam_ref) / num_subsets
+        D = _safe(lam_ref, sens + lam_ref * prior_curv_lam / num_subsets, fov_mask)
+        lam_ref = xp.clip(lam_ref + D * g_pen, 0, None)
+print()
+
+# %%
 # MLAA: interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation)
 # ------------------------------------------------------------------------
 
 lam = lam_warm  # activity initialised at the warm-start
 mu = mu0  # attenuation initialised at the 0th-order water blob
-cost = np.zeros(num_outer + 1)
-cost[0] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
 
 # keep every intermediate estimate to visualise the convergence
 lam_hist = [lam]
@@ -416,34 +439,33 @@ for it in range(num_outer):
         # fix the global scale ambiguity: anchor the known-water region
         mu = mu * (mu_water / float(xp.mean(mu[water_roi])))
 
-    cost[it + 1] = emission_neg_logL(lam, mu) + float(reg_lam(lam)) + float(reg_mu(mu))
     lam_hist.append(lam)
     mu_hist.append(mu)
 print()
-print(f"final penalised cost = {cost[-1]:.2f}")
 
 # %%
-# Convergence of the joint objective
-# ----------------------------------
+# Final penalised objective: MLAA vs. the true-attenuation reference
+# ------------------------------------------------------------------
+#
+# Compare the *full* penalised cost
+# :math:`\Phi = -L + \beta_\lambda R(\lambda) + \beta_\mu R(\mu)` of the MLAA
+# solution with that of the OS-MLEM reference that used the true attenuation.
+# MLAA estimates :math:`\mu` jointly, so on noisy data it can even reach a
+# slightly *lower* :math:`\Phi` -- the meaningful question is whether the
+# images themselves are correct (see the comparison figure).
 
-fig0, ax0 = plt.subplots(figsize=(5, 4), tight_layout=True)
-ax0.plot(cost)
-ax0.set_xlabel("outer iteration")
-ax0.set_ylabel(r"$-L + \beta_\lambda R(\lambda) + \beta_\mu R(\mu)$")
-ax0.set_title("MLAA joint objective")
-ax0.grid(ls=":")
-fig0.show()
+print(f"penalised cost  OS-MLEM (true mu): {penalised_cost(lam_ref, mu_true):.2f}")
+print(f"penalised cost  MLAA            : {penalised_cost(lam, mu):.2f}")
 
 # %%
 # Comparison: ground truth vs. 0th-order / baseline vs. MLAA
 # ----------------------------------------------------------
 #
-# Top row -- attenuation: truth, the 0th-order water blob, and the MLAA
-# estimate (which recovers the dense / air inserts).  Bottom row --
-# activity: truth, OS-MLEM with the fixed 0th-order attenuation (artefacts
-# where the true attenuation differs from water), and the MLAA activity.
-# Because the activity and attenuation phantoms have different inserts,
-# little crosstalk means each MLAA image shows only its own structure.
+# Each column pairs the attenuation used/estimated (top) with the resulting
+# activity (bottom): ground truth; the 0th-order water blob; the MLAA joint
+# estimate; and the true-attenuation reference (gold standard).  Because the
+# activity and attenuation phantoms have different inserts, little crosstalk
+# means each MLAA image shows only its own structure.
 
 sl = img_shape[2] // 2
 vmax_mu = 2.5 * mu_water
@@ -464,15 +486,17 @@ def _show(ax, vol, vmax, title):
     return h
 
 
-fig, ax = plt.subplots(2, 3, figsize=(11, 7.5), layout="constrained")
+fig, ax = plt.subplots(2, 4, figsize=(14, 7.5), layout="constrained")
 _show(ax[0, 0], mu_true, vmax_mu, r"true $\mu$")
 _show(ax[0, 1], mu0, vmax_mu, r"0th-order $\mu$ (water blob)")
-h_mu = _show(ax[0, 2], mu, vmax_mu, r"MLAA $\mu$")
+_show(ax[0, 2], mu, vmax_mu, r"MLAA $\mu$")
+h_mu = _show(ax[0, 3], mu_true, vmax_mu, r"true $\mu$ (reference)")
 fig.colorbar(h_mu, ax=ax[0, :], fraction=0.04, location="right")
 
 _show(ax[1, 0], act_true, vmax_lam, r"true activity")
 _show(ax[1, 1], lam_ac, vmax_lam, r"OS-MLEM (0th-order $\mu$)")
-h_lam = _show(ax[1, 2], lam, vmax_lam, r"MLAA activity")
+_show(ax[1, 2], lam, vmax_lam, r"MLAA activity")
+h_lam = _show(ax[1, 3], lam_ref, vmax_lam, r"OS-MLEM (true $\mu$)")
 fig.colorbar(h_lam, ax=ax[1, :], fraction=0.04, location="right")
 fig.show()
 
