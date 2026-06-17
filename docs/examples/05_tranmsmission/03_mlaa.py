@@ -87,6 +87,7 @@ from copy import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 from scipy.ndimage import binary_fill_holes, gaussian_filter, label
 
 import parallelproj.operators
@@ -110,10 +111,10 @@ xp, dev = suggest_array_backend_and_device(None, None)
 num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
 num_outer = 10  # MLAA outer iterations
 num_mltr_epochs = 5  # OS-MLTR updates per OS-MLEM updates (MLTR is slower than MLEM)
-scatter_fraction = 0.3  # contamination relative to mean true emission
+scatter_fraction = 0.6  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
 support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
-psf_fwhm = 4.5  # mm, emission image-based resolution model (Gaussian PSF)
+psf_fwhm = 6.0  # mm, emission image-based resolution model (Gaussian PSF)
 
 mu_water = 0.0096  # 1/mm at 511 keV
 
