@@ -10,8 +10,13 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
   **Features of parallelproj**
 
   * dedicated **sinogram** and **listmode** versions of the projectors
-  * **Python array API compatible Python interface** (e.g. directly compatible with numpy, cupy, **pytorch**) 
+  * **Python array API compatible Python interface** (e.g. directly compatible with numpy, cupy, **pytorch**)
   * available on `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
+
+**Source code** is on `GitHub <https://github.com/KUL-recon-lab/parallelproj>`_
+(`report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_).
+``parallelproj`` is released under the
+`Apache-2.0 license <https://github.com/KUL-recon-lab/parallelproj/blob/main/LICENSE>`_.
 
 .. hint::
   *If you are using parallelproj, we highly recommend to read and cite our publication:*

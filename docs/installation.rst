@@ -12,6 +12,18 @@ Both ``libparallelproj`` and ``parallelproj-core`` are available on **conda-forg
 .. note::
     We strongly recommend installing ``parallelproj`` from **conda-forge**, which automatically pulls in the correct pre-compiled ``libparallelproj`` variant (CPU or CUDA) for your system.
 
+**Requirements**
+
+- **Python ≥ 3.12**.
+- A platform for which ``libparallelproj`` is built on conda-forge (Linux, macOS and Windows; CUDA builds are available on the platforms supported by the feedstock). conda-forge selects the right build automatically; you do not need to compile anything yourself.
+
+.. important::
+    ``parallelproj`` cannot be installed with ``pip`` alone.  Its compiled
+    backend (``libparallelproj`` / ``parallelproj-core``) is distributed **only
+    through conda-forge**, not on PyPI.  Installing the pure-Python part with
+    ``pip`` will import but fail at the first projection because the backend is
+    missing.  Always install from conda-forge as shown below.
+
 .. tip::
 
    You can get **miniforge** (a minimal conda installer configured for conda-forge) `here <https://github.com/conda-forge/miniforge>`_.
@@ -149,9 +161,36 @@ To explicitly install the CPU-only variant of ``libparallelproj`` (e.g. on a mac
 Verifying the installation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To check whether the installed ``parallelproj-core`` (backend) package was compiled with CUDA support, run the following in Python:
+First check that the backend imports and report whether it was compiled with CUDA support:
 
 .. code-block:: python
 
    import parallelproj_core
    print(parallelproj_core.cuda_enabled)  # 1 = CUDA enabled, 0 = CPU only
+
+Then confirm that the full stack works end to end by building a small projector
+and running a forward and back projection:
+
+.. code-block:: python
+
+   import array_api_compat.numpy as xp
+   from parallelproj.pet_scanners import DemoPETScannerGeometry
+   from parallelproj.pet_lors import Michelogram, RegularPolygonPETLORDescriptor
+   from parallelproj.projectors import RegularPolygonPETProjector
+
+   scanner = DemoPETScannerGeometry(xp, "cpu", num_rings=2)
+   lor_desc = RegularPolygonPETLORDescriptor(
+       scanner, Michelogram(scanner.num_rings, max_ring_difference=1, span=1)
+   )
+   proj = RegularPolygonPETProjector(
+       lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
+   )
+
+   img = xp.ones(proj.in_shape, dtype=xp.float32)
+   sino = proj(img)             # forward projection
+   back = proj.adjoint(sino)    # back projection
+   print("OK:", sino.shape, back.shape)
+
+If this prints two shapes without error, the compiled backend, the Python
+interface and the array backend are all working.  See the :doc:`quickstart` for
+the next steps.

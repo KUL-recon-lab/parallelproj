@@ -204,7 +204,7 @@ pytorch = "*"       # docs/examples/05_torch/01_run_projection_layer.py uses tor
 # See note on ``depends-on = ["setup-hooks"]`` under the test feature.
 docs = { cmd = "sphinx-build -b html docs docs/_build/html", depends-on = ["setup-hooks"] }
 # fast local build: render the gallery but execute NO examples
-docs-fast = { cmd = "sphinx-build -b html docs docs/_build/html", env = { BUILD_NO_EXAMPLES = "1" }, depends-on = ["setup-hooks"], description = "Build the docs without executing any example (fast prose/structure check)." }
+docs-fast = { cmd = "sphinx-build -W --keep-going -b html docs docs/_build/html", env = { BUILD_NO_EXAMPLES = "1" }, depends-on = ["setup-hooks"], description = "Build the docs without executing any example (fast prose/structure check). Uses -W --keep-going to mirror Read the Docs strictness." }
 docs-clean = "rm -rf docs/_build docs/auto_examples"
 
 # ---- docs-gpu feature ----
