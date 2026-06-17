@@ -13,10 +13,15 @@ Make sure ``parallelproj`` is installed first (see :doc:`installation`).
 A minimal PET sinogram projection
 ----------------------------------
 
-Every PET sinogram projector is built from the same short chain:
+The example below uses the **regular-polygon route**, which is the right choice
+for scanners with cylindrical symmetry and a single layer of LOR endpoints:
 
 ``scanner geometry`` → ``Michelogram`` (axial plane layout) →
-``LOR / sinogram descriptor`` → ``projector``.
+``RegularPolygonPETLORDescriptor`` → ``RegularPolygonPETProjector``.
+
+(General block / panel scanners use the **equal-block route** instead --
+:class:`.ModularizedPETScannerGeometry` → :class:`.EqualBlockPETLORDescriptor` →
+:class:`.EqualBlockPETProjector`; see the :doc:`API reference <api_projectors>`.)
 
 .. code-block:: python
 
