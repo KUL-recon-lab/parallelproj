@@ -561,7 +561,9 @@ class GaussianFilterOperator(LinearOperator):
             ), "cupy must be installed to use GaussianFilterOperator with PyTorch CUDA tensors"
             from cupyx.scipy import ndimage as cupy_ndimage
 
-            y_cp = cupy_ndimage.gaussian_filter(cp.from_dlpack(x.detach()), **self._kwargs)
+            y_cp = cupy_ndimage.gaussian_filter(
+                cp.from_dlpack(x.detach()), **self._kwargs
+            )
             return xp.asarray(xp.from_dlpack(y_cp))
 
         # CPU arrays (NumPy, PyTorch CPU, array-api-strict) via scipy.ndimage.

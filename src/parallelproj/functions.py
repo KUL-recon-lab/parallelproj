@@ -643,8 +643,7 @@ class NegPoissonLogL(C2FunctionWithConjProx):
                 )
         elif bool(xp.min(x) < 0):
             warnings.warn(
-                "x contains negative values: expected counts must be "
-                "non-negative",
+                "x contains negative values: expected counts must be " "non-negative",
                 RuntimeWarning,
                 stacklevel=3,
             )

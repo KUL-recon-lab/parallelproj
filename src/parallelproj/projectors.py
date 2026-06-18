@@ -23,7 +23,11 @@ import parallelproj_core
 
 from ._backend import Array, to_numpy_array, empty_cuda_cache
 from .operators import LinearOperator
-from .pet_lors import Michelogram, RegularPolygonPETLORDescriptor, EqualBlockPETLORDescriptor
+from .pet_lors import (
+    Michelogram,
+    RegularPolygonPETLORDescriptor,
+    EqualBlockPETLORDescriptor,
+)
 from .tof import TOFParameters
 
 

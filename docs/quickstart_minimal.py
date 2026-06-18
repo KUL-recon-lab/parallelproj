@@ -18,7 +18,7 @@ scanner = DemoPETScannerGeometry(xp, dev, num_rings=4)
 lor_desc = RegularPolygonPETLORDescriptor(
     scanner,
     Michelogram(scanner.num_rings, max_ring_difference=3, span=1),
-    radial_trim=50
+    radial_trim=50,
 )
 
 # non-TOF projector
@@ -30,7 +30,7 @@ proj = RegularPolygonPETProjector(
 img = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
 img[50:90, 10:40, :] = 1.0
 
-img_fwd = proj(img)           # forward projection:  image  -> sinogram
+img_fwd = proj(img)  # forward projection:  image  -> sinogram
 back = proj.adjoint(img_fwd)  # back projection (adjoint);  proj.H(sino) works too
 
 print("image shape:    ", img.shape)

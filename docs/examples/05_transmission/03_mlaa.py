@@ -379,7 +379,7 @@ print()
 
 # %%
 # Reference: OS-MAPEM activity with the TRUE attenuation image
-# ------------------------------------------------------------ 
+# ------------------------------------------------------------
 #
 # The activity we would reconstruct if the attenuation were known exactly --
 # the gold standard against which MLAA is judged.
