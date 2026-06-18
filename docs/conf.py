@@ -39,14 +39,28 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "examples/README.rst"]
 bibtex_bibfiles = ["refs.bib"]
 
+# Which examples are *executed*?  Non-executed examples are still rendered
+# (their source is shown) but not run.  Two env vars control this:
+#   * default (incl. Read the Docs): only ``<NN>_run_*.py`` run, which keeps
+#     the RTD build under its 15 min limit;
+#   * ``BUILD_ALL_EXAMPLES=1``: execute *every* example (e.g. on a GPU box);
+#   * ``BUILD_NO_EXAMPLES=1``: execute *none* (fast local prose/structure
+#     build); this takes precedence over ``BUILD_ALL_EXAMPLES``.
+_build_all_examples = os.environ.get("BUILD_ALL_EXAMPLES", "0") == "1"
+_build_no_examples = os.environ.get("BUILD_NO_EXAMPLES", "0") == "1"
+_example_filename_pattern = (
+    r".*\.py$" if _build_all_examples else r"[\\/]\d{2,3}_run_.*\.py$"
+)
+
 sphinx_gallery_conf = {
     "examples_dirs": ["examples"],
     "gallery_dirs": ["auto_examples"],
     "backreferences_dir": "auto_examples/backreferences",
     "doc_module": ("parallelproj",),
-    "filename_pattern": r"[\\/]\d{2,3}_run_.*\.py$",
+    "filename_pattern": _example_filename_pattern,
     "ignore_pattern": r"(^|[\\/])(utils|example_utils)\.py$",
-    "plot_gallery": True,
+    # plot_gallery=False disables execution of ALL examples
+    "plot_gallery": not _build_no_examples,
     "within_subsection_order": FileNameSortKey,
     "parallel": os.cpu_count(),
     # Inject a setup note at the top of every generated Jupyter notebook so

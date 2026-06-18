@@ -243,8 +243,8 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # EM update
 # ---------
 #
-# The EM update used in MLEM and OSEM is :cite:p:`Dempster1977`
-# :cite:p:`Shepp1982` :cite:p:`Lange1984` :cite:p:`Hudson1994`
+# The EM update used in MLEM and OSEM is :footcite:p:`Dempster1977`
+# :footcite:p:`Shepp1982` :footcite:p:`Lange1984` :footcite:p:`Hudson1994`
 #
 # .. math::
 #     x^+ = \frac{x}{A^H 1} A^H \frac{y}{A x + s}
@@ -653,3 +653,8 @@ fig2, axs2, widgets2 = show_vol_cuts(
     vmax=vmax,
 )
 fig2.show()
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::

@@ -447,7 +447,12 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         if lor_endpoint_positions is not None:
             # lor_endpoint_positions is already an Array on the correct device
             max_abs = max(float(xp.max(xp.abs(lor_endpoint_positions))), 1.0)
-            if not bool(xp.all(xp.abs(lor_endpoint_positions + xp.flip(lor_endpoint_positions)) < 1e-4 * max_abs)):
+            if not bool(
+                xp.all(
+                    xp.abs(lor_endpoint_positions + xp.flip(lor_endpoint_positions))
+                    < 1e-4 * max_abs
+                )
+            ):
                 warnings.warn(
                     "lor_endpoint_positions is not anti-symmetric about 0 "
                     "(pos[i] != -pos[N-1-i]). Radial sinogram symmetry "

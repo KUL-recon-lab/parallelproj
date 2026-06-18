@@ -11,7 +11,6 @@ from __future__ import annotations
 import numpy as np
 import array_api_compat
 
-
 # -- Axial (plane) symmetry helpers -------------------------------------------
 
 

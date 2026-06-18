@@ -22,7 +22,21 @@ array libraries (e.g. numpy, cupy, **pytorch**) and devices (CPU and CUDA GPUs).
 
 ## Installation, Documentation & Examples
 
-**Please refer to the official documentation [here](https://parallelproj.readthedocs.io/en/stable/).**
+`parallelproj` is distributed through **conda-forge**, which automatically pulls in
+the correct pre-compiled backend (CPU or CUDA) for your system:
+
+```bash
+mamba create -n parallelproj -c conda-forge parallelproj
+```
+
+> **Note:** `parallelproj` cannot be installed with `pip` alone — its compiled backend
+> (`libparallelproj` / `parallelproj-core`) is only on conda-forge, not on PyPI.
+
+For a minimal forward / back projection to get started, see this
+[quickstart example](./docs/quickstart_minimal.py).
+
+**For full installation instructions, the API reference and the example gallery, see the
+official documentation [here](https://parallelproj.readthedocs.io/en/stable/).**
 
 </br>
 
@@ -132,9 +146,9 @@ This makes `import parallelproj` pick up your local clone instead of any install
 
 **4. Run the examples**
 
-The examples in `docs/examples/` share small helper modules (`array_utils.py`,
-`img.py`, `vis.py`) that live in `docs/examples/` itself and are not part of
-the installed package.  Add that directory to `PYTHONPATH` as well:
+The examples in `docs/examples/` share a small helper module (`example_utils.py`)
+that lives in `docs/examples/` itself and is not part of the installed package.
+Add that directory to `PYTHONPATH` as well:
 
 ```bash
 export PYTHONPATH=/path/to/parallelproj/docs/examples:$PYTHONPATH

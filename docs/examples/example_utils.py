@@ -15,15 +15,22 @@ Contents
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# array_utils
-# ---------------------------------------------------------------------------
+import array_api_compat
 
 from importlib import import_module, util as iutil
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, TextBox  # noqa: E402
+
 from types import ModuleType
 from typing import Any
 
 import parallelproj_core as ppc
+from parallelproj import Array
+
+# ---------------------------------------------------------------------------
+# array_utils
+# ---------------------------------------------------------------------------
 
 
 def suggest_array_backend_and_device(
@@ -130,8 +137,6 @@ def suggest_array_backend_and_device(
 # img
 # ---------------------------------------------------------------------------
 
-from parallelproj import Array  # noqa: E402
-
 
 def elliptic_cylinder_phantom(
     xp: ModuleType,
@@ -222,10 +227,6 @@ def elliptic_cylinder_phantom(
 # vis
 # ---------------------------------------------------------------------------
 
-import numpy as np  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.widgets import Slider, TextBox  # noqa: E402
-
 
 def show_vol_cuts(
     vol: np.ndarray,
@@ -307,13 +308,17 @@ def show_vol_cuts(
         fig.suptitle(fig_title)
 
     if is_4d:
-        gs = fig.add_gridspec(5, 3, height_ratios=[8, 1, 1, 1, 0.5], hspace=0.6, wspace=0.35)
+        gs = fig.add_gridspec(
+            5, 3, height_ratios=[8, 1, 1, 1, 0.5], hspace=0.6, wspace=0.35
+        )
         ax_s0 = fig.add_subplot(gs[1, :])
         ax_sl = [fig.add_subplot(gs[2, c]) for c in range(3)]
         ax_tb = [fig.add_subplot(gs[3, c]) for c in range(3)]
         ax_cb = fig.add_subplot(gs[4, :])
     else:
-        gs = fig.add_gridspec(4, 3, height_ratios=[8, 1, 1, 0.5], hspace=0.6, wspace=0.35)
+        gs = fig.add_gridspec(
+            4, 3, height_ratios=[8, 1, 1, 0.5], hspace=0.6, wspace=0.35
+        )
         ax_s0 = None
         ax_sl = [fig.add_subplot(gs[1, c]) for c in range(3)]
         ax_tb = [fig.add_subplot(gs[2, c]) for c in range(3)]
@@ -402,8 +407,12 @@ def show_vol_cuts(
     tb_cmap.on_submit(update_cmap)
 
     widgets = {
-        f"s_{lx}": sx, f"s_{ly}": sy, f"s_{lz}": sz,
-        "tb_vmin": tb_vmin, "tb_vmax": tb_vmax, "tb_cmap": tb_cmap,
+        f"s_{lx}": sx,
+        f"s_{ly}": sy,
+        f"s_{lz}": sz,
+        "tb_vmin": tb_vmin,
+        "tb_vmax": tb_vmax,
+        "tb_cmap": tb_cmap,
     }
     if s0 is not None:
         widgets[f"s_{l0}"] = s0
@@ -413,3 +422,72 @@ def show_vol_cuts(
 
 #: Backward-compatible alias.
 show_3d_cuts = show_vol_cuts
+
+
+# ---------------------------------------------------------------------------
+# transmission (exact Poisson model) helper
+# ---------------------------------------------------------------------------
+
+
+def poisson_transmission_terms(
+    att_line_integral, blank, contamination, data, *, tof_sum=False
+):
+    r"""Per-bin terms of the *exact Poisson* transmission log-likelihood.
+
+    For the transmission model
+
+    .. math::
+        \bar{y} = \bar\psi + s, \qquad \bar\psi = b\,e^{-\ell},
+
+    with line integral :math:`\ell`, blank :math:`b`, contamination
+    :math:`s` and measured counts :math:`y`, this returns the ingredients
+    shared by the MLTR / SPS / MLAA updates (see ``00_mltr_sps.py`` for the
+    explicit math).  It is the *exact Poisson* model -- no log-linearisation
+    into a weighted-least-squares problem.
+
+    In MLAA the "blank" is the (TOF) activity forward projection
+    :math:`P\lambda`; pass ``tof_sum=True`` so the per-TOF-bin gradient and
+    curvature are summed over the trailing TOF axis before back-projecting
+    through the non-TOF attenuation projector (``att_line_integral`` is then
+    the geometric line integral, broadcast over the TOF axis).
+
+    Parameters
+    ----------
+    att_line_integral : Array
+        Attenuation line integral :math:`\ell = P\mu` (geometric).
+    blank : Array
+        Blank scan :math:`b` (transmission) or activity forward projection
+        :math:`P\lambda` (MLAA).  May carry a trailing TOF axis.
+    contamination : Array
+        Additive contamination :math:`s` (scatter + randoms), > 0.
+    data : Array
+        Measured counts :math:`y`.
+    tof_sum : bool, optional
+        If ``True``, sum the gradient and curvature over the trailing (TOF)
+        axis.  Defaults to ``False``.
+
+    Returns
+    -------
+    expected_counts : Array
+        :math:`\bar{y} = b\,e^{-\ell} + s` (full per-bin shape).
+    gradient_sino : Array
+        :math:`\tfrac{\bar\psi}{\bar y}(\bar y - y)` -- back-project this to
+        get the ascent gradient :math:`\nabla_\mu L`.  TOF-summed if
+        ``tof_sum``.
+    curvature_sino : Array
+        MLTR / SPS separable curvature :math:`\bar\psi^2/\bar y`; the
+        preconditioner denominator is ``P^T[(P 1) * curvature_sino]``.
+        TOF-summed if ``tof_sum``.
+    """
+    xp = array_api_compat.get_namespace(att_line_integral)
+    att = xp.exp(-att_line_integral)
+    if tof_sum:
+        att = att[..., None]  # broadcast the geometric attenuation over TOF
+    psi = blank * att
+    ybar = psi + contamination
+    gradient_sino = psi / ybar * (ybar - data)
+    curvature_sino = psi**2 / ybar
+    if tof_sum:
+        gradient_sino = xp.sum(gradient_sino, axis=-1)
+        curvature_sino = xp.sum(curvature_sino, axis=-1)
+    return ybar, gradient_sino, curvature_sino

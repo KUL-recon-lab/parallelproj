@@ -135,6 +135,21 @@ New Features
   averaged-LOR z-position per plane (exact for span=1, standard approximation
   for span>1), with no loop over ring-pair multiplicities.
 - **``parallelproj.__version__``** is now exposed at the top level.
+- **New example: transmission reconstruction (MLTR / SPS / L-BFGS-B)** — exact Poisson
+  transmission model with strictly positive scatter background, presenting MLTR
+  (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one
+  preconditioned gradient ascent differing only in the diagonal preconditioner, and
+  L-BFGS-B on the same smooth objective with a non-negativity box constraint.
+- **New example: accelerating MLTR with ordered subsets and SVRG** — OS-MLTR and a
+  preconditioned SVRG variant compared against full MLTR and a converged L-BFGS-B
+  reference, showing the per-epoch speed-up of subset-based transmission reconstruction.
+- **New example: penalised transmission reconstruction (MAPTR)** — MLTR / OS-MLTR / SVRG
+  on the penalised objective with an edge-preserving log-cosh prior, using the
+  transmission "harmonic-mean" preconditioner (inverse of data plus prior curvature).
+- **New example: joint activity/attenuation reconstruction (MLAA) for TOF PET** —
+  interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
+  forward projection as the transmission blank scan), NAC warm-start, support-constrained
+  attenuation update, and a known-water region to fix the TOF scale ambiguity.
 
 1.10.2 (Aug 20, 2025)
 ----------------------

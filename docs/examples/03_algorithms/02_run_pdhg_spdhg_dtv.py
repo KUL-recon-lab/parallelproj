@@ -36,8 +36,8 @@ phantom and a structural prior image derived from the ground-truth activity.
 MLEM is run for a small number of epochs to provide a warm start for both
 algorithms.
 
-See :cite:p:`Ehrhardt2016` and :cite:p:`Ehrhardt2019` for details on the DTV prior
-and the SPDHG algorithm (Algorithm 2), and :cite:p:`Schramm2022` for the step-size
+See :footcite:p:`Ehrhardt2016` and :footcite:p:`Ehrhardt2019` for details on the DTV prior
+and the SPDHG algorithm (Algorithm 2), and :footcite:p:`Schramm2022` for the step-size
 rules used here.
 
 .. note::
@@ -99,7 +99,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 #
 # Passing ``probs=None`` performs a full PDHG update (all blocks updated every
 # call, scale factor 1).  Passing per-block probabilities activates SPDHG
-# (Algorithm 2 from :cite:p:`Ehrhardt2019`), which touches only one block per
+# (Algorithm 2 from :footcite:p:`Ehrhardt2019`), which touches only one block per
 # mini-iteration and scales :math:`\bar{z}` by :math:`1/p_i`.
 #
 # .. admonition:: Step sizes
@@ -114,7 +114,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 #
 #  :math:`T = \min(T^1, \ldots, T^n, T_D)` elementwise
 #
-# See :cite:p:`Ehrhardt2019` and :cite:p:`Schramm2022` for more details.
+# See :footcite:p:`Ehrhardt2019` and :footcite:p:`Schramm2022` for more details.
 
 
 def spdhg_update(
@@ -521,7 +521,7 @@ data_fid_full = parallelproj.functions.NegPoissonLogL(d, exact=exact_mode)
 # Setup PDHG -- step sizes and primal / dual variables
 # -----------------------------------------------------
 #
-# The step sizes follow the rules from :cite:p:`Schramm2022`.  The primal
+# The step sizes follow the rules from :footcite:p:`Schramm2022`.  The primal
 # variable is warm-started from the MLEM result; the dual variables are
 # warm-started from the current residuals.
 
@@ -780,3 +780,8 @@ if track_cost:
     ax2.set_xlabel("epoch")
     ax2.set_title("cost", fontsize="medium")
     fig2.show()
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::
