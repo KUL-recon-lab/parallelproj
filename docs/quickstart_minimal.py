@@ -33,10 +33,10 @@ img[50:90, 10:40, :] = 1.0
 img_fwd = proj(img)           # forward projection:  image  -> sinogram
 back = proj.adjoint(img_fwd)  # back projection (adjoint);  proj.H(sino) works too
 
-print("image shape:    ", proj.in_shape)
-print("sinogram shape: ", proj.out_shape)
+print("image shape:    ", img.shape)
+print("sinogram shape: ", img_fwd.shape)
 
 fig = plt.figure(figsize=(8, 8), tight_layout=True)
 ax = fig.add_subplot(111, projection="3d")
 proj.show_geometry(ax)
-fig.show()
+plt.show()

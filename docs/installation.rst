@@ -175,6 +175,6 @@ and running a forward and back projection (the same minimal example as the
 .. literalinclude:: quickstart_minimal.py
    :language: python
 
-If this prints three shapes without error, the compiled backend, the Python
+If this prints two shapes without error, the compiled backend, the Python
 interface and the array backend are all working.  See the :doc:`quickstart` for
 the next steps.
