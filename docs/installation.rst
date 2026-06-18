@@ -169,28 +169,12 @@ First check that the backend imports and report whether it was compiled with CUD
    print(parallelproj_core.cuda_enabled)  # 1 = CUDA enabled, 0 = CPU only
 
 Then confirm that the full stack works end to end by building a small projector
-and running a forward and back projection:
+and running a forward and back projection (the same minimal example as the
+:doc:`quickstart`):
 
-.. code-block:: python
+.. literalinclude:: quickstart_minimal.py
+   :language: python
 
-   import array_api_compat.numpy as xp
-   from parallelproj.pet_scanners import DemoPETScannerGeometry
-   from parallelproj.pet_lors import Michelogram, RegularPolygonPETLORDescriptor
-   from parallelproj.projectors import RegularPolygonPETProjector
-
-   scanner = DemoPETScannerGeometry(xp, "cpu", num_rings=2)
-   lor_desc = RegularPolygonPETLORDescriptor(
-       scanner, Michelogram(scanner.num_rings, max_ring_difference=1, span=1)
-   )
-   proj = RegularPolygonPETProjector(
-       lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
-   )
-
-   img = xp.ones(proj.in_shape, dtype=xp.float32)
-   sino = proj(img)             # forward projection
-   back = proj.adjoint(sino)    # back projection
-   print("OK:", sino.shape, back.shape)
-
-If this prints two shapes without error, the compiled backend, the Python
+If this prints three shapes without error, the compiled backend, the Python
 interface and the array backend are all working.  See the :doc:`quickstart` for
 the next steps.

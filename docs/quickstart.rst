@@ -23,40 +23,8 @@ for scanners with cylindrical symmetry and a single layer of LOR endpoints:
 :class:`.ModularizedPETScannerGeometry` → :class:`.EqualBlockPETLORDescriptor` →
 :class:`.EqualBlockPETProjector`; see the :doc:`API reference <api_projectors>`.)
 
-.. code-block:: python
-
-    import array_api_compat.numpy as xp  # swap for array_api_compat.torch / .cupy
-    from parallelproj.pet_scanners import DemoPETScannerGeometry
-    from parallelproj.pet_lors import Michelogram, RegularPolygonPETLORDescriptor
-    from parallelproj.projectors import RegularPolygonPETProjector
-    from parallelproj import to_numpy_array
-
-    dev = "cpu"  # or "cuda"
-
-    # 1) a ready-made demo cylindrical PET scanner (here trimmed to 4 rings)
-    scanner = DemoPETScannerGeometry(xp, dev, num_rings=4)
-
-    # 2) Michelogram (axial plane layout) -> LOR / sinogram descriptor
-    lor_desc = RegularPolygonPETLORDescriptor(
-        scanner,
-        Michelogram(scanner.num_rings, max_ring_difference=3, span=1),
-    )
-
-    # 3) geometric (non-TOF) sinogram projector for a 40 x 8 x 40 image
-    proj = RegularPolygonPETProjector(
-        lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
-    )
-
-    # a simple test image: a hot box in the centre
-    img = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
-    img[15:25, :, 15:25] = 1.0
-
-    sino = proj(img)           # forward projection:  image  -> sinogram
-    back = proj.adjoint(sino)  # back projection (adjoint);  proj.H(sino) works too
-
-    print("image shape:    ", proj.in_shape)
-    print("sinogram shape: ", proj.out_shape)
-    print("backproj shape: ", to_numpy_array(back).shape)
+.. literalinclude:: quickstart_minimal.py
+    :language: python
 
 That is the whole core API: a projector is a
 :class:`.LinearOperator`, so ``proj(img)`` forward projects, ``proj.adjoint(sino)``

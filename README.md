@@ -32,27 +32,8 @@ mamba create -n parallelproj -c conda-forge parallelproj
 > **Note:** `parallelproj` cannot be installed with `pip` alone — its compiled backend
 > (`libparallelproj` / `parallelproj-core`) is only on conda-forge, not on PyPI.
 
-A minimal forward / back projection (see the
-[Quickstart](https://parallelproj.readthedocs.io/en/stable/quickstart.html) for details):
-
-```python
-import array_api_compat.numpy as xp  # swap for array_api_compat.torch / .cupy
-from parallelproj.pet_scanners import DemoPETScannerGeometry
-from parallelproj.pet_lors import Michelogram, RegularPolygonPETLORDescriptor
-from parallelproj.projectors import RegularPolygonPETProjector
-
-scanner = DemoPETScannerGeometry(xp, "cpu", num_rings=4)  # or dev="cuda"
-lor_desc = RegularPolygonPETLORDescriptor(
-    scanner, Michelogram(scanner.num_rings, max_ring_difference=3, span=1)
-)
-proj = RegularPolygonPETProjector(
-    lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
-)
-
-img = xp.ones(proj.in_shape, dtype=xp.float32)
-sino = proj(img)            # forward projection
-back = proj.adjoint(sino)   # back projection
-```
+For a minimal forward / back projection to get started, see this
+[quickstart example](./docs/quickstart_minimal.py).
 
 **For full installation instructions, the API reference and the example gallery, see the
 official documentation [here](https://parallelproj.readthedocs.io/en/stable/).**
