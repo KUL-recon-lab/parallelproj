@@ -85,6 +85,8 @@ New Features
     division terms (expectation-only shift — the symmetric shifted-Poisson surrogate
     of ``NegPoissonLogL`` would require full-sinogram projections and is not
     listmode-compatible)
+  - ``LogCosh`` — edge-preserving log-cosh prior (smooth, with bounded curvature);
+    used by the penalised reconstruction examples (MAPTR, MLAA)
   - ``HalfSquaredL2Deviation`` — weighted least-squares deviation
   - ``SumC1Function`` / ``SumC2Function`` — also created via ``f1 + f2`` operator
     overloading
@@ -120,6 +122,15 @@ New Features
     array-API-compatible reduce/expand operations for the typical
     reduce -> compute -> expand sensitivity workflow
 
+- **``parallelproj.data`` submodule**: new module for memory-mapped, ordered-subset
+  access to sinogram data, enabling out-of-core OSEM on datasets larger than RAM.
+  Provides ``SubsetArrayMmap`` (a lazily-loaded per-subset view of an on-disk array)
+  and ``to_subset_mmap`` (write a sinogram to disk as subset-ordered memory maps).
+- **New sinogram / scanner ordering options**: ``SinogramZigZagOrder`` (a
+  ``zig_zag_order`` argument on ``RegularPolygonPETLORDescriptor``) and
+  ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``
+  and ``lor_endpoint_positions`` arguments on ``RegularPolygonPETScannerGeometry``)
+  make the crystal / LOR endpoint ordering explicit and configurable.
 - **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
   data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
   Provides:
@@ -135,6 +146,13 @@ New Features
   averaged-LOR z-position per plane (exact for span=1, standard approximation
   for span>1), with no loop over ring-pair multiplicities.
 - **``parallelproj.__version__``** is now exposed at the top level.
+- **Citation metadata**: ``import parallelproj`` is silent, but the reference to cite
+  is available on demand as ``parallelproj.__citation__`` (plain text) and
+  ``parallelproj.__bibtex__`` (BibTeX); a ``CITATION.cff`` file is also provided
+  (GitHub "Cite this repository").
+- **Example gallery substantially reorganised and expanded**, now grouped into PET
+  scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
+  transmission / joint estimation, and PyTorch integration. Highlights below.
 - **New example: transmission reconstruction (MLTR / SPS / L-BFGS-B)** — exact Poisson
   transmission model with strictly positive scatter background, presenting MLTR
   (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one

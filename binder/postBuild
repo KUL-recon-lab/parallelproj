@@ -1,8 +1,12 @@
-# convert all sphinx-gallery scripts to jupyer notebooks
-find examples -name "??_*.py" -exec sphinx_gallery_py2jupyter {} \;
+#!/bin/bash
+set -e
 
-## remove the python scripts
-#find examples -name "??_*.py" -exec rm {} \;
+# Install parallelproj itself from THIS cloned repo (not from conda-forge), so
+# Binder runs the exact code in the repository.  --no-deps because all runtime
+# dependencies are provided by environment.yml (conda-forge); in particular the
+# compiled backend parallelproj-core is conda-forge-only and not on PyPI.
+pip install --no-deps .
 
-## install the package
-#pip install -e .
+# Convert the sphinx-gallery example scripts in docs/examples to Jupyter
+# notebooks so they can be run interactively on Binder.
+find docs/examples -name "??_*.py" -exec sphinx_gallery_py2jupyter {} \;
