@@ -6,12 +6,40 @@ that are `python array API <https://data-apis.org/array-api/latest/>`_
 compatible meaning that they can be used with a variety of python
 array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 
-.. note:: 
-  **Features of parallelproj**
+.. grid:: 1 2 2 3
+    :gutter: 3
 
-  * dedicated **sinogram** and **listmode** versions of the projectors
-  * **Python array API compatible Python interface** (e.g. directly compatible with numpy, cupy, **pytorch**)
-  * available on `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
+    .. grid-item-card:: :octicon:`package;1.5em;sd-mr-1` Multi-backend
+
+        The same reconstruction code runs on **NumPy**, **CuPy** and **PyTorch**
+        arrays through the
+        `Python array API <https://data-apis.org/array-api/latest/>`_.
+
+    .. grid-item-card:: :octicon:`zap;1.5em;sd-mr-1` GPU-native
+
+        Built on fast C/CUDA projectors — the *same* code executes on the
+        **CPU** or a **CUDA GPU**, chosen by the array backend and device.
+
+    .. grid-item-card:: :octicon:`flame;1.5em;sd-mr-1` Differentiable / DL-ready
+
+        Projectors integrate with **PyTorch autograd**, so they can be embedded
+        directly in deep-learning reconstruction pipelines.
+
+    .. grid-item-card:: :octicon:`telescope;1.5em;sd-mr-1` Sinogram & listmode
+
+        Dedicated **sinogram** and **listmode** PET projectors, with optional
+        time-of-flight (TOF) support.
+
+    .. grid-item-card:: :octicon:`download;1.5em;sd-mr-1` Easy to install
+
+        Available on
+        `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_ —
+        a single command pulls in the right CPU or CUDA build.
+
+    .. grid-item-card:: :octicon:`law;1.5em;sd-mr-1` Open source
+
+        Developed in the open and released under the permissive
+        **Apache-2.0** license.
 
 **Source code** is on `GitHub <https://github.com/KUL-recon-lab/parallelproj>`_
 (`report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_).
