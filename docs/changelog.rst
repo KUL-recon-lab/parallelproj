@@ -146,6 +146,10 @@ New Features
   averaged-LOR z-position per plane (exact for span=1, standard approximation
   for span>1), with no loop over ring-pair multiplicities.
 - **``parallelproj.__version__``** is now exposed at the top level.
+- **Citation metadata**: ``import parallelproj`` is silent, but the reference to cite
+  is available on demand as ``parallelproj.__citation__`` (plain text) and
+  ``parallelproj.__bibtex__`` (BibTeX); a ``CITATION.cff`` file is also provided
+  (GitHub "Cite this repository").
 - **Example gallery substantially reorganised and expanded**, now grouped into PET
   scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
   transmission / joint estimation, and PyTorch integration. Highlights below.
