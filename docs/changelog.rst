@@ -1,8 +1,11 @@
 Changelog
 =========
 
+2.x
+---
+
 2.0.0 (TBD)
------------
+^^^^^^^^^^^
 
 Breaking Changes
 ~~~~~~~~~~~~~~~~
@@ -113,12 +116,12 @@ New Features
   the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
   sensitivity calculations. Provides:
 
-  - ``compute_sinogram_plane_symmetries`` -- partition all axial ring pairs into
+  - ``compute_sinogram_plane_symmetries`` ^^ partition all axial ring pairs into
     equivalence classes under axial block-shift, midplane reflection, and endpoint-swap
     symmetries (with optional edge-ring correction)
   - ``build_plane_class_indices``, ``build_view_class_indices``,
-    ``build_radial_class_indices`` -- per-class index arrays for the three sinogram axes
-  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` --
+    ``build_radial_class_indices`` ^^ per-class index arrays for the three sinogram axes
+  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` ^^
     array-API-compatible reduce/expand operations for the typical
     reduce -> compute -> expand sensitivity workflow
 
@@ -135,9 +138,9 @@ New Features
   data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
   Provides:
 
-  - ``regular_polygon_events_to_sinogram`` -- histogram per-event crystal and ring
+  - ``regular_polygon_events_to_sinogram`` ^^ histogram per-event crystal and ring
     indices into a non-TOF or TOF sinogram array; supports numpy, cupy, and torch
-  - ``detection_times_to_tof_bin`` -- convert raw detection-time differences
+  - ``detection_times_to_tof_bin`` ^^ convert raw detection-time differences
     (nanoseconds) to projector-convention unsigned TOF bin indices ready for
     histogramming
 
@@ -169,15 +172,18 @@ New Features
   forward projection as the transmission blank scan), NAC warm-start, support-constrained
   attenuation update, and a known-water region to fix the TOF scale ambiguity.
 
+1.x
+---
+
 1.10.2 (Aug 20, 2025)
-----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 - add compatibility for latest cupy version (>= 13.5) which require ``from_dlpack`` to
   convert from torch tensors
 - fix minor issues to be compatible with ``array-api-strict~=2.0``
 
 1.10.1 (Jan 15, 2025)
-----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 - add a check whether sum of tof bins along LOR is non-zero before running
   TOF sinogram back projector
@@ -185,19 +191,19 @@ New Features
 - clean up RTD docs build
 
 1.10.0 (July 29, 2024)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - add support for numpy>=2.0
 - add tests with numpy 2.0 on python 3.9 and 3.12
 - remove tox.ini
 
 1.9.1 (June 19, 2024)
-----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 - BUGFIX: add missing device in BlockPET LOR descriptor (needed for pytorch + cuda backend)
 
 1.9 (June 18, 2024)
---------------------
+^^^^^^^^^^^^^^^^^^^
 
 - add functionality to create scanners, LOR descriptors and projectors for scanners
   consisting of equal "block" modules
@@ -205,7 +211,7 @@ New Features
   the tof bin width was >> tof resolution
 
 1.8 (March 20, 2024)
----------------------
+^^^^^^^^^^^^^^^^^^^^
 
 - add function to count event multiplicity
 - add more examples (e.g. DePierro and LM SPDHG)
@@ -214,45 +220,45 @@ New Features
 - use array-api-strict instead of numpy.array_api
 
 1.7.3 (January 26, 2024)
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 - print banner
 - test also on Windows
 
 1.7.2 (January 26, 2024)
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 - require python>=3.9
 - replace ``distuils.spawn`` by ``shutil.which``
 
 1.7.1 (January 19, 2024)
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 - BUGFIX: correct bug in the "chunking" of TOF sinogram projections in the python
   interface
 
 1.7.0 (January 15, 2024)
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 - update of documentation
 - addition of more examples
 - addition of high-level classes for RegularPolygonPETScanner and LOR descriptors
 
 1.6.2 (December 01, 2023)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - BUGFIX: correct use of ``conj()`` of scalar value to be array api compatible
 - BUGFIX: divided by ``float()`` to be array api compatible
 - add scipy dependency
 
 1.6.1 (October 18, 2023)
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 - BUGFIX: add sigma as explicit argument in ``GaussianFilterOperator`` and convert
   correctly to numpy/cupy arrays
 
 1.6.0 (October 16, 2023)
--------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 - rewrite ``LinearOperator`` base class to support python array api including devices
 - add missing type hints
@@ -260,55 +266,55 @@ New Features
 - remove obsolete functions
 
 1.5.0 (July 29, 2023)
-----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 - add compatibility of python wrapper to python array api (via array-api-compat)
   such that numpy, cupy, pytorch arrays can be directly projected
 - no changes to the C/CUDA libs
 
 1.4.0 (June 11, 2023)
-----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 - add Linear Operators
 
 1.3.7 (April 27, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - update documentation
 
 1.3.6 (April 25, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - enable readthedocs
 
 1.3.5 (April 23, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - add py.typed for mypy type checker
 
 1.3.4 (April 21, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - rename python binding back to parallelproj
 
 1.3.3 (April 20, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - import annotations from ``__future__`` to be compatible with older versions
 
 1.3.2 (April 18, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - rename test folder
 - lower absolute tolerance for forward TOF tests (otherwise windows builds might fail)
 
 1.3.1 (April 17, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - add ``num_visible_devices`` definition when cuda is not present
 
 1.3.0 (April 17, 2023)
------------------------
+^^^^^^^^^^^^^^^^^^^^^^
 
 - clean up pyproject.toml
 - move tests and rename imports in tests
@@ -316,7 +322,7 @@ New Features
 - add first version of pyproject.toml
 
 1.2.16 (April 16, 2023)
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^
 
 - improve way to detect whether visible GPUs are present in the python API
 - remove AS approximation of ``erff`` in openMP lib (too large inaccuracies)
@@ -325,7 +331,7 @@ New Features
 - add TOF sino fwd test
 
 1.2.15 (April 15, 2023)
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^
 
 - add TOF sino projector wrappers and first test
 - BUGFIX: correct start and stop of loop over planes in cuda TOF sino projector when
@@ -335,30 +341,30 @@ New Features
 - add first python wrappers for non-tof Joseph projectors
 
 1.2.14 (February 15, 2023)
----------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - make target link libraries (m and OpenMP) private
 
 1.2.13 (January 13, 2023)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - fix variable expansion in Config.cmake.in
 - update README
 - add link to arxiv preprint
 
 1.2.12 (January 08, 2023)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - set CUDA_HOST_COMPILER only when using clang
 - skip build of cuda lib if cuda is not present
 
 1.2.11 (January 05, 2023)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - set default ``CMAKE_CUDA_HOST_COMPILER`` to ``CMAKE_CXX_COMPILER``
 
 1.2.10 (December 30, 2022)
----------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - link parallelproj_c against libm (using PUBLIC link interface)
 - use better way to test whether we have to link against libm
@@ -366,38 +372,38 @@ New Features
 - add more generic non-tof test that tests rays in all 3 directions
 
 1.2.9 (December 09, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - BUGFIX: correct calculation of ``x_pr2`` when principal direction is 0
 
 1.2.8 (December 02, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - do not install test binaries
 - require CXX compiler only for CUDA
 
 1.2.6 (November 18, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - clean up CMake logic
 
 1.2.5 (November 11, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - add conditions to nested if-else when adding cuda subdir
 
 1.2.4 (November 10, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - add fatal error if cuda lib is to be built but no cuda compiler is found
 
 1.2.3 (November 04, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - add skip option for cmake
 
 1.2.2 (November 03, 2022)
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - read version from package.json
 - add conda build
