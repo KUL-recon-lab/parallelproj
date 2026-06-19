@@ -1,0 +1,7 @@
+#!/bin/bash
+# The example scripts/notebooks import the shared helper module
+# ``example_utils`` (and a few local ``utils``), which lives in docs/examples/.
+# Put that directory on PYTHONPATH so the notebooks in the numbered sub-folders
+# can import it.
+export PYTHONPATH="${HOME}/docs/examples:${PYTHONPATH}"
+exec "$@"

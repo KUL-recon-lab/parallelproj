@@ -2,6 +2,18 @@ name: parallelproj-binder
 channels:
   - conda-forge
 dependencies:
-  - parallelproj
+  # Python
+  - python >=3.12
+  # parallelproj runtime dependencies (NOT parallelproj itself -- that is
+  # installed from this cloned repo in postBuild, so Binder always runs the
+  # exact code in the repository rather than the last conda-forge release).
+  - parallelproj-core >=2.0.6
+  - numpy >=1.23
+  - scipy >=1.15
+  - array-api-compat >=1.7
+  - matplotlib
+  # needed for the 06_torch example
   - pytorch
+  # used by postBuild to convert the example scripts to Jupyter notebooks
   - sphinx-gallery
+  - pip
