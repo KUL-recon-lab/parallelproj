@@ -82,10 +82,20 @@ sphinx_gallery_conf = {
 
 html_theme = "furo"
 html_logo = "_static/parallelproj-logo.png"
+html_favicon = "_static/favicon.ico"
 
-# Theme options
+# Theme options.  The brand colours are taken from the parallelproj logo
+# (navy / blue family); lighter shades are used in dark mode for contrast.
 html_theme_options = {
     "navigation_with_keys": True,
+    "light_css_variables": {
+        "color-brand-primary": "#2c5178",
+        "color-brand-content": "#3c75aa",
+    },
+    "dark_css_variables": {
+        "color-brand-primary": "#7aa7d0",
+        "color-brand-content": "#adc9e0",
+    },
 }
 
 # -- napoleon options --------------------------------------------------------
