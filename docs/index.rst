@@ -41,17 +41,29 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
         Developed in the open and released under the permissive
         **Apache-2.0** license.
 
-**Source code** is on `GitHub <https://github.com/KUL-recon-lab/parallelproj>`_
-(`report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_).
-``parallelproj`` is released under the
-`Apache-2.0 license <https://github.com/KUL-recon-lab/parallelproj/blob/main/LICENSE>`_.
+:octicon:`mark-github;1em;sd-mr-1` `Source code on GitHub <https://github.com/KUL-recon-lab/parallelproj>`_ • :octicon:`issue-opened;1em;sd-mr-1` `Report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_
 
 .. hint::
   *If you are using parallelproj, we highly recommend to read and cite our publication:*
   
   * G. Schramm, K. Thielemans: "**PARALLELPROJ - An open-source framework for fast calculation of projections in tomography**", Front. Nucl. Med., Volume 3 - 2023, doi: 10.3389/fnume.2023.1324562, `link to paper <https://www.frontiersin.org/articles/10.3389/fnume.2023.1324562/abstract>`_, `link to arxiv version <https://arxiv.org/abs/2212.12519>`_
 
-.. admonition:: parallelproj vs other frameworks -- which to use when
+.. dropdown:: BibTeX citation
+    :icon: quote
+
+    .. code-block:: bibtex
+
+        @article{Schramm2023,
+          author  = {Schramm, Georg and Thielemans, Kris},
+          title   = {PARALLELPROJ---an open-source framework for fast calculation of projections in tomography},
+          journal = {Frontiers in Nuclear Medicine},
+          year    = {2023},
+          volume  = {3},
+          doi     = {10.3389/fnume.2023.1324562}
+        }
+
+.. dropdown:: parallelproj vs other frameworks -- which to use when
+  :icon: question
 
   * **parallelproj** is a fast, GPU-native, `python array API <https://data-apis.org/array-api/latest/>`_
     projection library -- a *toolbox*, not a full pipeline. Reach for it
