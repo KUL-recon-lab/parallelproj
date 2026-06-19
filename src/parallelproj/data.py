@@ -210,7 +210,7 @@ def count_event_multiplicity(events: Array) -> Array:
 
     if array_api_compat.is_torch_namespace(xp):
         return _count_event_multiplicity_torch(events, xp)
-    elif array_api_compat.is_cupy_namespace(xp):
+    elif array_api_compat.is_cupy_namespace(xp):  # pragma: no cover
         return _count_event_multiplicity_cupy(events, xp)
     else:
         return _count_event_multiplicity_numpy_fallback(events, xp)
@@ -227,7 +227,7 @@ def _count_event_multiplicity_torch(events: Array, xp) -> Array:
     return counts[inverse].reshape(-1)
 
 
-def _count_event_multiplicity_cupy(events: Array, xp) -> Array:
+def _count_event_multiplicity_cupy(events: Array, xp) -> Array:  # pragma: no cover
     cupy_mod = xp
     _, inverse, counts = cupy_mod.unique(
         events,

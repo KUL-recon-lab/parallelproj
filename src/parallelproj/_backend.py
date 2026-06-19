@@ -150,7 +150,7 @@ def to_numpy_array(x: Array) -> np.ndarray:
     np.ndarray
         NumPy ndarray with the same data and dtype as *x*.
     """
-    if array_api_compat.is_cupy_array(x):
+    if array_api_compat.is_cupy_array(x):  # pragma: no cover
         cp = array_api_compat.get_namespace(x)
 
         return cp.asnumpy(x)
@@ -175,7 +175,7 @@ def empty_cuda_cache(xp: ModuleType) -> None:
     xp : ModuleType
         Array namespace as returned by ``array_api_compat.get_namespace()``.
     """
-    if array_api_compat.is_cupy_namespace(xp):
+    if array_api_compat.is_cupy_namespace(xp):  # pragma: no cover
         xp.get_default_memory_pool().free_all_blocks()
         xp.get_default_pinned_memory_pool().free_all_blocks()
     elif array_api_compat.is_torch_namespace(xp):
