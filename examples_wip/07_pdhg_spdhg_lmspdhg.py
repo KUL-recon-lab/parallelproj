@@ -38,6 +38,7 @@ import array_api_compat.numpy as xp
 # import array_api_compat.torch as xp
 
 import parallelproj
+import parallelproj.data
 from array_api_compat import to_device
 import array_api_compat.numpy as np
 import matplotlib.pyplot as plt
@@ -594,7 +595,7 @@ contamination_list = xp.full(
 events = xp.concat(
     [event_start_coords, event_end_coords, xp.expand_dims(event_tofbins, -1)], axis=1
 )
-mu = parallelproj.count_event_multiplicity(events)
+mu = parallelproj.data.count_event_multiplicity(events)
 
 # %%
 # Listmode SPDHG

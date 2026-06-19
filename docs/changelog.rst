@@ -19,16 +19,21 @@ Breaking Changes
   in the ``parallelproj`` namespace. Import them from ``parallelproj_core`` instead. Note
   that the TOF function names were also reordered
   (e.g. ``joseph3d_fwd_tof_sino`` → ``joseph3d_tof_sino_fwd``).
-- **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``,
-  ``to_numpy_array``, and ``count_event_multiplicity`` are exported from ``parallelproj``
-  directly. Everything else must be imported from the relevant submodule:
+- **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``, and
+  ``to_numpy_array`` are exported from ``parallelproj`` directly. Everything else
+  must be imported from the relevant submodule:
 
   .. code-block:: python
 
-     from parallelproj.operators import LinearOperator
-     from parallelproj.projectors import RegularPolygonPETProjector
      from parallelproj.pet_scanners import RegularPolygonPETScannerGeometry
      from parallelproj.pet_lors import RegularPolygonPETLORDescriptor
+     from parallelproj.projectors import RegularPolygonPETProjector
+
+- **``count_event_multiplicity`` moved** to the new ``parallelproj.data`` submodule
+  and is **no longer exported at the top level**. Replace
+  ``parallelproj.count_event_multiplicity`` / ``from parallelproj import
+  count_event_multiplicity`` with ``from parallelproj.data import
+  count_event_multiplicity``.
 
 - **Runtime-detection variables removed** from the ``parallelproj`` namespace:
   ``cuda_present``, ``cupy_enabled``, ``torch_enabled``, ``num_visible_cuda_devices``,
@@ -129,6 +134,8 @@ New Features
   access to sinogram data, enabling out-of-core OSEM on datasets larger than RAM.
   Provides ``SubsetArrayMmap`` (a lazily-loaded per-subset view of an on-disk array)
   and ``to_subset_mmap`` (write a sinogram to disk as subset-ordered memory maps).
+  ``count_event_multiplicity`` now also lives here (see the breaking change above —
+  it is no longer exported at the top level).
 - **New sinogram / scanner ordering options**: ``SinogramZigZagOrder`` (a
   ``zig_zag_order`` argument on ``RegularPolygonPETLORDescriptor``) and
   ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``

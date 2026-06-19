@@ -8,9 +8,11 @@ import pytest
 # parallelproj._backend loads numpy's C extension fully; this import must
 # come before any bare `import numpy` to avoid a double-init error when the
 # test file is collected in isolation.
-from parallelproj.data import SubsetArrayMmap, to_subset_mmap
+from parallelproj.data import SubsetArrayMmap, to_subset_mmap, count_event_multiplicity
 
 import numpy as np
+
+from .config import xp_dev_list
 
 
 # ---------------------------------------------------------------------------
@@ -132,3 +134,35 @@ def test_nbytes_total(arr, slices, tmp_path):
     """nbytes_total equals num_subsets times nbytes_per_subset."""
     mmap = to_subset_mmap(arr, slices, tmp_path / "y.bin")
     assert mmap.nbytes_total() == len(mmap) * mmap.nbytes_per_subset()
+
+
+# ---------------------------------------------------------------------------
+# count_event_multiplicity (multi-backend)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("xp,dev", xp_dev_list)
+def test_event_multiplicity(xp, dev):
+    events = xp.asarray(
+        [
+            [2, 1, 1, 1, 1],
+            [1, -1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+            [2, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+        ],
+        device=dev,
+    )
+
+    mu = count_event_multiplicity(events)
+
+    assert xp.all(mu == xp.asarray([2, 1, 4, 4, 4, 2, 4], device=dev))
+
+
+@pytest.mark.parametrize("xp,dev", xp_dev_list)
+def test_count_event_multiplicity_1d_raises(xp, dev):
+    events_1d = xp.asarray([1, 2, 3], device=dev)
+    with pytest.raises(ValueError, match="events must be a 2D array"):
+        count_event_multiplicity(events_1d)

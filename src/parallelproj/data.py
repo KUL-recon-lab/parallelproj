@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 
 import numpy as np
+import array_api_compat
+
+from ._backend import Array, to_numpy_array
 
 
 class SubsetArrayMmap:
@@ -178,3 +181,73 @@ def to_subset_mmap(
     del mmap  # closes the write handle and flushes OS buffers
 
     return SubsetArrayMmap(path, num_subsets, subset_shape, dtype=dtype, mode="r")
+
+
+def count_event_multiplicity(events: Array) -> Array:
+    """Count how many times each row appears in a 2-D event array.
+
+    Parameters
+    ----------
+    events : Array
+        2-D integer array of shape ``(N, M)`` where each row represents one
+        event and the columns are event attributes (e.g. crystal indices).
+
+    Returns
+    -------
+    Array
+        1-D integer array of length ``N``.  Element ``i`` is the number of
+        rows in *events* that are identical to row ``i``.
+
+    Raises
+    ------
+    ValueError
+        If *events* is not a 2-D array.
+    """
+    xp = array_api_compat.get_namespace(events)
+
+    if events.ndim != 2:
+        raise ValueError("events must be a 2D array")
+
+    if array_api_compat.is_torch_namespace(xp):
+        return _count_event_multiplicity_torch(events, xp)
+    elif array_api_compat.is_cupy_namespace(xp):
+        return _count_event_multiplicity_cupy(events, xp)
+    else:
+        return _count_event_multiplicity_numpy_fallback(events, xp)
+
+
+def _count_event_multiplicity_torch(events: Array, xp) -> Array:
+    torch_mod = _native_torch_module(xp)
+    _, inverse, counts = torch_mod.unique(
+        events,
+        dim=0,
+        return_inverse=True,
+        return_counts=True,
+    )
+    return counts[inverse].reshape(-1)
+
+
+def _count_event_multiplicity_cupy(events: Array, xp) -> Array:
+    cupy_mod = xp
+    _, inverse, counts = cupy_mod.unique(
+        events,
+        axis=0,
+        return_inverse=True,
+        return_counts=True,
+    )
+    return counts[inverse].reshape(-1)
+
+
+def _count_event_multiplicity_numpy_fallback(events: Array, xp) -> Array:
+    x_np = to_numpy_array(events)
+    _, inverse, counts = np.unique(
+        x_np,
+        axis=0,
+        return_inverse=True,
+        return_counts=True,
+    )
+    return xp.asarray(counts[inverse].reshape(-1))
+
+
+def _native_torch_module(xp):
+    return xp if xp.__name__ == "torch" else xp.torch
