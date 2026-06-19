@@ -23,18 +23,18 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
   
   * G. Schramm, K. Thielemans: "**PARALLELPROJ - An open-source framework for fast calculation of projections in tomography**", Front. Nucl. Med., Volume 3 - 2023, doi: 10.3389/fnume.2023.1324562, `link to paper <https://www.frontiersin.org/articles/10.3389/fnume.2023.1324562/abstract>`_, `link to arxiv version <https://arxiv.org/abs/2212.12519>`_
 
-.. admonition:: parallelproj, STIR & CASToR -- which to use when
+.. admonition:: parallelproj vs other frameworks -- which to use when
 
   * **parallelproj** is a fast, GPU-native, `python array API <https://data-apis.org/array-api/latest/>`_
-    projection library -- a *building block*, not a full pipeline. Reach for it
+    projection library -- a *toolbox*, not a full pipeline. Reach for it
     when you want to **prototype your own reconstruction algorithms** in Python,
     or build **differentiable, deep-learning-integrated** reconstruction
     (PyTorch autograd) with the same code on CPU and GPU.
 
   * **Easy to install and get started.** parallelproj is available on
     `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
-    (single-command install) and ships with many worked examples, so you can go
-    from install to a running reconstruction quickly.
+    (single-command install) and ships with many examples, so you can go
+    from install to a running prototype reconstruction quickly.
 
   * `STIR <https://stir.sourceforge.net>`_ and `CASToR <https://castor-project.org>`_
     are mature, full reconstruction *frameworks* with built-in scanner models,
