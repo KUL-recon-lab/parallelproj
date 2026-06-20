@@ -84,6 +84,13 @@ html_theme = "furo"
 html_logo = "_static/parallelproj-logo.png"
 html_favicon = "_static/favicon.ico"
 
+# Canonical base URL for SEO: tells search engines that the ``stable`` version
+# is the authoritative one, so ranking is not split across the per-version
+# paths (``/latest/``, ``/v2.0.0/``, ...).  Sphinx emits a
+# ``<link rel="canonical">`` on every page pointing at the matching page under
+# this base URL.  Read the Docs also uses this for its generated sitemap.
+html_baseurl = "https://parallelproj.readthedocs.io/en/stable/"
+
 # Theme options.  The brand colours are taken from the parallelproj logo
 # (navy / blue family); lighter shades are used in dark mode for contrast.
 html_theme_options = {
