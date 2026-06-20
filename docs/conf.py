@@ -33,6 +33,7 @@ extensions = [
     "sphinxcontrib.bibtex",
     "sphinx_gallery.gen_gallery",
     "sphinx_design",
+    "sphinxext.opengraph",
 ]
 
 templates_path = ["_templates"]
@@ -104,6 +105,21 @@ html_theme_options = {
         "color-brand-content": "#adc9e0",
     },
 }
+
+# -- Open Graph / SEO metadata (sphinxext-opengraph) -------------------------
+# Adds a <meta name="description"> to every page (from its first paragraphs)
+# and Open Graph / Twitter-card tags, improving Google snippets and link
+# previews (GitHub, Slack, X, ...).
+ogp_site_url = "https://parallelproj.readthedocs.io/en/stable/"
+ogp_site_name = "parallelproj documentation"
+ogp_image = (
+    "https://parallelproj.readthedocs.io/en/stable/_static/parallelproj-logo.png"
+)
+ogp_type = "website"
+ogp_enable_meta_description = True
+ogp_description_length = 200
+# use the static logo as the preview image rather than auto-generated cards
+ogp_social_cards = {"enable": False}
 
 # -- napoleon options --------------------------------------------------------
 napoleon_google_docstring = False
