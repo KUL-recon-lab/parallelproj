@@ -150,7 +150,7 @@ def to_numpy_array(x: Array) -> np.ndarray:
     np.ndarray
         NumPy ndarray with the same data and dtype as *x*.
     """
-    if array_api_compat.is_cupy_array(x):
+    if array_api_compat.is_cupy_array(x):  # pragma: no cover
         cp = array_api_compat.get_namespace(x)
 
         return cp.asnumpy(x)
@@ -175,80 +175,10 @@ def empty_cuda_cache(xp: ModuleType) -> None:
     xp : ModuleType
         Array namespace as returned by ``array_api_compat.get_namespace()``.
     """
-    if array_api_compat.is_cupy_namespace(xp):
+    if array_api_compat.is_cupy_namespace(xp):  # pragma: no cover
         xp.get_default_memory_pool().free_all_blocks()
         xp.get_default_pinned_memory_pool().free_all_blocks()
     elif array_api_compat.is_torch_namespace(xp):
         torch_mod = getattr(xp, "torch", xp)
         if torch_mod.cuda.is_available():
             torch_mod.cuda.empty_cache()
-
-
-def count_event_multiplicity(events: Array) -> Array:
-    """Count how many times each row appears in a 2-D event array.
-
-    Parameters
-    ----------
-    events : Array
-        2-D integer array of shape ``(N, M)`` where each row represents one
-        event and the columns are event attributes (e.g. crystal indices).
-
-    Returns
-    -------
-    Array
-        1-D integer array of length ``N``.  Element ``i`` is the number of
-        rows in *events* that are identical to row ``i``.
-
-    Raises
-    ------
-    ValueError
-        If *events* is not a 2-D array.
-    """
-    xp = array_api_compat.get_namespace(events)
-
-    if events.ndim != 2:
-        raise ValueError("events must be a 2D array")
-
-    if array_api_compat.is_torch_namespace(xp):
-        return _count_event_multiplicity_torch(events, xp)
-    elif array_api_compat.is_cupy_namespace(xp):
-        return _count_event_multiplicity_cupy(events, xp)
-    else:
-        return _count_event_multiplicity_numpy_fallback(events, xp)
-
-
-def _count_event_multiplicity_torch(events: Array, xp) -> Array:
-    torch_mod = _native_torch_module(xp)
-    _, inverse, counts = torch_mod.unique(
-        events,
-        dim=0,
-        return_inverse=True,
-        return_counts=True,
-    )
-    return counts[inverse].reshape(-1)
-
-
-def _count_event_multiplicity_cupy(events: Array, xp) -> Array:
-    cupy_mod = xp
-    _, inverse, counts = cupy_mod.unique(
-        events,
-        axis=0,
-        return_inverse=True,
-        return_counts=True,
-    )
-    return counts[inverse].reshape(-1)
-
-
-def _count_event_multiplicity_numpy_fallback(events: Array, xp) -> Array:
-    x_np = to_numpy_array(events)
-    _, inverse, counts = np.unique(
-        x_np,
-        axis=0,
-        return_inverse=True,
-        return_counts=True,
-    )
-    return xp.asarray(counts[inverse].reshape(-1))
-
-
-def _native_torch_module(xp):
-    return xp if xp.__name__ == "torch" else xp.torch

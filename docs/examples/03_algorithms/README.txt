@@ -1,5 +1,5 @@
-Iterative algorithm examples
-----------------------------
+Emission tomography reconstruction algorithms (sinogram data)
+-------------------------------------------------------------
 
 A tour of reconstruction algorithms for the (regularised) Poisson problem,
 all built on the data-fidelity and prior objects in ``parallelproj.functions``.

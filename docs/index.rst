@@ -6,24 +6,62 @@ that are `python array API <https://data-apis.org/array-api/latest/>`_
 compatible meaning that they can be used with a variety of python
 array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 
-.. note:: 
-  **Features of parallelproj**
+.. grid:: 1 2 2 3
+    :gutter: 3
 
-  * dedicated **sinogram** and **listmode** versions of the projectors
-  * **Python array API compatible Python interface** (e.g. directly compatible with numpy, cupy, **pytorch**)
-  * available on `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
+    .. grid-item-card:: :octicon:`package;1.5em;sd-mr-1` Multi-backend
 
-**Source code** is on `GitHub <https://github.com/KUL-recon-lab/parallelproj>`_
-(`report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_).
-``parallelproj`` is released under the
-`Apache-2.0 license <https://github.com/KUL-recon-lab/parallelproj/blob/main/LICENSE>`_.
+        The same code runs on **NumPy**, **CuPy** and **PyTorch** arrays
+        through the `Python array API <https://data-apis.org/array-api/latest/>`_.
+
+    .. grid-item-card:: :octicon:`zap;1.5em;sd-mr-1` GPU-native
+
+        Fast C/CUDA projectors — the *same* code runs on the **CPU** or a
+        **CUDA GPU**, chosen by the array backend and device.
+
+    .. grid-item-card:: :octicon:`telescope;1.5em;sd-mr-1` Sinogram & listmode
+
+        Dedicated **sinogram** and **listmode** PET projectors, with optional
+        **time-of-flight** (TOF) support.
+
+    .. grid-item-card:: :octicon:`flame;1.5em;sd-mr-1` Differentiable / DL-ready
+
+        Projectors plug into **PyTorch autograd**, ready to embed in
+        deep-learning reconstruction pipelines.
+
+    .. grid-item-card:: :octicon:`workflow;1.5em;sd-mr-1` Reconstruction examples
+
+        Worked examples running **OS-MLEM** and other algorithms on both
+        sinogram and listmode data.
+
+    .. grid-item-card:: :octicon:`download;1.5em;sd-mr-1` Open & easy to install
+
+        On `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
+        (one-command install) and released under the **Apache-2.0** license.
+
+:octicon:`mark-github;1em;sd-mr-1` `Source code on GitHub <https://github.com/KUL-recon-lab/parallelproj>`_ • :octicon:`issue-opened;1em;sd-mr-1` `Report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_
 
 .. hint::
   *If you are using parallelproj, we highly recommend to read and cite our publication:*
   
   * G. Schramm, K. Thielemans: "**PARALLELPROJ - An open-source framework for fast calculation of projections in tomography**", Front. Nucl. Med., Volume 3 - 2023, doi: 10.3389/fnume.2023.1324562, `link to paper <https://www.frontiersin.org/articles/10.3389/fnume.2023.1324562/abstract>`_, `link to arxiv version <https://arxiv.org/abs/2212.12519>`_
 
-.. admonition:: parallelproj vs other frameworks -- which to use when
+.. dropdown:: BibTeX citation
+    :icon: quote
+
+    .. code-block:: bibtex
+
+        @article{Schramm2023,
+          author  = {Schramm, Georg and Thielemans, Kris},
+          title   = {PARALLELPROJ---an open-source framework for fast calculation of projections in tomography},
+          journal = {Frontiers in Nuclear Medicine},
+          year    = {2023},
+          volume  = {3},
+          doi     = {10.3389/fnume.2023.1324562}
+        }
+
+.. dropdown:: parallelproj vs other frameworks -- which to use when
+  :icon: question
 
   * **parallelproj** is a fast, GPU-native, `python array API <https://data-apis.org/array-api/latest/>`_
     projection library -- a *toolbox*, not a full pipeline. Reach for it

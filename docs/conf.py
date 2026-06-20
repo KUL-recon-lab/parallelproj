@@ -33,6 +33,7 @@ extensions = [
     "sphinxcontrib.bibtex",
     "sphinx_gallery.gen_gallery",
     "sphinx_design",
+    "sphinxext.opengraph",
 ]
 
 templates_path = ["_templates"]
@@ -82,11 +83,43 @@ sphinx_gallery_conf = {
 
 html_theme = "furo"
 html_logo = "_static/parallelproj-logo.png"
+html_favicon = "_static/favicon.ico"
 
-# Theme options
+# Canonical base URL for SEO: tells search engines that the ``stable`` version
+# is the authoritative one, so ranking is not split across the per-version
+# paths (``/latest/``, ``/v2.0.0/``, ...).  Sphinx emits a
+# ``<link rel="canonical">`` on every page pointing at the matching page under
+# this base URL.  Read the Docs also uses this for its generated sitemap.
+html_baseurl = "https://parallelproj.readthedocs.io/en/stable/"
+
+# Theme options.  The brand colours are taken from the parallelproj logo
+# (navy / blue family); lighter shades are used in dark mode for contrast.
 html_theme_options = {
     "navigation_with_keys": True,
+    "light_css_variables": {
+        "color-brand-primary": "#2c5178",
+        "color-brand-content": "#3c75aa",
+    },
+    "dark_css_variables": {
+        "color-brand-primary": "#7aa7d0",
+        "color-brand-content": "#adc9e0",
+    },
 }
+
+# -- Open Graph / SEO metadata (sphinxext-opengraph) -------------------------
+# Adds a <meta name="description"> to every page (from its first paragraphs)
+# and Open Graph / Twitter-card tags, improving Google snippets and link
+# previews (GitHub, Slack, X, ...).
+ogp_site_url = "https://parallelproj.readthedocs.io/en/stable/"
+ogp_site_name = "parallelproj documentation"
+ogp_image = (
+    "https://parallelproj.readthedocs.io/en/stable/_static/parallelproj-logo.png"
+)
+ogp_type = "website"
+ogp_enable_meta_description = True
+ogp_description_length = 200
+# use the static logo as the preview image rather than auto-generated cards
+ogp_social_cards = {"enable": False}
 
 # -- napoleon options --------------------------------------------------------
 napoleon_google_docstring = False

@@ -44,7 +44,8 @@ import parallelproj.tof
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
 import parallelproj.projectors
-from parallelproj import to_numpy_array, count_event_multiplicity
+from parallelproj import to_numpy_array
+from parallelproj.data import count_event_multiplicity
 
 # %%
 from example_utils import suggest_array_backend_and_device

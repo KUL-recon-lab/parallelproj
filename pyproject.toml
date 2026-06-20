@@ -195,6 +195,7 @@ test-cov-xml = { cmd = "pytest tests/ --cov=parallelproj --cov-branch --cov-repo
 sphinx = "*"
 sphinx-gallery = "*"
 sphinx-design = "*"
+sphinxext-opengraph = "*"
 furo = "*"
 sphinxcontrib-bibtex = "*"
 joblib = "*"        # used by sphinx-gallery for parallel example execution

@@ -1,5 +1,5 @@
-Iterative listmode algorithm examples
--------------------------------------
+Emission tomography reconstruction algorithms (listmode data)
+-------------------------------------------------------------
 
 The same families of algorithms as the sinogram gallery, but operating directly
 on listmode (event-by-event) data through the listmode projector: listmode

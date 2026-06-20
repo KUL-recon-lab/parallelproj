@@ -6,7 +6,7 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 
-from ._backend import Array, empty_cuda_cache, to_numpy_array, count_event_multiplicity
+from ._backend import Array, empty_cuda_cache, to_numpy_array
 
 #: Human-readable citation. ``import parallelproj`` stays silent; if you use
 #: parallelproj in your research, please cite this paper (see also ``__bibtex__``).
@@ -33,5 +33,4 @@ __all__ = [
     "Array",
     "empty_cuda_cache",
     "to_numpy_array",
-    "count_event_multiplicity",
 ]
