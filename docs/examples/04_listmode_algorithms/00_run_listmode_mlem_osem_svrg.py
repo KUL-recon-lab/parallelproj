@@ -140,6 +140,16 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
+# The scanner's cylindrical field of view does not cover every voxel of the
+# image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity (A^H 1)_i = 0.  Dividing by zero in the EM preconditioner
+# would produce NaN / Inf values that corrupt the reconstruction.
+# fov_mask is True inside the FOV and is set to None when every image voxel
+# is inside the FOV (no masking needed).
+cyl_mask = proj.fov_mask()
+fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+del cyl_mask
+
 x_true = elliptic_cylinder_phantom(xp, dev)
 
 
@@ -462,6 +472,7 @@ def em_update(
     x_cur: Array,
     negpoissonlogl: C1Function,
     adj_ones: Array,
+    img_mask: Array | None = None,
 ) -> Array:
     """One MLEM iteration as a preconditioned gradient descent step.
 
@@ -478,6 +489,9 @@ def em_update(
     :class:`.C2AffineObjective` (sinogram) and
     :class:`.NegPoissonLogLListmode` (listmode).
 
+    Voxels outside the FOV are excluded via ``img_mask`` to avoid division by
+    the zero sensitivity values in ``adj_ones``.
+
     Parameters
     ----------
     x_cur:
@@ -488,15 +502,22 @@ def em_update(
     adj_ones:
         Sensitivity image :math:`A^T\\mathbf{1}` used as the diagonal
         preconditioner.
+    img_mask:
+        Boolean FOV mask (``True`` inside the FOV).  Preconditioner is zeroed
+        outside the FOV so that zero-sensitivity voxels do not produce
+        NaN / Inf.  Pass ``None`` when every voxel is in the FOV.
 
     Returns
     -------
     Array
         Updated image estimate :math:`x^{(k+1)}`.
     """
-    em_diag_precond = x_cur / adj_ones
+    if img_mask is None:
+        d = x_cur / adj_ones
+    else:
+        d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
 
-    return x_cur - em_diag_precond * negpoissonlogl.gradient(x_cur)
+    return x_cur - d * negpoissonlogl.gradient(x_cur)
 
 
 # %%
@@ -514,9 +535,12 @@ def em_update(
 
 # run 1 LM-OSEM epoch as a common warm-start for all reconstructions
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+# zero out voxels outside the FOV so they don't carry a spurious non-zero value
+if fov_mask is not None:
+    x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
 for k in range(num_subsets):
     print(f"warm-start LM-OSEM subset {(k + 1):03} / {num_subsets:03}", end="\r")
-    x_init = em_update(x_init, lm_subset_neg_logL[k], lm_subset_adj_ones)
+    x_init = em_update(x_init, lm_subset_neg_logL[k], lm_subset_adj_ones, fov_mask)
 print()
 
 df_sino = sinogram_neg_logL(x_init)
@@ -561,7 +585,7 @@ if run_mlem:
     x_mlem_sino = xp.asarray(x_init, copy=True)
     for i in range(num_epochs_mlem):
         print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-        x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones)
+        x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones, fov_mask)
         if (i + 1) in mlem_checkpoints:
             df_mlem_sino[i + 1] = float(sinogram_neg_logL(x_mlem_sino))
     print()
@@ -571,7 +595,7 @@ if run_mlem:
     x_mlem_lm = xp.asarray(x_init, copy=True)
     for i in range(num_epochs_mlem):
         print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-        x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones)
+        x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones, fov_mask)
         if (i + 1) in mlem_checkpoints:
             df_mlem_lm[i + 1] = float(sinogram_neg_logL(x_mlem_lm))
     print()
@@ -604,7 +628,7 @@ for i in range(num_epochs):
             end="\r",
         )
         x_osem_sino = em_update(
-            x_osem_sino, sino_subset_neg_logL[k], subset_adjoint_ones[k]
+            x_osem_sino, sino_subset_neg_logL[k], subset_adjoint_ones[k], fov_mask
         )
     df_osem_sino.append(float(sinogram_neg_logL(x_osem_sino)))
 print()
@@ -619,7 +643,9 @@ for i in range(num_epochs):
             f"subset {(k + 1):03} / {num_subsets:03}",
             end="\r",
         )
-        x_osem_lm = em_update(x_osem_lm, lm_subset_neg_logL[k], lm_subset_adj_ones)
+        x_osem_lm = em_update(
+            x_osem_lm, lm_subset_neg_logL[k], lm_subset_adj_ones, fov_mask
+        )
     df_osem_lm.append(float(sinogram_neg_logL(x_osem_lm)))
 print()
 
@@ -702,14 +728,24 @@ svrg_step_size = 1.0
 # sinogram SVRG
 df_svrg_sino: list[float] = []
 x_svrg_sino = xp.asarray(x_init, copy=True)
-svrg_precond_sino = x_svrg_sino / adjoint_ones
+if fov_mask is None:
+    svrg_precond_sino = x_svrg_sino / adjoint_ones
+else:
+    svrg_precond_sino = xp.where(
+        fov_mask, x_svrg_sino / adjoint_ones, xp.zeros_like(x_svrg_sino)
+    )
 stored_grads_sino: Array
 full_grad_sino: Array
 
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond_sino = x_svrg_sino / adjoint_ones
+            if fov_mask is None:
+                svrg_precond_sino = x_svrg_sino / adjoint_ones
+            else:
+                svrg_precond_sino = xp.where(
+                    fov_mask, x_svrg_sino / adjoint_ones, xp.zeros_like(x_svrg_sino)
+                )
         stored_grads_sino, full_grad_sino = svrg_calc_snapshot_gradients(
             x_svrg_sino, sino_subset_neg_logL
         )
@@ -737,14 +773,24 @@ print()
 # listmode SVRG -- identical loop, subset objectives and sensitivity differ
 df_svrg_lm: list[float] = []
 x_svrg_lm = xp.asarray(x_init, copy=True)
-svrg_precond_lm = x_svrg_lm / adjoint_ones
+if fov_mask is None:
+    svrg_precond_lm = x_svrg_lm / adjoint_ones
+else:
+    svrg_precond_lm = xp.where(
+        fov_mask, x_svrg_lm / adjoint_ones, xp.zeros_like(x_svrg_lm)
+    )
 stored_grads_lm: Array
 full_grad_lm: Array
 
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond_lm = x_svrg_lm / adjoint_ones
+            if fov_mask is None:
+                svrg_precond_lm = x_svrg_lm / adjoint_ones
+            else:
+                svrg_precond_lm = xp.where(
+                    fov_mask, x_svrg_lm / adjoint_ones, xp.zeros_like(x_svrg_lm)
+                )
         stored_grads_lm, full_grad_lm = svrg_calc_snapshot_gradients(
             x_svrg_lm, lm_subset_neg_logL
         )

@@ -10,13 +10,16 @@ minimising the regularised negative Poisson log-likelihood
            + \\beta \\, R(x),
     \\qquad \\bar{y}(x) = A x + s
 
-where the quadratic penalty is
+where the edge-preserving logcosh penalty is
 
 .. math::
-    R(x) = \\frac{1}{2} \\| G x \\|_2^2
+    R(x) = \\delta \\sum_i \\log\\!\\cosh\\!\\left(\\frac{(Gx)_i}{\\delta}\\right)
 
-and :math:`G` is the finite forward-difference operator.  The same objective
-is expressed in two equivalent ways:
+and :math:`G` is the finite forward-difference operator.  The scale
+:math:`\\delta` is set relative to the maximum of the ground truth image
+(``delta = delta_rel * max(x_true)``), placing true edges in the linear
+(edge-preserving) regime while penalising smooth-region deviations
+quadratically.  The same objective is expressed in two equivalent ways:
 
 * **Sinogram** -- via :class:`.C2AffineObjective` wrapping :class:`.NegPoissonLogL`
   (operates on predicted counts :math:`\\bar{y}`).
@@ -77,7 +80,7 @@ from parallelproj import to_numpy_array, Array
 from parallelproj.functions import (
     NegPoissonLogL,
     NegPoissonLogLListmode,
-    HalfSquaredL2Deviation,
+    LogCosh,
     C2AffineObjective,
     C1Function,
 )
@@ -98,13 +101,15 @@ xp, dev = suggest_array_backend_and_device(None, None)
 num_subsets = 24
 
 # if run on a CPU limit the number of epochs
-num_epochs = (72 if dev == "cpu" else 240) // num_subsets
+num_epochs = (96 if dev == "cpu" else 240) // num_subsets
 
 # sens factor
 sens_factor = 0.2
 
 # regularisation weight beta
-beta = 10.0
+beta = 1.0
+# delta value relative to max of ground truth image for logcosh prior
+delta_rel = 0.05
 
 # step size for SGD and SVRG updates
 step_size = 1.0
@@ -144,6 +149,17 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
+
+# The scanner's cylindrical field of view does not cover every voxel of the
+# image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity (A^T 1)_i = 0.  Zeroing the initial image outside the FOV
+# ensures those voxels stay at zero throughout reconstruction (the
+# preconditioner is proportional to x, so a zero initialisation propagates as
+# zero updates).  fov_mask is True inside the FOV and is set to None when every
+# image voxel is inside the FOV (no masking needed).
+cyl_mask = proj.fov_mask()
+fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+del cyl_mask
 
 # setup a simple test image
 x_true = sens_factor * elliptic_cylinder_phantom(
@@ -268,18 +284,27 @@ adjoint_ones = pet_lin_op.adjoint(
 )
 
 # %%
-# Regularisation :math:`R(x) = \frac{1}{2} \| G x \|_2^2`
-# ---------------------------------------------------------
+# Regularisation :math:`R(x)`
+# ---------------------------
 #
-# The quadratic penalty is built from the :class:`.FiniteForwardDifference`
-# operator :math:`G`.  The full regulariser ``reg`` (weight :math:`\beta`)
-# is used for total objective evaluation.  The per-subset regulariser
-# (weight :math:`\beta/m`) is added to each subset data-fidelity function so
-# that :math:`\sum_k f_k(x) = F(x)`.
+# The edge-preserving logcosh penalty is built from the
+# :class:`.FiniteForwardDifference` operator :math:`G` and :class:`.LogCosh`.
+# The full regulariser ``reg`` (weight :math:`\beta`) is used for total
+# objective evaluation.  The per-subset regulariser (weight :math:`\beta/m`)
+# is added to each subset data-fidelity function so that
+# :math:`\sum_k f_k(x) = F(x)`.
+#
+# ``delta`` is set to ``delta_rel`` times the maximum of the ground truth
+# image.  With ``delta_rel = 0.1`` edges with gradient equal to the image
+# maximum are placed firmly in the linear (edge-preserving) regime, while
+# smooth-region gradients near zero remain quadratic.
 
 G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
-reg = C2AffineObjective(HalfSquaredL2Deviation(beta=beta), G)
-reg_per_subset = C2AffineObjective(HalfSquaredL2Deviation(beta=beta / num_subsets), G)
+
+delta = float(xp.max(x_true)) * delta_rel
+
+reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
+reg_per_subset = C2AffineObjective(LogCosh(delta=delta, beta=beta / num_subsets), G)
 
 # %%
 # .. note::
@@ -479,15 +504,24 @@ def svrg_update(
 # Run one LM-SGD epoch as a common warm-start for all four reconstructions.
 
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-init_precond = x_init / (adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init))
+if fov_mask is not None:
+    x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
+
+_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
+if fov_mask is None:
+    init_precond = x_init / _denom
+else:
+    init_precond = xp.where(fov_mask, x_init / _denom, xp.zeros_like(x_init))
 
 num_init_updates = 4
 
 for k in range(num_init_updates):
     print(f"warm-start LM-SGD subset {(k+1):03} / {num_init_updates:03}", end="\r")
-    init_precond = x_init / (
-        adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
-    )
+    _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
+    if fov_mask is None:
+        init_precond = x_init / _denom
+    else:
+        init_precond = xp.where(fov_mask, x_init / _denom, xp.zeros_like(x_init))
     x_init = xp.clip(
         x_init
         - init_precond * (num_subsets * lm_subset_objectives[k].gradient(x_init)),
@@ -520,16 +554,24 @@ print()
 # --- sinogram SGD ---
 df_sgd_sino: list[float] = []
 x_sgd_sino = xp.asarray(x_init, copy=True)
-sgd_precond_sino = x_sgd_sino / (
-    adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_sino, x_sgd_sino)
-)
+_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_sino, x_sgd_sino)
+if fov_mask is None:
+    sgd_precond_sino = x_sgd_sino / _denom
+else:
+    sgd_precond_sino = xp.where(
+        fov_mask, x_sgd_sino / _denom, xp.zeros_like(x_sgd_sino)
+    )
 
 for i in range(num_epochs):
     if i % 2 == 0 and i <= 4:
         # Use mean subset sensitivity as a single shared preconditioner
-        sgd_precond_sino = x_sgd_sino / (
-            adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_sino, x_sgd_sino)
-        )
+        _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_sino, x_sgd_sino)
+        if fov_mask is None:
+            sgd_precond_sino = x_sgd_sino / _denom
+        else:
+            sgd_precond_sino = xp.where(
+                fov_mask, x_sgd_sino / _denom, xp.zeros_like(x_sgd_sino)
+            )
     for k in range(num_subsets):
         print(
             f"Sino-SGD epoch {(i+1):04} / {num_epochs:04}, "
@@ -546,15 +588,21 @@ print()
 # --- listmode SGD ---
 df_sgd_lm: list[float] = []
 x_sgd_lm = xp.asarray(x_init, copy=True)
-sgd_precond_lm = x_sgd_lm / (
-    adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_lm, x_sgd_lm)
-)
+_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_lm, x_sgd_lm)
+if fov_mask is None:
+    sgd_precond_lm = x_sgd_lm / _denom
+else:
+    sgd_precond_lm = xp.where(fov_mask, x_sgd_lm / _denom, xp.zeros_like(x_sgd_lm))
 
 for i in range(num_epochs):
     if i % 2 == 0 and i <= 4:
-        sgd_precond_lm = x_sgd_lm / (
-            adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_lm, x_sgd_lm)
-        )
+        _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_lm, x_sgd_lm)
+        if fov_mask is None:
+            sgd_precond_lm = x_sgd_lm / _denom
+        else:
+            sgd_precond_lm = xp.where(
+                fov_mask, x_sgd_lm / _denom, xp.zeros_like(x_sgd_lm)
+            )
     for k in range(num_subsets):
         print(
             f"LM-SGD epoch {(i+1):04} / {num_epochs:04}, "
@@ -591,18 +639,28 @@ print()
 # --- sinogram SVRG ---
 df_svrg_sino: list[float] = []
 x_svrg_sino = xp.asarray(x_init, copy=True)
-svrg_precond_sino = x_svrg_sino / (
-    adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_sino, x_svrg_sino)
-)
+_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_sino, x_svrg_sino)
+if fov_mask is None:
+    svrg_precond_sino = x_svrg_sino / _denom
+else:
+    svrg_precond_sino = xp.where(
+        fov_mask, x_svrg_sino / _denom, xp.zeros_like(x_svrg_sino)
+    )
 stored_grads_sino: Array
 full_grad_sino: Array
 
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond_sino = x_svrg_sino / (
-                adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_sino, x_svrg_sino)
+            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(
+                x_svrg_sino, x_svrg_sino
             )
+            if fov_mask is None:
+                svrg_precond_sino = x_svrg_sino / _denom
+            else:
+                svrg_precond_sino = xp.where(
+                    fov_mask, x_svrg_sino / _denom, xp.zeros_like(x_svrg_sino)
+                )
         stored_grads_sino, full_grad_sino = svrg_calc_snapshot_gradients(
             x_svrg_sino, sino_subset_objectives
         )
@@ -630,18 +688,26 @@ print()
 # --- listmode SVRG ---
 df_svrg_lm: list[float] = []
 x_svrg_lm = xp.asarray(x_init, copy=True)
-svrg_precond_lm = x_svrg_lm / (
-    adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_lm, x_svrg_lm)
-)
+_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_lm, x_svrg_lm)
+if fov_mask is None:
+    svrg_precond_lm = x_svrg_lm / _denom
+else:
+    svrg_precond_lm = xp.where(fov_mask, x_svrg_lm / _denom, xp.zeros_like(x_svrg_lm))
 stored_grads_lm: Array
 full_grad_lm: Array
 
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            svrg_precond_lm = x_svrg_lm / (
-                adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_lm, x_svrg_lm)
+            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(
+                x_svrg_lm, x_svrg_lm
             )
+            if fov_mask is None:
+                svrg_precond_lm = x_svrg_lm / _denom
+            else:
+                svrg_precond_lm = xp.where(
+                    fov_mask, x_svrg_lm / _denom, xp.zeros_like(x_svrg_lm)
+                )
         stored_grads_lm, full_grad_lm = svrg_calc_snapshot_gradients(
             x_svrg_lm, lm_subset_objectives
         )
