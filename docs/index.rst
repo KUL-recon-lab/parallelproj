@@ -46,19 +46,6 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
   
   * G. Schramm, K. Thielemans: "**PARALLELPROJ - An open-source framework for fast calculation of projections in tomography**", Front. Nucl. Med., Volume 3 - 2023, doi: 10.3389/fnume.2023.1324562, `link to paper <https://www.frontiersin.org/articles/10.3389/fnume.2023.1324562/abstract>`_, `link to arxiv version <https://arxiv.org/abs/2212.12519>`_
 
-.. dropdown:: BibTeX citation
-    :icon: quote
-
-    .. code-block:: bibtex
-
-        @article{Schramm2023,
-          author  = {Schramm, Georg and Thielemans, Kris},
-          title   = {PARALLELPROJ---an open-source framework for fast calculation of projections in tomography},
-          journal = {Frontiers in Nuclear Medicine},
-          year    = {2023},
-          volume  = {3},
-          doi     = {10.3389/fnume.2023.1324562}
-        }
 
 .. dropdown:: parallelproj vs other frameworks -- which to use when
   :icon: question
