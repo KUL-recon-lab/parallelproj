@@ -408,14 +408,14 @@ axes[1].grid(True, ls=":", axis="y")
 fig.show()
 
 # %%
-# GE (Discovery MI / Signa) layout
-# --------------------------------
+# GE-style layout
+# ---------------
 #
-# GE scanners use a *mixed* axial layout that does not correspond to a single
-# (odd) span.  Select it with ``layout=MichelogramLayout.GE`` or the
-# :meth:`.Michelogram.ge_signa` convenience constructor; ``span`` is then
-# ignored and :attr:`.Michelogram.span` returns ``None``.  In GE's own
-# terminology the segment is called ``theta`` and the ring difference ``dZ``:
+# GE-style scanners use a *mixed* axial layout that does not correspond to a
+# single (odd) span.  Select it with ``layout=MichelogramLayout.GE`` or the
+# :meth:`.Michelogram.ge` convenience constructor; ``span`` is then ignored and
+# :attr:`.Michelogram.span` returns ``None``.  Using the usual segment
+# (``theta``) / ring-difference (``dZ``) terminology:
 #
 # * **segment 0** collects ring differences ``dZ = {-1, 0, +1}`` -- the
 #   ``+/-1`` *cross* planes are summed into virtual direct planes at the
@@ -423,10 +423,11 @@ fig.show()
 # * **every oblique segment** ``+/-k`` collects the ring-difference *pair*
 #   ``{+/-2k, +/-(2k+1)}`` without combination, laid out as a staircase.
 #
-# Segments are ordered ``0, +1, -1, +2, -2, ...``.  This reproduces the layout
-# documented in GE's data-access manual (and matches STIR's "span 2").
+# Segments are ordered ``0, +1, -1, +2, -2, ...`` (also known as "span 2" in
+# STIR).  Pick ``num_rings`` and ``max_ring_difference`` to match the GE
+# scanner of interest.
 
-m_ge = parallelproj.pet_lors.Michelogram.ge_signa(num_rings=9, max_ring_difference=8)
+m_ge = parallelproj.pet_lors.Michelogram.ge(num_rings=9, max_ring_difference=8)
 print(
     f"GE layout: span={m_ge.span}, num_planes={m_ge.num_planes}, "
     f"max_multiplicity={m_ge.max_multiplicity}"

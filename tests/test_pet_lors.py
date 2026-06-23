@@ -1170,11 +1170,11 @@ def test_michelogram_ring_diff_to_segment(xp: ModuleType, dev: str) -> None:
 
 
 def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
-    """GE (Discovery MI / Signa) layout: mixed segmentation, span ignored."""
+    """GE-style layout: mixed segmentation, span ignored."""
     from collections import defaultdict
 
-    # GE Discovery MI-3: 27 rings, max ring difference 26 -> 703 planes
-    m = ppl.Michelogram.ge_signa(num_rings=27, max_ring_difference=26)
+    # GE-style layout, 27 rings, max ring difference 26 -> 703 planes
+    m = ppl.Michelogram.ge(num_rings=27, max_ring_difference=26)
     assert m.layout is ppl.MichelogramLayout.GE
     assert m.span is None
     assert int(m.num_planes) == 703
@@ -1215,7 +1215,7 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
     # a descriptor built on a GE michelogram works; span is None and the
     # per-plane single-ring-pair indices are undefined (planes can hold 2 pairs)
     scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings=6, symmetry_axis=2)
-    ge = ppl.Michelogram.ge_signa(scanner.num_rings, 5)
+    ge = ppl.Michelogram.ge(scanner.num_rings, 5)
     desc = ppl.RegularPolygonPETLORDescriptor(scanner, ge)
     assert desc.span is None
     assert int(desc.num_planes) == int(ge.num_planes) == 31

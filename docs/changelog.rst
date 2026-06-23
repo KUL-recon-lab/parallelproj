@@ -106,14 +106,16 @@ New Features
 - **``Michelogram`` class** (``parallelproj.pet_lors``): encapsulates the full axial
   plane layout for cylindrical PET scanners under odd-span compression, including
   ring-pair-to-plane tables and visualisation methods.
-- **GE (Discovery MI / Signa) axial layout** for ``Michelogram``: new
+- **GE-style axial sinogram plane layout** for ``Michelogram``: new
   ``MichelogramLayout`` enum and ``layout=`` argument, plus a
-  ``Michelogram.ge_signa(num_rings, max_ring_difference)`` convenience
-  constructor.  The GE layout uses segment 0 = ring differences {−1, 0, +1}
-  (cross planes merged into virtual direct planes) and oblique segments = ring-
-  difference pairs {±2k, ±(2k+1)}, ordered 0, +1, −1, +2, −2, … — reproducing
-  GE's documented θ/ΔZ organisation (and STIR's "span 2").  ``span`` is ignored
-  for this layout and :attr:`Michelogram.span` returns ``None``.
+  ``Michelogram.ge(num_rings, max_ring_difference)`` convenience constructor.
+  The GE-style layout uses segment 0 = ring differences {−1, 0, +1} (cross
+  planes merged into virtual direct planes) and oblique segments = ring-
+  difference pairs {±2k, ±(2k+1)}, ordered 0, +1, −1, +2, −2, … (the segment /
+  ring-difference plane ordering used by GE-style sinograms; also known as
+  "span 2" in STIR).  ``span`` is ignored for this layout and
+  :attr:`Michelogram.span` returns ``None``.  Combine it with a matching
+  ``RegularPolygonPETLORDescriptor`` for the GE scanner of interest.
 - **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
   that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
   ``mode="average"``).

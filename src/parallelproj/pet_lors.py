@@ -82,7 +82,7 @@ class MichelogramLayout(enum.Enum):
     STANDARD = enum.auto()
     """Siemens/CTI-style layout parameterised by an odd ``span`` (default)."""
     GE = enum.auto()
-    """GE (Discovery MI / Signa) layout.
+    """GE-style mixed axial layout.
 
     Segment 0 collects ring differences :math:`\\{-1, 0, +1\\}` (the
     :math:`\\pm 1` *cross* planes are summed into virtual direct planes at the
@@ -91,8 +91,10 @@ class MichelogramLayout(enum.Enum):
     :math:`\\{\\pm 2k, \\pm(2k+1)\\}` without combination.  Segments are ordered
     ``0, +1, -1, +2, -2, ...`` with axial positions increasing within each
     segment.  ``span`` is ignored for this layout (see :attr:`Michelogram.span`,
-    which returns ``None``).  This matches GE's documented ``theta`` / ``dZ``
-    organisation (and STIR's "span 2").
+    which returns ``None``).  This is the segment (``theta``) / ring-difference
+    (``dZ``) plane ordering used by GE-style sinograms (also known as
+    "span 2" in STIR).  Combine it with a matching
+    :class:`RegularPolygonPETLORDescriptor` for the GE scanner of interest.
     """
 
 
@@ -189,8 +191,8 @@ class Michelogram:
         self._build()
 
     @classmethod
-    def ge_signa(cls, num_rings: int, max_ring_difference: int) -> "Michelogram":
-        """Convenience constructor for the GE (Discovery MI / Signa) layout.
+    def ge(cls, num_rings: int, max_ring_difference: int) -> "Michelogram":
+        """Convenience constructor for the GE-style layout.
 
         Equivalent to ``Michelogram(num_rings, max_ring_difference,
         layout=MichelogramLayout.GE)``.  See :class:`MichelogramLayout` for the
