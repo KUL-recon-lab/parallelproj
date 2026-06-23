@@ -406,3 +406,37 @@ axes[1].legend(loc="upper left", fontsize="small")
 axes[1].grid(True, ls=":", axis="y")
 
 fig.show()
+
+# %%
+# GE (Discovery MI / Signa) layout
+# --------------------------------
+#
+# GE scanners use a *mixed* axial layout that does not correspond to a single
+# (odd) span.  Select it with ``layout=MichelogramLayout.GE`` or the
+# :meth:`.Michelogram.ge_signa` convenience constructor; ``span`` is then
+# ignored and :attr:`.Michelogram.span` returns ``None``.  In GE's own
+# terminology the segment is called ``theta`` and the ring difference ``dZ``:
+#
+# * **segment 0** collects ring differences ``dZ = {-1, 0, +1}`` -- the
+#   ``+/-1`` *cross* planes are summed into virtual direct planes at the
+#   intermediate axial positions (exactly like a Siemens span-3 segment 0);
+# * **every oblique segment** ``+/-k`` collects the ring-difference *pair*
+#   ``{+/-2k, +/-(2k+1)}`` without combination, laid out as a staircase.
+#
+# Segments are ordered ``0, +1, -1, +2, -2, ...``.  This reproduces the layout
+# documented in GE's data-access manual (and matches STIR's "span 2").
+
+m_ge = parallelproj.pet_lors.Michelogram.ge_signa(num_rings=9, max_ring_difference=8)
+print(
+    f"GE layout: span={m_ge.span}, num_planes={m_ge.num_planes}, "
+    f"max_multiplicity={m_ge.max_multiplicity}"
+)
+
+fig_ge, ax_ge = plt.subplots(1, 1, figsize=(5.5, 5.5), tight_layout=True)
+m_ge.show(ax_ge, plane_index_fontsize=7)
+ax_ge.set_title(
+    "GE layout Michelogram (9 rings)\n"
+    "segment 0 = dZ{-1,0,1} (cross planes merged), oblique segments = dZ pairs",
+    fontsize="small",
+)
+fig_ge.show()

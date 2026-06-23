@@ -76,6 +76,26 @@ class SinogramZigZagOrder(enum.Enum):
     """Start crystal steps first."""
 
 
+class MichelogramLayout(enum.Enum):
+    """Axial plane layout / segmentation convention for a :class:`Michelogram`."""
+
+    STANDARD = enum.auto()
+    """Siemens/CTI-style layout parameterised by an odd ``span`` (default)."""
+    GE = enum.auto()
+    """GE (Discovery MI / Signa) layout.
+
+    Segment 0 collects ring differences :math:`\\{-1, 0, +1\\}` (the
+    :math:`\\pm 1` *cross* planes are summed into virtual direct planes at the
+    intermediate axial positions, exactly as in a Siemens span-3 segment 0),
+    while every oblique segment :math:`\\pm k` collects the ring-difference pair
+    :math:`\\{\\pm 2k, \\pm(2k+1)\\}` without combination.  Segments are ordered
+    ``0, +1, -1, +2, -2, ...`` with axial positions increasing within each
+    segment.  ``span`` is ignored for this layout (see :attr:`Michelogram.span`,
+    which returns ``None``).  This matches GE's documented ``theta`` / ``dZ``
+    organisation (and STIR's "span 2").
+    """
+
+
 class Michelogram:
     """Axial plane layout for a cylindrical PET scanner under odd span.
 
@@ -134,34 +154,71 @@ class Michelogram:
         num_rings: int,
         max_ring_difference: int,
         span: int = 1,
+        layout: MichelogramLayout = MichelogramLayout.STANDARD,
     ) -> None:
         if not isinstance(num_rings, int) or num_rings < 1:
             raise ValueError("num_rings must be a positive integer")
         if not isinstance(max_ring_difference, int) or max_ring_difference < 0:
             raise ValueError("max_ring_difference must be a non-negative integer")
-        if not isinstance(span, int) or span < 1 or span % 2 == 0:
-            raise ValueError("span must be an odd positive integer")
+        if not isinstance(layout, MichelogramLayout):
+            raise TypeError("layout must be a MichelogramLayout")
+
+        self._layout = layout
+
+        if layout is MichelogramLayout.GE:
+            # GE layout has a fixed (mixed) segmentation; span is meaningless.
+            if span != 1:
+                import warnings
+
+                warnings.warn(
+                    "span is ignored for layout=MichelogramLayout.GE "
+                    "(the GE segmentation is fixed); span will be reported as None.",
+                    stacklevel=2,
+                )
+            self._span: int | None = None
+            self._half_span: int | None = None
+        else:
+            if not isinstance(span, int) or span < 1 or span % 2 == 0:
+                raise ValueError("span must be an odd positive integer")
+            self._span = int(span)
+            self._half_span = (self._span - 1) // 2
 
         self._num_rings = int(num_rings)
         self._max_ring_difference = int(max_ring_difference)
-        self._span = int(span)
-        self._half_span = (self._span - 1) // 2
 
         self._build()
+
+    @classmethod
+    def ge_signa(cls, num_rings: int, max_ring_difference: int) -> "Michelogram":
+        """Convenience constructor for the GE (Discovery MI / Signa) layout.
+
+        Equivalent to ``Michelogram(num_rings, max_ring_difference,
+        layout=MichelogramLayout.GE)``.  See :class:`MichelogramLayout` for the
+        segmentation definition.
+        """
+        return cls(num_rings, max_ring_difference, layout=MichelogramLayout.GE)
 
     def ring_diff_to_segment(self, rd: int) -> int:
         """Signed segment number for a given ring difference :math:`e - s`.
 
-        Returns
-        -------
-        int
-            ``0`` if :math:`|rd| \\le \\text{half\\_span}`, otherwise
-            :math:`\\pm k` with :math:`k = \\lceil (|rd| - \\text{half\\_span}) / S \\rceil`
-            and sign equal to that of :math:`rd`.
+        For the ``STANDARD`` layout: ``0`` if :math:`|rd| \\le
+        \\text{half\\_span}`, otherwise :math:`\\pm k` with :math:`k = \\lceil
+        (|rd| - \\text{half\\_span}) / S \\rceil` and the sign of :math:`rd`.
+
+        For the ``GE`` layout: ``0`` if :math:`|rd| \\le 1`, otherwise
+        :math:`\\pm k` with :math:`k = \\lfloor |rd| / 2 \\rfloor` (so each
+        oblique segment holds the ring-difference pair :math:`\\{2k, 2k+1\\}`)
+        and the sign of :math:`rd`.
         """
+        abs_rd = abs(rd)
+        if self._layout is MichelogramLayout.GE:
+            if abs_rd <= 1:
+                return 0
+            k = abs_rd // 2
+            return k if rd > 0 else -k
+
         S = self._span
         half_span = self._half_span
-        abs_rd = abs(rd)
         if abs_rd <= half_span:
             return 0
         k = (abs_rd - half_span + S - 1) // S
@@ -241,9 +298,14 @@ class Michelogram:
         return self._max_ring_difference
 
     @property
-    def span(self) -> int:
-        """Axial compression factor (odd)."""
+    def span(self) -> int | None:
+        """Axial compression factor (odd), or ``None`` for the GE layout."""
         return self._span
+
+    @property
+    def layout(self) -> MichelogramLayout:
+        """Axial plane layout convention (``STANDARD`` or ``GE``)."""
+        return self._layout
 
     @property
     def num_planes(self) -> int:
@@ -428,6 +490,10 @@ class Michelogram:
         """
         if not isinstance(target, Michelogram):
             raise TypeError("target must be a Michelogram instance")
+        if self._span is None or target.span is None:
+            raise ValueError(
+                "axial compression mapping is not supported for the GE layout"
+            )
         if target.num_rings != self._num_rings:
             raise ValueError(
                 f"target.num_rings ({target.num_rings}) must match "
@@ -766,7 +832,6 @@ class Michelogram:
         """
         R = self._num_rings
         D = self._max_ring_difference
-        S = self._span
 
         # Unroll the padded layout into flat arrays of valid ring pairs.
         total = int(self._plane_mask.sum())
@@ -800,7 +865,7 @@ class Michelogram:
             **kwargs,
         )
 
-        if show_merge_lines and S > 1:
+        if show_merge_lines and self._max_multiplicity > 1:
             for pi in range(self._num_planes):
                 m = int(self._plane_multiplicity[pi])
                 if m > 1:
@@ -836,17 +901,24 @@ class Michelogram:
 
         ax.set_xlabel("start ring")
         ax.set_ylabel("end ring")
-        ax.set_title(f"Michelogram\n(span={S}, max Dring={D})", fontsize="small")
+        _layout_label = (
+            "layout=GE" if self._layout is MichelogramLayout.GE else f"span={self._span}"
+        )
+        ax.set_title(f"Michelogram\n({_layout_label}, max Dring={D})", fontsize="small")
         ax.set_aspect("equal")
         ax.set_xlim(-0.5, R - 0.5)
         ax.set_ylim(-0.5, R - 0.5)
 
     def __repr__(self) -> str:
+        if self._layout is MichelogramLayout.GE:
+            extra = "layout=GE"
+        else:
+            extra = f"span={self._span}"
         return (
             f"{self.__class__.__name__}("
             f"num_rings={self._num_rings}, "
             f"max_ring_difference={self._max_ring_difference}, "
-            f"span={self._span})"
+            f"{extra})"
         )
 
 
@@ -1172,8 +1244,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self._num_views
 
     @property
-    def span(self) -> int:
-        """axial compression factor (1 = no compression)"""
+    def span(self) -> int | None:
+        """axial compression factor (1 = no compression; ``None`` for GE layout)"""
         return self._span
 
     @property
@@ -1189,20 +1261,22 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
     @property
     def start_plane_index(self) -> Array:
-        """start ring index for all planes (only defined for span=1)"""
-        if self._span > 1:
+        """start ring index for all planes (only defined for single-ring-pair planes)"""
+        if self._michelogram.max_multiplicity > 1:
             raise AttributeError(
-                "start_plane_index is not defined for span > 1. Use start_plane_z instead."
+                "start_plane_index is only defined when every plane is a single "
+                "ring pair (span=1). Use start_plane_z instead."
             )
         assert self._start_plane_index is not None
         return self._start_plane_index
 
     @property
     def end_plane_index(self) -> Array:
-        """end ring index for all planes (only defined for span=1)"""
-        if self._span > 1:
+        """end ring index for all planes (only defined for single-ring-pair planes)"""
+        if self._michelogram.max_multiplicity > 1:
             raise AttributeError(
-                "end_plane_index is not defined for span > 1. Use end_plane_z instead."
+                "end_plane_index is only defined when every plane is a single "
+                "ring pair (span=1). Use end_plane_z instead."
             )
         assert self._end_plane_index is not None
         return self._end_plane_index
@@ -1318,7 +1392,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._start_plane_z = xp.asarray(start_z, device=dev)
         self._end_plane_z = xp.asarray(end_z, device=dev)
 
-        if self._span == 1:
+        if m.max_multiplicity == 1:
             self._start_plane_index = xp.asarray(m.plane_start_rings[:, 0], device=dev)
             self._end_plane_index = xp.asarray(m.plane_end_rings[:, 0], device=dev)
         else:
