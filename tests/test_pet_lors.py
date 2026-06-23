@@ -1179,6 +1179,12 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
     assert m.span is None
     assert int(m.num_planes) == 703
     assert int(m.max_multiplicity) == 2
+    # repr advertises the GE layout (not a span)
+    assert "layout=GE" in repr(m)
+
+    # an invalid layout argument is rejected
+    with pytest.raises(TypeError, match="layout must be a MichelogramLayout"):
+        ppl.Michelogram(3, 2, layout="GE")
 
     # per-segment plane counts in GE order 0, +1, -1, +2, -2, ...
     per = defaultdict(int)
