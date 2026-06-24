@@ -331,3 +331,43 @@ ax3d2b.set_title(
     f"span {span} mrd {max_ring_difference} | view {lor_desc_s5_mrd9.num_views // 2}, last plane of highest seg (plane {_ph_s5_mrd9})"
 )
 fig_3d2.show()
+
+# %%
+# GE-style plane ordering
+# -----------------------
+#
+# Instead of a single (odd) span, GE-style scanners use a *mixed* axial layout:
+# segment 0 collects ring differences ``{-1, 0, +1}`` (the ``+/-1`` cross planes
+# are merged into virtual direct planes), while every oblique segment collects a
+# ring-difference *pair* ``{+/-2k, +/-(2k+1)}`` laid out as a staircase.  Select
+# it with the :meth:`.Michelogram.ge` constructor (equivalently
+# ``layout=MichelogramLayout.GE``); ``span`` is then ignored and
+# :attr:`.Michelogram.span` returns ``None``.  Choose ``num_rings`` and
+# ``max_ring_difference`` to match the GE scanner of interest.
+
+lor_desc_ge = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+    scanner,
+    parallelproj.pet_lors.Michelogram.ge(
+        scanner.num_rings, max_ring_difference=scanner.num_rings - 1
+    ),
+    radial_trim=10,
+    sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
+)
+
+print(lor_desc_ge)
+print(f"sinogram shape: {lor_desc_ge.spatial_sinogram_shape}")
+print(f"num planes: {lor_desc_ge.num_planes}  (GE layout, span={lor_desc_ge.span})")
+
+# %%
+# Michelogram for the GE-style layout
+
+fig_mge, ax_mge = plt.subplots(1, 1, figsize=(6, 6), tight_layout=True)
+lor_desc_ge.show_michelogram(ax_mge)
+fig_mge.show()
+
+# %%
+# Segment side-view diagram for the GE-style layout
+
+fig_seg_ge = lor_desc_ge.show_segment_lors()
+fig_seg_ge.tight_layout()
+fig_seg_ge.show()

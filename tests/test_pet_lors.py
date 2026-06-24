@@ -1169,6 +1169,66 @@ def test_michelogram_ring_diff_to_segment(xp: ModuleType, dev: str) -> None:
     assert m9.ring_diff_to_segment(-13) == -1
 
 
+def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
+    """GE-style layout: mixed segmentation, span ignored."""
+    from collections import defaultdict
+
+    # GE-style layout, 27 rings, max ring difference 26 -> 703 planes
+    m = ppl.Michelogram.ge(num_rings=27, max_ring_difference=26)
+    assert m.layout is ppl.MichelogramLayout.GE
+    assert m.span is None
+    assert int(m.num_planes) == 703
+    assert int(m.max_multiplicity) == 2
+    # repr advertises the GE layout (not a span)
+    assert "layout=GE" in repr(m)
+
+    # an invalid layout argument is rejected
+    with pytest.raises(TypeError, match="layout must be a MichelogramLayout"):
+        ppl.Michelogram(3, 2, layout="GE")
+
+    # per-segment plane counts in GE order 0, +1, -1, +2, -2, ...
+    per = defaultdict(int)
+    for seg in m.plane_segment.tolist():
+        per[seg] += 1
+    assert [per[s] for s in (0, 1, -1, 2, -2)] == [53, 49, 49, 45, 45]
+    assert per[13] == 1 and per[-13] == 1
+
+    # cross planes (multiplicity 2) are exactly segment 0 at odd axial midpoint
+    for pi in range(int(m.num_planes)):
+        if int(m.plane_multiplicity[pi]) == 2:
+            assert int(m.plane_segment[pi]) == 0
+            assert int(m.plane_axial_midpoint_int[pi]) % 2 == 1
+    # full bijection over all ring pairs (max ring diff = num_rings - 1)
+    assert int((m.plane_for_ring_pair_table >= 0).sum()) == 27 * 27
+
+    # explicit-enum constructor is equivalent; span is ignored (with a warning)
+    m_enum = ppl.Michelogram(27, 26, layout=ppl.MichelogramLayout.GE)
+    assert int(m_enum.num_planes) == 703 and m_enum.span is None
+    with pytest.warns(UserWarning, match="ignored"):
+        ppl.Michelogram(27, 26, span=3, layout=ppl.MichelogramLayout.GE)
+
+    # GE ring-difference -> segment rule: 0 for |rd|<=1, else sign*(|rd|//2)
+    assert m.ring_diff_to_segment(0) == 0
+    assert m.ring_diff_to_segment(1) == 0 and m.ring_diff_to_segment(-1) == 0
+    assert m.ring_diff_to_segment(2) == 1 and m.ring_diff_to_segment(3) == 1
+    assert m.ring_diff_to_segment(-2) == -1 and m.ring_diff_to_segment(-3) == -1
+    assert m.ring_diff_to_segment(4) == 2 and m.ring_diff_to_segment(26) == 13
+
+    # axial compression is not supported for the GE layout
+    with pytest.raises(ValueError, match="GE layout"):
+        m.compression_index_maps_to(ppl.Michelogram(27, 26, span=3))
+
+    # a descriptor built on a GE michelogram works; span is None and the
+    # per-plane single-ring-pair indices are undefined (planes can hold 2 pairs)
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings=6, symmetry_axis=2)
+    ge = ppl.Michelogram.ge(scanner.num_rings, 5)
+    desc = ppl.RegularPolygonPETLORDescriptor(scanner, ge)
+    assert desc.span is None
+    assert int(desc.num_planes) == int(ge.num_planes) == 31
+    with pytest.raises(AttributeError):
+        _ = desc.start_plane_index
+
+
 def test_michelogram_plane_for_ring_pair(xp: ModuleType, dev: str) -> None:
     """plane_for_ring_pair lookup matches the (start, end) -> plane mapping
     derived from the padded plane_start_rings / plane_end_rings arrays."""
