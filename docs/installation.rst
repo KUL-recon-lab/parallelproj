@@ -165,16 +165,13 @@ First check that the backend imports and report whether it was compiled with CUD
 
 .. code-block:: python
 
+   import parallelproj
+   print(parallelproj.__version__)  # print version of parallelproj python package
+
    import parallelproj_core
+   print(parallelproj_core.__version)  # print version of compiled projector backend core library
    print(parallelproj_core.cuda_enabled)  # 1 = CUDA enabled, 0 = CPU only
 
 Then confirm that the full stack works end to end by building a small projector
 and running a forward and back projection (the same minimal example as the
-:doc:`quickstart`):
-
-.. literalinclude:: quickstart_minimal.py
-   :language: python
-
-If this prints two shapes without error, the compiled backend, the Python
-interface and the array backend are all working.  See the :doc:`quickstart` for
-the next steps.
+:doc:`quickstart`).
