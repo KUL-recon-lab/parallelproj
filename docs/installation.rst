@@ -174,4 +174,4 @@ First check that the backend imports and report whether it was compiled with CUD
 
 Then confirm that the full stack works end to end by building a small projector
 and running a forward and back projection (the same minimal example as the
-:doc:`quickstart`):
+:doc:`quickstart`).
