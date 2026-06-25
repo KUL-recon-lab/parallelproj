@@ -43,56 +43,68 @@ elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
 is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
 (P_\\text{tof} G \\lambda)` and :math:`\\bar y = \\bar z + s` are the array
 (elementwise) forms of :math:`\\bar z_{i,t}` and :math:`\\bar y_{i,t}` above;
-:math:`\\Sigma_t` sums over the TOF axis; and :math:`m` is the number of subsets.
+:math:`\\Sigma_t` sums over the TOF axis; and :math:`m` is the number of
+(ordered-view) subsets.  Each update below operates on a **single subset**
+:math:`k` (one of :math:`m`): :math:`P_\\text{tof}^{(k)}` and
+:math:`P_\\text{nt}^{(k)}` are the emission and attenuation projectors
+restricted to the LORs of subset :math:`k`, and :math:`y^{(k)}`,
+:math:`s^{(k)}`, :math:`a^{(k)}`,
+:math:`\\bar z^{(k)} = a^{(k)} \\odot (P_\\text{tof}^{(k)} G \\lambda)` and
+:math:`\\bar y^{(k)} = \\bar z^{(k)} + s^{(k)}` the corresponding
+subset sinograms.  The :math:`1/m` factor distributes the penalty gradient
+evenly across the :math:`m` subsets, so one full sweep applies it once.
 
 * **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in the
-  system matrix.  The back projection :math:`G^T P_\\text{tof}^T` already sums
-  over the TOF axis, so no intermediate sinogram is needed:
+  system matrix.  The back projection :math:`G^T (P_\\text{tof}^{(k)})^T` already
+  sums over the TOF axis, so no intermediate sinogram is needed:
 
   .. math::
 
-      \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda \\odot \\big(
-      G^T P_\\text{tof}^T\\big[a \\odot (y \\oslash \\bar y - \\mathbf 1)\\big]
+      \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda^{(k)} \\odot \\big(
+      G^T (P_\\text{tof}^{(k)})^T\\big[a^{(k)} \\odot
+      (y^{(k)} \\oslash \\bar y^{(k)} - \\mathbf 1)\\big]
       - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
 
   .. math::
 
-      D_\\lambda = \\lambda \\oslash \\big(G^T P_\\text{tof}^T(a \\odot \\mathbf 1)
+      D_\\lambda^{(k)} = \\lambda \\oslash \\big(
+      G^T (P_\\text{tof}^{(k)})^T(a^{(k)} \\odot \\mathbf 1)
       + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
 
 * **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
   transmission reconstruction of the ``05_transmission`` examples with the
   *blank scan* replaced by the activity forward projection
-  :math:`P_\\text{tof} G \\lambda`.  Define the TOF-summed per-LOR gradient and
-  curvature sinograms (the only component-indexed quantities)
+  :math:`P_\\text{tof}^{(k)} G \\lambda`.  Define, over the LORs :math:`i` of
+  subset :math:`k`, the TOF-summed per-LOR gradient and curvature sinograms
+  (the only component-indexed quantities)
 
   .. math::
 
-      g_i = \\Sigma_t\\, \\frac{\\bar z_{i,t}}{\\bar y_{i,t}}
-      (\\bar y_{i,t} - y_{i,t}),
+      g^{(k)}_i = \\Sigma_t\\, \\frac{\\bar z^{(k)}_{i,t}}{\\bar y^{(k)}_{i,t}}
+      (\\bar y^{(k)}_{i,t} - y^{(k)}_{i,t}),
       \\qquad
-      c_i = \\Sigma_t\\, \\frac{\\bar z_{i,t}^2}{\\bar y_{i,t}} ;
+      c^{(k)}_i = \\Sigma_t\\, \\frac{(\\bar z^{(k)}_{i,t})^2}{\\bar y^{(k)}_{i,t}} ;
 
   then, restricted to the object support,
 
   .. math::
 
-      \\mu \\leftarrow \\Big[\\mu + D_\\mu \\odot \\big(
-      P_\\text{nt}^T g - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
+      \\mu \\leftarrow \\Big[\\mu + D_\\mu^{(k)} \\odot \\big(
+      (P_\\text{nt}^{(k)})^T g^{(k)} - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
 
   .. math::
 
-      D_\\mu = \\mathbf 1 \\oslash \\big(
-      P_\\text{nt}^T\\big[(P_\\text{nt}\\mathbf 1) \\odot c\\big]
+      D_\\mu^{(k)} = \\mathbf 1 \\oslash \\big(
+      (P_\\text{nt}^{(k)})^T\\big[(P_\\text{nt}^{(k)}\\mathbf 1) \\odot c^{(k)}\\big]
       + \\tfrac{\\beta_\\mu}{m}\\,\\kappa / \\delta_\\mu\\big) .
 
 .. note::
     **Exact TOF gradient vs. the TOF-summed approximation.**  The gradient
-    sinogram :math:`g_i` above forms the per-TOF-bin residual
-    :math:`\\tfrac{\\bar z_{i,t}}{\\bar y_{i,t}}(\\bar y_{i,t} - y_{i,t})` and only
-    **then** sums over the TOF axis (:math:`\\Sigma_t`) -- i.e. :math:`P_\\text{nt}^T g`
-    is the *exact* gradient of the full TOF log-likelihood with respect to
-    :math:`\\mu`.  The MLTR update in
+    sinogram :math:`g^{(k)}_i` above forms the per-TOF-bin residual
+    :math:`\\tfrac{\\bar z^{(k)}_{i,t}}{\\bar y^{(k)}_{i,t}}(\\bar y^{(k)}_{i,t} - y^{(k)}_{i,t})`
+    and only **then** sums over the TOF axis (:math:`\\Sigma_t`) -- i.e.
+    :math:`(P_\\text{nt}^{(k)})^T g^{(k)}` is the *exact* gradient of the
+    subset-:math:`k` TOF log-likelihood with respect to :math:`\\mu`.  The MLTR update in
     :footcite:t:`Rezaei2012` (their Eq. 6) instead sums :math:`\\bar z`,
     :math:`s` and :math:`y` over TOF **first** and runs a non-TOF transmission
     step on the resulting TOF-summed sinogram.  Because the attenuation factor
