@@ -8,7 +8,7 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t}(\\lambda, \\mu) = \\bar z_{i,t}(\\lambda, \\mu) + s_{i,t},
+    \\bar{y}_{i,t}(\\lambda, \\mu) = \\bar z_{i,t}(\\lambda, \\mu) + \\bar s_{i,t},
     \\qquad
     \\bar z_{i,t}(\\lambda, \\mu) = a_i(\\mu) \\, (P_\\text{tof} B \\lambda)_{i,t},
     \\qquad
@@ -16,7 +16,8 @@ measurement.  The TOF emission model is
 
 where :math:`\\bar z_{i,t}` is the expected (attenuated, resolution-blurred)
 emission contribution to TOF bin :math:`t` of LOR :math:`i`, :math:`\\bar y_{i,t}`
-the expected data after adding the contamination :math:`s_{i,t}`,
+the expected data after adding the **expected** contamination
+:math:`\\bar s_{i,t}`,
 :math:`P_\\text{tof}` is the **TOF emission projector**, :math:`B` is an
 image-based Gaussian **resolution model** (PSF) applied to the activity
 :math:`\\lambda`, and :math:`P_\\text{nt}` is the **non-TOF** projector used
@@ -24,8 +25,9 @@ for the attenuation line integrals.  The attenuation factor :math:`a_i` is the
 same for every TOF bin :math:`t` of a given LOR :math:`i` and carries **no**
 resolution model -- the PET resolution loss (positron range, non-collinearity,
 detector response) blurs the apparent *activity*, not the bulk attenuation of
-the medium.  Finally :math:`s` is a strictly positive contamination (scatter +
-randoms); here it is assumed known and fixed (see the warning below).
+the medium.  Finally :math:`\\bar s` is the strictly positive **expected**
+contamination (mean scatter + randoms) -- an expectation, not a noisy
+realisation; here it is assumed known and fixed (see the warning below).
 
 .. tip::
     MLAA reuses the machinery of two earlier examples and is much easier to
@@ -65,16 +67,16 @@ operators (:math:`P_\\text{tof}`, :math:`B`, :math:`P_\\text{nt}` and their
 transposes) act on whole arrays; :math:`\\odot` and :math:`\\oslash` denote
 elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
 is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
-(P_\\text{tof} B \\lambda)` and :math:`\\bar y = \\bar z + s` are the array
+(P_\\text{tof} B \\lambda)` and :math:`\\bar y = \\bar z + \\bar s` are the array
 (elementwise) forms of :math:`\\bar z_{i,t}` and :math:`\\bar y_{i,t}` above;
 :math:`\\Sigma_t` sums over the TOF axis; and :math:`m` is the number of
 (ordered-view) subsets.  Each update below operates on a **single subset**
 :math:`k` (one of :math:`m`): :math:`P_\\text{tof}^{(k)}` and
 :math:`P_\\text{nt}^{(k)}` are the emission and attenuation projectors
 restricted to the LORs of subset :math:`k`, and :math:`y^{(k)}`,
-:math:`s^{(k)}`, :math:`a^{(k)}`,
+:math:`\\bar s^{(k)}`, :math:`a^{(k)}`,
 :math:`\\bar z^{(k)} = a^{(k)} \\odot (P_\\text{tof}^{(k)} B \\lambda)` and
-:math:`\\bar y^{(k)} = \\bar z^{(k)} + s^{(k)}` the corresponding
+:math:`\\bar y^{(k)} = \\bar z^{(k)} + \\bar s^{(k)}` the corresponding
 subset sinograms.  The :math:`1/m` factor distributes the penalty gradient
 evenly across the :math:`m` subsets, so one full sweep applies it once.
 
@@ -167,11 +169,11 @@ combines the data (sensitivity) and prior curvatures.
     :math:`(P_\\text{nt}^{(k)})^T g^{(k)}` is the *exact* gradient of the
     subset-:math:`k` TOF log-likelihood with respect to :math:`\\mu`.  The MLTR update in
     :footcite:t:`Rezaei2012` (their Eq. 6) instead sums :math:`\\bar z`,
-    :math:`s` and :math:`y` over TOF **first** and runs a non-TOF transmission
+    :math:`\\bar s` and :math:`y` over TOF **first** and runs a non-TOF transmission
     step on the resulting TOF-summed sinogram.  Because the attenuation factor
     :math:`a_i` is identical for every TOF bin, that TOF-summed sinogram is a
     valid non-TOF transmission measurement; the two gradients coincide for a
-    single TOF bin or when the contamination vanishes (:math:`s = 0`), and
+    single TOF bin or when the contamination vanishes (:math:`\\bar s = 0`), and
     differ slightly otherwise (a sum of ratios :math:`\\sum_t
     \\bar z_{i,t} y_{i,t}/\\bar y_{i,t}` vs. a ratio of sums).  Summing first is
     cheaper -- it operates on the much smaller non-TOF sinogram -- whereas the
@@ -211,13 +213,14 @@ crosstalk = each image shows only its own structure).
     CPU.  Run it locally, ideally on a GPU backend.
 
 .. warning::
-    For simplicity the contamination :math:`s` (scatter + randoms) is treated
-    as **known and fixed** throughout.  This is not realistic: the scatter
-    distribution depends on *both* the activity :math:`\\lambda` **and** the
-    attenuation :math:`\\mu`, so a real MLAA pipeline must **re-estimate it
-    iteratively** (e.g. a single-scatter simulation refreshed as
-    :math:`\\lambda` and :math:`\\mu` evolve).  Holding it fixed here -- and
-    reusing the known :math:`s` in the non-attenuation-corrected warm-start
+    For simplicity the expected contamination :math:`\\bar s` (scatter +
+    randoms) is treated as **known and fixed** throughout.  This is not
+    realistic: the scatter distribution depends on *both* the activity
+    :math:`\\lambda` **and** the attenuation :math:`\\mu`, so a real MLAA
+    pipeline must **re-estimate it iteratively** (e.g. a single-scatter
+    simulation refreshed as :math:`\\lambda` and :math:`\\mu` evolve).  Holding
+    it fixed here -- and reusing the known :math:`\\bar s` in the
+    non-attenuation-corrected warm-start
     while omitting attenuation -- is a deliberate idealisation that keeps the
     example focused on the joint activity/attenuation update itself.
 
