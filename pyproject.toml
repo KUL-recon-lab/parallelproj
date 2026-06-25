@@ -174,7 +174,13 @@ python = ">=3.13"
 pytest = ">=8"
 pytest-cov = "*"
 array-api-strict = "*"
-pytorch = "*"
+# NOTE: pytorch is intentionally NOT declared here.  It is pulled in per
+# environment instead: the CPU environments add the ``torch-cpu`` feature
+# (CPU build), while the CUDA environments get it from the ``cuda*``
+# features (CUDA build).  Declaring an unconstrained ``pytorch = "*"`` here
+# would let the solver pick the higher-numbered CUDA build on linux-64
+# whenever the locking machine exposes ``__cuda`` -- which then needs
+# ``__cuda`` at install time and breaks CPU CI / Read the Docs.
 
 [tool.pixi.feature.test.tasks]
 # ``depends-on = ["setup-hooks"]`` is the contributor-friendly workaround
@@ -199,7 +205,9 @@ sphinxext-opengraph = "*"
 furo = "*"
 sphinxcontrib-bibtex = "*"
 joblib = "*"        # used by sphinx-gallery for parallel example execution
-pytorch = "*"       # docs/examples/05_torch/01_run_projection_layer.py uses torch
+# pytorch (used by docs/examples/05_torch/01_run_projection_layer.py) comes
+# from the ``torch-cpu`` feature on the ``docs`` env and from the ``cuda13``
+# feature on the ``docs-gpu`` env -- see the note in the ``test`` feature.
 
 [tool.pixi.feature.docs.tasks]
 # See note on ``depends-on = ["setup-hooks"]`` under the test feature.
@@ -237,6 +245,21 @@ ipython = "*"
 [tool.pixi.feature.examples.tasks]
 ipython-examples = { cmd = "ipython", env = { PYTHONPATH = "docs/examples" }, description = "Start IPython with docs/examples/ on PYTHONPATH for interactive example exploration." }
 
+# ---- CPU pytorch ----
+#
+# Pins the CPU build of pytorch for the non-GPU environments.  The build
+# string match keeps the lock reproducible regardless of whether the
+# machine that regenerates it exposes ``__cuda``: without it, pixi picks
+# the higher-numbered CUDA build on linux-64, which then requires
+# ``__cuda`` at install time and breaks CPU CI and Read the Docs.  This
+# feature is deliberately kept separate from ``test``/``docs`` (which are
+# also composed into the CUDA environments) so the CPU pin never leaks
+# into a GPU environment, where ``cpu*`` and ``cuda*`` builds cannot be
+# intersected.
+
+[tool.pixi.feature.torch-cpu.dependencies]
+pytorch = { version = "*", build = "cpu*" }
+
 # ---- CUDA 12 stack ----
 #
 # GPU environments only make sense on linux-64 (where conda-forge ships
@@ -251,6 +274,8 @@ system-requirements = { cuda = "12" }
 [tool.pixi.feature.cuda12.dependencies]
 cuda-version = "12.*"
 cupy = "*"
+# CUDA build of pytorch (selected via system-requirements.cuda above).
+pytorch = "*"
 
 # ---- CUDA 13 stack ----
 
@@ -261,6 +286,8 @@ system-requirements = { cuda = "13" }
 [tool.pixi.feature.cuda13.dependencies]
 cuda-version = "13.*"
 cupy = "*"
+# CUDA build of pytorch (selected via system-requirements.cuda above).
+pytorch = "*"
 
 # ---- environments ----
 #
@@ -294,9 +321,9 @@ cupy = "*"
 
 [tool.pixi.environments]
 default = { features = ["py312", "examples"] }
-test = { features = ["test", "py312", "examples"] }
-test-py-latest = { features = ["test", "py-latest", "examples"] }
-docs = { features = ["docs", "py312", "examples"] }
+test = { features = ["test", "torch-cpu", "py312", "examples"] }
+test-py-latest = { features = ["test", "torch-cpu", "py-latest", "examples"] }
+docs = { features = ["docs", "torch-cpu", "py312", "examples"] }
 cuda12 = { features = ["test", "cuda12", "py312", "examples"] }
 cuda13 = { features = ["test", "cuda13", "py312", "examples"] }
 docs-gpu = { features = ["docs", "docs-gpu", "cuda13", "py312", "examples"] }
