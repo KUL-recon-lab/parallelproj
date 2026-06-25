@@ -136,8 +136,8 @@ scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 #
 # Transmission data have no TOF information, so we use a plain non-TOF
 # projector.  The ground-truth :math:`\mu` image is the elliptic cylinder
-# phantom rescaled such that the cylinder background equals water at
-# 511 keV (:math:`0.0096 \, \text{mm}^{-1}`); the hot / cold inserts
+# phantom rescaled such that the cylinder background equals the linear attenuation coefficient 
+# of water at 511 keV (:math:`0.0096 \, \text{mm}^{-1}`); the hot / cold inserts
 # become dense / air-like regions.
 
 num_rings = 3
@@ -185,7 +185,7 @@ fov_mask = proj.fov_mask()
 # Simulate transmission data
 # ---------------------------
 #
-# Noise-free unscattered transmission :math:`\bar{\psi} = b e^{-P\mu}`,
+# Noise-free unscattered transmission :math:`\bar{\psi}_i = b_i e^{-(P\mu)_i}`,
 # plus a smooth (here: constant) strictly positive scatter background with
 # known mean, then Poisson noise.
 
@@ -215,8 +215,7 @@ y = xp.asarray(
 # .. math::
 #     \nabla_\mu L = P^T\left[\frac{\bar{\psi}}{\bar{y}}(\bar{y} - y)\right]
 #
-# and the forward projection of an all-ones image :math:`P\mathbf{1}`
-# (the De Pierro separability weights), precomputed once.
+# and the forward projection of an all-ones image :math:`P\mathbf{1}`, precomputed once.
 
 ones_img = xp.ones(proj.in_shape, dtype=xp.float32, device=dev)
 P1 = proj(ones_img)  # sinogram of intersection-length sums
@@ -357,8 +356,10 @@ print(
 # All three reach essentially the same maximum-likelihood solution.  MLTR
 # is the faster of the two surrogate methods; SPS additionally *guarantees*
 # a monotone increase of :math:`L`.  On this unregularised problem L-BFGS-B
-# converges at least as fast as MLTR -- its quasi-Newton metric captures the
+# converges much faster than MLTR -- its quasi-Newton metric captures the
 # curvature that the separable surrogates approximate with a fixed diagonal.
+# However, as will be shown in the next example, in contrast to L-BFGS-B, MLTR
+# can be easily run with subsets (OS-MLTR).
 
 c_min = float(min(c.min() for c in cost.values()))
 c_max = float(cost["MLTR"][50])
