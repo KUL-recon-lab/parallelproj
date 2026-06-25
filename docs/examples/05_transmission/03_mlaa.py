@@ -54,6 +54,16 @@ restricted to the LORs of subset :math:`k`, and :math:`y^{(k)}`,
 subset sinograms.  The :math:`1/m` factor distributes the penalty gradient
 evenly across the :math:`m` subsets, so one full sweep applies it once.
 
+The penalty :math:`R` is an edge-preserving **log-cosh** prior on the
+nearest-neighbour finite differences of the image: :math:`\\delta_\\lambda`
+and :math:`\\delta_\\mu` are its edge-preservation scales (differences much
+larger than :math:`\\delta` are penalised roughly linearly, much smaller ones
+quadratically), and :math:`\\kappa` is the prior curvature constant -- the
+diagonal of the finite-difference operator's normal matrix, equal to twice the
+number of image dimensions.  :math:`D_\\lambda^{(k)}` and :math:`D_\\mu^{(k)}`
+are the **harmonic-mean preconditioners** that combine the data (sensitivity)
+and prior curvatures, exactly as in ``05_transmission/02_run_maptr.py``.
+
 * **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in the
   system matrix.  The back projection :math:`G^T (P_\\text{tof}^{(k)})^T` already
   sums over the TOF axis, so no intermediate sinogram is needed:
@@ -261,14 +271,15 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(
 
 fov_mask = proj_nt.fov_mask()
 
-# Image-based Gaussian resolution model (PSF) for the *emission* path only.
-# Composing it with the TOF projector into a single operator means the
-# transpose (used in every activity update) is assembled automatically in the
-# right order -- no chance of forgetting R^T.  The attenuation path keeps the
-# bare geometric non-TOF projector (no PSF; see the module docstring).
+# Image-based Gaussian resolution model (PSF) -- the operator G in the
+# docstring -- for the *emission* path only.  Composing it with the TOF
+# projector into a single operator means the transpose (used in every
+# activity update) is assembled automatically in the right order -- no chance
+# of forgetting G^T.  The attenuation path keeps the bare geometric non-TOF
+# projector (no PSF; see the module docstring).
 psf_sigma = tuple(psf_fwhm / 2.355 / vs for vs in voxel_size)  # voxels
-res_model = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
-A = parallelproj.operators.CompositeLinearOperator([proj, res_model])
+G = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
+A = parallelproj.operators.CompositeLinearOperator([proj, G])
 
 # %%
 # Ground-truth activity and attenuation -- DIFFERENT insert patterns
@@ -330,7 +341,7 @@ A_k = []  # subset emission operators: TOF projector composed with the PSF
 for k in range(num_subsets):
     p = copy(proj)
     p.views = subset_views[k]
-    A_k.append(parallelproj.operators.CompositeLinearOperator([p, res_model]))
+    A_k.append(parallelproj.operators.CompositeLinearOperator([p, G]))
     q = copy(proj_nt)
     q.views = subset_views[k]
     proj_nt_k.append(q)
@@ -341,8 +352,9 @@ s_k = [s[subset_slices[k]] for k in range(num_subsets)]
 ones_img = xp.ones(img_shape, dtype=xp.float32, device=dev)
 Pnt1_k = [proj_nt_k[k](ones_img) for k in range(num_subsets)]  # subset att sensitivity
 
-G = parallelproj.operators.FiniteForwardDifference(img_shape)
-kappa = 2.0 * len(img_shape)  # diag(G^T G) for forward differences
+# finite-difference operator of the edge-preserving prior (NOT the PSF G above)
+fd = parallelproj.operators.FiniteForwardDifference(img_shape)
+kappa = 2.0 * len(img_shape)  # diag(fd^T fd) for forward differences = 2 * ndim
 
 
 def emission_neg_logL(lam: Array, mu: Array) -> float:
@@ -425,8 +437,8 @@ for k in range(num_subsets):
     lam_warm = _safe(lam_warm * update, sens, fov_mask)
 
 delta_lam = 0.3 * float(xp.mean(lam_warm[lam_warm > 0]))
-reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), G)
-reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
+reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), fd)
+reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), fd)
 prior_curv_lam = beta_lam * kappa / delta_lam
 prior_curv_mu = beta_mu * kappa / delta_mu
 
@@ -505,7 +517,7 @@ for it in range(num_outer):
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # G^T P_\\text{tof}^T (a 1) (attenuated)
+        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # G^T P_tof^T (a * 1), attenuated
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
