@@ -265,7 +265,7 @@ for k, op in enumerate(pet_subset_linop_seq):
 #
 # The scanner's cylindrical field of view does not cover every voxel of the
 # image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity :math:`(A^H 1)_i = 0`.  Dividing by zero in the EM
+# their sensitivity :math:`(A^T 1)_i = 0`.  Dividing by zero in the EM
 # preconditioner would produce NaN / Inf values that corrupt the
 # reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
 # boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
@@ -289,7 +289,7 @@ def em_update(
     """One EM update rewritten as a preconditioned gradient descent step.
 
     Computes :math:`x^+ = x - D \\nabla f(x)` where the diagonal
-    preconditioner is :math:`D = \\operatorname{diag}(x / (A^H 1))`.
+    preconditioner is :math:`D = \\operatorname{diag}(x / (A^T 1))`.
     Voxels outside the FOV are excluded via ``img_mask`` to avoid
     division by the zero sensitivity values in ``adj_ones``.
 
@@ -301,8 +301,8 @@ def em_update(
         Differentiable data-fidelity term whose gradient is evaluated at
         ``x_cur``.
     adj_ones : Array
-        Sensitivity image :math:`A^H 1` (or subset variant
-        :math:`(A^k)^H 1`).
+        Sensitivity image :math:`A^T 1` (or subset variant
+        :math:`(A^k)^T 1`).
     img_mask : Array or None, optional
         Boolean FOV mask (``True`` inside the FOV).  Preconditioner is
         zeroed outside the FOV so that zero-sensitivity voxels do not

@@ -142,7 +142,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
 
 # The scanner's cylindrical field of view does not cover every voxel of the
 # image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity (A^H 1)_i = 0.  Dividing by zero in the EM preconditioner
+# their sensitivity (A^T 1)_i = 0.  Dividing by zero in the EM preconditioner
 # would produce NaN / Inf values that corrupt the reconstruction.
 # fov_mask is True inside the FOV and is set to None when every image voxel
 # is inside the FOV (no masking needed).
@@ -322,7 +322,7 @@ sinogram_neg_logL = C2AffineObjective(
 )
 
 # The sensitivity image A^T 1 is required by NegPoissonLogLListmode.
-# It equals the adjoint of the *sinogram* (full) forward model applied to
+# It equals the transpose of the *sinogram* (full) forward model applied to
 # all-ones, and serves as the diagonal of the EM preconditioner.
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)

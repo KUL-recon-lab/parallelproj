@@ -125,8 +125,11 @@ fig2.show()
 # Simple geometrical back projections
 # --------------------------------------
 #
-# :meth:`.RegularPolygonPETProjector.adjoint` allows us to calculate
-# the geometrical back projection (the adjoint of the forward projection)
+# The geometrical back projection is the **transpose** :math:`P^T` of the
+# forward projector.  Because the projectors operate on real-valued images and
+# sinograms, the transpose coincides with the adjoint, so it is computed with
+# the general :meth:`.RegularPolygonPETProjector.adjoint` method (equivalently
+# the ``.H`` property, e.g. ``proj.H(x_fwd)``):
 x_fwd_back = proj.adjoint(x_fwd)
 
 # %%
@@ -138,7 +141,7 @@ x_fwd_back = proj.adjoint(x_fwd)
 #
 # If our forward operator :math:`A = P G` is given by the composition of an
 # image-based resolution model :math:`G` and a projection operator :math:`P`,
-# its adjoint is given by :math:`A^H = G^H P^H` which is implemented by
+# its transpose is given by :math:`A^T = G^T P^T` which is implemented by
 # :meth:`.CompositeLinearOperator.adjoint`
 
 

@@ -183,7 +183,7 @@ fov_mask = proj_nt.fov_mask()
 
 # Image-based Gaussian resolution model (PSF) for the *emission* path only.
 # Composing it with the TOF projector into a single operator means the
-# adjoint (used in every activity update) is assembled automatically in the
+# transpose (used in every activity update) is assembled automatically in the
 # right order -- no chance of forgetting R^T.  The attenuation path keeps the
 # bare geometric non-TOF projector (no PSF; see the module docstring).
 psf_sigma = tuple(psf_fwhm / 2.355 / vs for vs in voxel_size)  # voxels
