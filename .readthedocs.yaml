@@ -27,9 +27,14 @@ build:
     python: "latest"
   jobs:
     create_environment:
+      # Pin the pixi version (do NOT use "latest"): newer pixi releases ship a
+      # pixi-build backend whose ``pixi-build-api-version`` is incompatible with
+      # the ``pixi-build-python`` recorded in ``pixi.lock``, which breaks the
+      # build-backend solve.  Keep this in sync with the version pinned in CI
+      # (.github/workflows/test.yml).
       - asdf plugin add pixi
-      - asdf install pixi latest
-      - asdf global pixi latest
+      - asdf install pixi 0.71.0
+      - asdf global pixi 0.71.0
     install:
       - pixi install -e docs
     build:

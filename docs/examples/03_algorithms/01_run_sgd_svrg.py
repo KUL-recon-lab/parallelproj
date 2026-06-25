@@ -294,7 +294,7 @@ reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
 # --------------------------------------------------
 #
 # We define one subset objective :math:`f_k` per subset and one full
-# objective :math:`F` for evaluation, as well as the sensitivity image :math:`A^H 1`
+# objective :math:`F` for evaluation, as well as the sensitivity image :math:`A^T 1`
 #
 # .. note::
 #     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
@@ -309,7 +309,7 @@ reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
 #     reach zero in bins with counts, e.g. with zero contamination and a
 #     mismatched forward model.
 
-# sensitivity image (adjoint of all-ones vector)
+# sensitivity image (transpose applied to the all-ones vector)
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
@@ -346,7 +346,7 @@ total_objective = full_data_fidelity + reg
 #
 # The scanner's cylindrical field of view does not cover every voxel of the
 # image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity :math:`(A^H 1)_i = 0`.  In this example the regulariser
+# their sensitivity :math:`(A^T 1)_i = 0`.  In this example the regulariser
 # Hessian keeps the preconditioner denominator strictly positive everywhere,
 # so there is no divide-by-zero risk.  However, zeroing the initial image
 # outside the FOV ensures those voxels stay at zero throughout reconstruction:

@@ -8,37 +8,180 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t} = a_i \\, (P \\lambda)_{i,t} + s_{i,t},
+    \\bar{y}_{i,t}(\\lambda, \\mu) = \\bar z_{i,t}(\\lambda, \\mu) + \\bar s_{i,t},
     \\qquad
-    a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
+    \\bar z_{i,t}(\\lambda, \\mu) = a_i(\\mu) \\, (P_\\text{tof} B \\lambda)_{i,t},
+    \\qquad
+    a_i(\\mu) = e^{-(P_\\text{nt}\\,\\mu)_i},
 
-where :math:`P` is the **TOF** emission projector -- here composed with an
-image-based Gaussian **resolution model** (PSF), so :math:`P\\lambda` really
-means (TOF projector) :math:`\\circ` (PSF) applied to :math:`\\lambda`.
-:math:`P_\\text{nt}` is the **non-TOF** projector used for the attenuation
-line integrals: the attenuation factor :math:`a_i` is the same for every TOF
-bin :math:`t` of a given LOR :math:`i` and carries **no** resolution model --
-the PET resolution loss (positron range, non-collinearity, detector
-response) blurs the apparent *activity*, not the bulk attenuation of the
-medium.  Finally :math:`s` is a strictly positive contamination (scatter +
-randoms); here it is assumed known and fixed (see the warning below).
+where :math:`\\bar z_{i,t}` is the expected (attenuated, resolution-blurred)
+emission contribution to TOF bin :math:`t` of LOR :math:`i`, :math:`\\bar y_{i,t}`
+the expected data after adding the **expected** contamination
+:math:`\\bar s_{i,t}`,
+:math:`P_\\text{tof}` is the **TOF emission projector**, :math:`B` is an
+image-based Gaussian **resolution model** (PSF) applied to the activity
+:math:`\\lambda`, and :math:`P_\\text{nt}` is the **non-TOF** projector used
+for the attenuation line integrals.  The attenuation factor :math:`a_i` is the
+same for every TOF bin :math:`t` of a given LOR :math:`i` and carries **no**
+resolution model -- the PET resolution loss (positron range, non-collinearity,
+detector response) blurs the apparent *activity*, not the bulk attenuation of
+the medium.  Finally :math:`\\bar s` is the strictly positive **expected**
+contamination (mean scatter + randoms) -- an expectation, not a noisy
+realisation; here it is assumed known and fixed (see the warning below).
 
-MLAA alternates two block updates of the penalised log-likelihood
-:math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`:
+.. tip::
+    MLAA reuses the machinery of two earlier examples and is much easier to
+    follow once you have run and understood them.  The activity block is an
+    ordered-subset **emission** update -- see
+    ``03_algorithms/00_run_mlem_osem_svrg.py`` (OSEM / SVRG) and
+    ``03_algorithms/01_run_sgd_svrg.py`` -- and the attenuation block is the
+    penalised **transmission** (MAP-TR) update of
+    ``05_transmission/02_run_maptr.py`` (which itself builds on
+    ``00_mltr_sps.py``).  The two MLAA blocks below are essentially those two
+    algorithms applied in alternation.
 
-* **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in
-  the system matrix -- preconditioned gradient ascent with the
-  EM/harmonic-mean preconditioner :math:`D_\\lambda = \\lambda /
-  (A^T\\mathbf 1 + \\lambda\\,\\beta_\\lambda\\kappa/\\delta_\\lambda)`;
-* **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- this is
-  exactly the transmission reconstruction of the ``05_transmission``
-  examples, with the *blank scan* replaced by the current activity forward
-  projection :math:`b = P\\lambda` (and, with TOF, the per-TOF-bin MLTR
-  weights summed over the TOF axis before back-projecting through the
-  non-TOF projector).
+For implementation convenience the TOF projector :math:`P_\\text{tof}` and the
+resolution model :math:`B` are composed into a single linear operator
+:math:`A = P_\\text{tof} B` (a :class:`.CompositeLinearOperator`); its transpose
+:math:`B^T P_\\text{tof}^T` is then assembled automatically, so the code uses
+``A`` and ``A.adjoint`` wherever the equations below write
+:math:`P_\\text{tof} B` and :math:`B^T P_\\text{tof}^T`.
+
+MLAA maximises the penalised emission Poisson log-likelihood
+
+.. math::
+
+    \\Phi(\\lambda,\\mu) = L(\\lambda,\\mu)
+    - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu),
+    \\qquad
+    L(\\lambda,\\mu) = \\sum_{i,t}\\big(
+    y_{i,t}\\,\\log \\bar y_{i,t}(\\lambda,\\mu) - \\bar y_{i,t}(\\lambda,\\mu)
+    \\big)
+
+(:math:`L` is the Poisson log-likelihood up to a constant independent of
+:math:`\\lambda,\\mu`) by alternating two preconditioned gradient-ascent
+**block** updates -- one for :math:`\\lambda` (activity, :math:`\\mu` held
+fixed) and one for :math:`\\mu` (attenuation, :math:`\\lambda` held fixed).
+In the equations below,
+operators (:math:`P_\\text{tof}`, :math:`B`, :math:`P_\\text{nt}` and their
+transposes) act on whole arrays; :math:`\\odot` and :math:`\\oslash` denote
+elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
+is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
+(P_\\text{tof} B \\lambda)` and :math:`\\bar y = \\bar z + \\bar s` are the array
+(elementwise) forms of :math:`\\bar z_{i,t}` and :math:`\\bar y_{i,t}` above;
+:math:`\\Sigma_t` sums over the TOF axis; and :math:`m` is the number of
+(ordered-view) subsets.  Each update below operates on a **single subset**
+:math:`k` (one of :math:`m`): :math:`P_\\text{tof}^{(k)}` and
+:math:`P_\\text{nt}^{(k)}` are the emission and attenuation projectors
+restricted to the LORs of subset :math:`k`, and :math:`y^{(k)}`,
+:math:`\\bar s^{(k)}`, :math:`a^{(k)}`,
+:math:`\\bar z^{(k)} = a^{(k)} \\odot (P_\\text{tof}^{(k)} B \\lambda)` and
+:math:`\\bar y^{(k)} = \\bar z^{(k)} + \\bar s^{(k)}` the corresponding
+subset sinograms.  The :math:`1/m` factor distributes the penalty gradient
+evenly across the :math:`m` subsets, so one full sweep applies it once.
+
+Differentiating :math:`L` restricted to the LORs of subset :math:`k` gives the
+two **subset log-likelihood gradients** that drive the updates:
+
+.. math::
+
+    \\nabla_\\lambda L^{(k)} = B^T (P_\\text{tof}^{(k)})^T\\big[
+    a^{(k)} \\odot (y^{(k)} \\oslash \\bar y^{(k)} - \\mathbf 1)\\big],
+
+.. math::
+
+    \\nabla_\\mu L^{(k)} = (P_\\text{nt}^{(k)})^T g^{(k)},
+    \\qquad
+    g^{(k)}_i = \\Sigma_t\\, \\frac{\\bar z^{(k)}_{i,t}}{\\bar y^{(k)}_{i,t}}
+    (\\bar y^{(k)}_{i,t} - y^{(k)}_{i,t}) .
+
+The activity back projection :math:`B^T (P_\\text{tof}^{(k)})^T` already sums
+over the TOF axis, so :math:`\\nabla_\\lambda L^{(k)}` needs no intermediate
+sinogram; the attenuation gradient first forms the TOF-summed per-LOR residual
+:math:`g^{(k)}` and then back-projects it through the non-TOF projector.
+
+Each penalty :math:`R` is an edge-preserving **log-cosh** roughness prior on
+the nearest-neighbour finite differences :math:`G x` of the image (the same
+prior and preconditioner as in ``05_transmission/02_run_maptr.py``):
+
+.. math::
+
+    R(x) = \\delta \\sum_d \\sum_j \\log\\cosh\\!\\Big(\\frac{(G x)_{d,j}}{\\delta}\\Big),
+    \\qquad
+    \\nabla R(x) = G^T \\tanh(G x / \\delta),
+
+where :math:`x` is :math:`\\lambda` or :math:`\\mu`, :math:`G` is the
+**finite-difference** operator (the sum runs over the difference directions
+:math:`d` and voxels :math:`j`), and :math:`\\delta` -- :math:`\\delta_\\lambda`
+or :math:`\\delta_\\mu` -- is the edge-preservation scale: differences
+:math:`\\gg \\delta` are penalised roughly linearly (edges preserved),
+:math:`\\ll \\delta` quadratically (noise smoothed).  The constant
+:math:`\\kappa = \\operatorname{diag}(G^T G) \\approx 2\\,n_\\text{dim}` is the
+log-cosh **maximal curvature** (a valid diagonal majorant, since
+:math:`\\tfrac{d^2}{dz^2}\\,\\delta\\log\\cosh(z/\\delta) =
+\\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`); it enters the
+**harmonic-mean preconditioners** :math:`D_\\lambda^{(k)}` and
+:math:`D_\\mu^{(k)}` through the :math:`\\beta\\,\\kappa/\\delta` term, which
+combines the data (sensitivity) and prior curvatures.
+
+* **activity** (:math:`\\mu` fixed) -- a penalised OSEM step driven by
+  :math:`\\nabla_\\lambda L^{(k)}`:
+
+  .. math::
+
+      \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda^{(k)} \\odot \\big(
+      \\nabla_\\lambda L^{(k)}
+      - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
+
+  .. math::
+
+      D_\\lambda^{(k)} = \\lambda \\oslash \\big(
+      B^T (P_\\text{tof}^{(k)})^T a^{(k)}
+      + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
+
+* **attenuation** (:math:`\\lambda` fixed) -- a penalised **OS-MAPTR** step
+  driven by :math:`\\nabla_\\mu L^{(k)}`: the transmission update of
+  ``05_transmission/02_run_maptr.py`` with the *blank scan* replaced by the
+  activity forward projection :math:`P_\\text{tof}^{(k)} B \\lambda`, and
+  restricted to the object support:
+
+  .. math::
+
+      \\mu \\leftarrow \\Big[\\mu + D_\\mu^{(k)} \\odot \\big(
+      \\nabla_\\mu L^{(k)} - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
+
+  .. math::
+
+      D_\\mu^{(k)} = \\mathbf 1 \\oslash \\big(
+      (P_\\text{nt}^{(k)})^T\\big[(P_\\text{nt}^{(k)}\\mathbf 1) \\odot c^{(k)}\\big]
+      + \\tfrac{\\beta_\\mu}{m}\\,\\kappa / \\delta_\\mu\\big),
+      \\qquad
+      c^{(k)}_i = \\Sigma_t\\, \\frac{(\\bar z^{(k)}_{i,t})^2}{\\bar y^{(k)}_{i,t}},
+
+  where :math:`c^{(k)}` is the MLTR / SPS separable curvature (as in
+  ``02_run_maptr.py``).
+
+.. note::
+    **Exact TOF gradient vs. the TOF-summed approximation.**  The gradient
+    sinogram :math:`g^{(k)}_i` above forms the per-TOF-bin residual
+    :math:`\\tfrac{\\bar z^{(k)}_{i,t}}{\\bar y^{(k)}_{i,t}}(\\bar y^{(k)}_{i,t} - y^{(k)}_{i,t})`
+    and only **then** sums over the TOF axis (:math:`\\Sigma_t`) -- i.e.
+    :math:`(P_\\text{nt}^{(k)})^T g^{(k)}` is the *exact* gradient of the
+    subset-:math:`k` TOF log-likelihood with respect to :math:`\\mu`.  The MLTR update in
+    :footcite:t:`Rezaei2012` (their Eq. 6) instead sums :math:`\\bar z`,
+    :math:`\\bar s` and :math:`y` over TOF **first** and runs a non-TOF transmission
+    step on the resulting TOF-summed sinogram.  Because the attenuation factor
+    :math:`a_i` is identical for every TOF bin, that TOF-summed sinogram is a
+    valid non-TOF transmission measurement; the two gradients coincide for a
+    single TOF bin or when the contamination vanishes (:math:`\\bar s = 0`), and
+    differ slightly otherwise (a sum of ratios :math:`\\sum_t
+    \\bar z_{i,t} y_{i,t}/\\bar y_{i,t}` vs. a ratio of sums).  Summing first is
+    cheaper -- it operates on the much smaller non-TOF sinogram -- whereas the
+    exact per-TOF form used here uses the full TOF information at slightly
+    higher cost.
 
 The two blocks are interleaved at the **subset** level: every activity
-subset update is immediately followed by ``num_mltr_epochs`` attenuation
+subset update is immediately followed by ``num_att_updates_per_act_update`` attenuation
 subset updates, so the two images improve together rather than in separate
 full passes (the total number of activity and attenuation updates is
 unchanged).
@@ -70,13 +213,14 @@ crosstalk = each image shows only its own structure).
     CPU.  Run it locally, ideally on a GPU backend.
 
 .. warning::
-    For simplicity the contamination :math:`s` (scatter + randoms) is treated
-    as **known and fixed** throughout.  This is not realistic: the scatter
-    distribution depends on *both* the activity :math:`\\lambda` **and** the
-    attenuation :math:`\\mu`, so a real MLAA pipeline must **re-estimate it
-    iteratively** (e.g. a single-scatter simulation refreshed as
-    :math:`\\lambda` and :math:`\\mu` evolve).  Holding it fixed here -- and
-    reusing the known :math:`s` in the non-attenuation-corrected warm-start
+    For simplicity the expected contamination :math:`\\bar s` (scatter +
+    randoms) is treated as **known and fixed** throughout.  This is not
+    realistic: the scatter distribution depends on *both* the activity
+    :math:`\\lambda` **and** the attenuation :math:`\\mu`, so a real MLAA
+    pipeline must **re-estimate it iteratively** (e.g. a single-scatter
+    simulation refreshed as :math:`\\lambda` and :math:`\\mu` evolve).  Holding
+    it fixed here -- and reusing the known :math:`\\bar s` in the
+    non-attenuation-corrected warm-start
     while omitting attenuation -- is a deliberate idealisation that keeps the
     example focused on the joint activity/attenuation update itself.
 
@@ -121,7 +265,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # %%
 num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
 num_outer = 10  # MLAA outer iterations
-num_mltr_epochs = 5  # OS-MAPTR updates per OS-MAPEM updates (MLTR is slower than MLEM)
+num_att_updates_per_act_update = 5  # attenuation (OS-MAPTR) subset updates per activity (OS-MAPEM) subset update (MLTR converges slower than MLEM)
 scatter_fraction = 0.6  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
 support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
@@ -181,14 +325,15 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(
 
 fov_mask = proj_nt.fov_mask()
 
-# Image-based Gaussian resolution model (PSF) for the *emission* path only.
-# Composing it with the TOF projector into a single operator means the
-# adjoint (used in every activity update) is assembled automatically in the
-# right order -- no chance of forgetting R^T.  The attenuation path keeps the
-# bare geometric non-TOF projector (no PSF; see the module docstring).
+# Image-based Gaussian resolution model (PSF) -- the operator B in the
+# docstring -- for the *emission* path only.  Composing it with the TOF
+# projector into a single operator means the transpose (used in every
+# activity update) is assembled automatically in the right order -- no chance
+# of forgetting B^T.  The attenuation path keeps the bare geometric non-TOF
+# projector (no PSF; see the module docstring).
 psf_sigma = tuple(psf_fwhm / 2.355 / vs for vs in voxel_size)  # voxels
-res_model = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
-A = parallelproj.operators.CompositeLinearOperator([proj, res_model])
+B = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
+A = parallelproj.operators.CompositeLinearOperator([proj, B])
 
 # %%
 # Ground-truth activity and attenuation -- DIFFERENT insert patterns
@@ -250,7 +395,7 @@ A_k = []  # subset emission operators: TOF projector composed with the PSF
 for k in range(num_subsets):
     p = copy(proj)
     p.views = subset_views[k]
-    A_k.append(parallelproj.operators.CompositeLinearOperator([p, res_model]))
+    A_k.append(parallelproj.operators.CompositeLinearOperator([p, B]))
     q = copy(proj_nt)
     q.views = subset_views[k]
     proj_nt_k.append(q)
@@ -261,8 +406,9 @@ s_k = [s[subset_slices[k]] for k in range(num_subsets)]
 ones_img = xp.ones(img_shape, dtype=xp.float32, device=dev)
 Pnt1_k = [proj_nt_k[k](ones_img) for k in range(num_subsets)]  # subset att sensitivity
 
+# finite-difference operator G of the edge-preserving prior (NOT the PSF B above)
 G = parallelproj.operators.FiniteForwardDifference(img_shape)
-kappa = 2.0 * len(img_shape)  # diag(G^T G) for forward differences
+kappa = 2.0 * len(img_shape)  # diag(G^T G) for forward differences = 2 * ndim
 
 
 def emission_neg_logL(lam: Array, mu: Array) -> float:
@@ -409,9 +555,9 @@ lam_hist = [lam]
 mu_hist = [mu]
 
 # Updates are interleaved at the *subset* level: each activity (OS-MAPEM)
-# subset update is immediately followed by ``num_mltr_epochs`` attenuation
+# subset update is immediately followed by ``num_att_updates_per_act_update`` attenuation
 # (OS-MAPTR) subset updates.  Over one outer iteration this still amounts to
-# one activity pass (``num_subsets`` updates) and ``num_mltr_epochs``
+# one activity pass (``num_subsets`` updates) and ``num_att_updates_per_act_update``
 # attenuation passes, but the two images now improve in lock-step.  The
 # attenuation "blank scan" is the activity forward projection ``P lam``,
 # recomputed from the just-updated activity for every attenuation update.
@@ -425,16 +571,16 @@ for it in range(num_outer):
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # A^T 1 (attenuated)
+        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # B^T P_tof^T (a * 1), attenuated
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
         lam = xp.clip(lam + D * g_pen, 0, None)
 
-        # --- num_mltr_epochs attenuation (OS-MAPTR) subset updates ---
+        # --- num_att_updates_per_act_update attenuation (OS-MAPTR) subset updates ---
         # the transmission update with the blank scan replaced by the current
         # activity forward projection P lam (TOF terms summed over TOF bins)
-        for _ in range(num_mltr_epochs):
+        for _ in range(num_att_updates_per_act_update):
             kt = att_k % num_subsets
             att_k += 1
             _, grad_sino, curv_sino = poisson_transmission_terms(

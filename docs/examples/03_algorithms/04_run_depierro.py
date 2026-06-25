@@ -116,9 +116,9 @@ def cost_function(x):
 # We apply multiple DePierro updates
 #
 # .. math::
-#     b = A^H 1 - \beta z
+#     b = A^T 1 - \beta z
 # .. math::
-#     t = x A^H \frac{y}{A x + s}
+#     t = x A^T \frac{y}{A x + s}
 # .. math::
 #     x^+ = \frac{2 t}{\sqrt{b^2 + 4 \beta t} + b}
 #

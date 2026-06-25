@@ -120,7 +120,7 @@ fig.show()
 #     y_n = \sum_{p_1 \,\in\, \mathcal{G}(n)} x_{p_1}\,,
 #
 # where :math:`\mathcal{G}(n)` is the set of span-1 plane indices that
-# fold into target plane :math:`n`.  Its adjoint replicates each output
+# fold into target plane :math:`n`.  Its transpose replicates each output
 # value back to every input plane that contributed to it.
 #
 # To see the operator in action, we set up a small 5-ring scanner, build

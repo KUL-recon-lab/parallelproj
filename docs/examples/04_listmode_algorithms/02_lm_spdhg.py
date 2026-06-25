@@ -209,7 +209,7 @@ d = xp.asarray(
 # --------------------------------
 
 x_mlem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-# calculate A^H 1
+# calculate A^T 1
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )

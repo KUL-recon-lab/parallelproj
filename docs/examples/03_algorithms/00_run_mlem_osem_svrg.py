@@ -247,10 +247,10 @@ pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
 # :footcite:p:`Shepp1982` :footcite:p:`Lange1984` :footcite:p:`Hudson1994`
 #
 # .. math::
-#     x^+ = \frac{x}{A^H 1} A^H \frac{y}{A x + s}
+#     x^+ = \frac{x}{A^T 1} A^T \frac{y}{A x + s}
 #
 # which can be rewritten as a preconditioned gradient descent step with
-# diagonal preconditioner :math:`D = \operatorname{diag}(x / (A^H 1))`:
+# diagonal preconditioner :math:`D = \operatorname{diag}(x / (A^T 1))`:
 #
 # .. math::
 #     x^+ = x - D \, \nabla_x f(x).
@@ -267,7 +267,7 @@ def em_update(
     """One EM update rewritten as a preconditioned gradient descent step.
 
     Computes :math:`x^+ = x - D \\nabla f(x)` where the diagonal
-    preconditioner is :math:`D = \\operatorname{diag}(x / (A^H 1))`.
+    preconditioner is :math:`D = \\operatorname{diag}(x / (A^T 1))`.
     Voxels outside the FOV are excluded via ``img_mask`` to avoid
     division by the zero sensitivity values in ``adj_ones``.
 
@@ -279,8 +279,8 @@ def em_update(
         Differentiable data-fidelity term whose gradient is evaluated at
         ``x_cur``.
     adj_ones : Array
-        Sensitivity image :math:`A^H 1` (or subset variant
-        :math:`(A^k)^H 1`).
+        Sensitivity image :math:`A^T 1` (or subset variant
+        :math:`(A^k)^T 1`).
     img_mask : Array or None, optional
         Boolean FOV mask (``True`` inside the FOV).  Preconditioner is
         zeroed outside the FOV so that zero-sensitivity voxels do not
@@ -304,10 +304,10 @@ def em_update(
 #
 # We define one :class:`.C2AffineObjective` per subset (for OSEM and SVRG)
 # and one for the full data (for MLEM and objective evaluation).
-# The sensitivity image :math:`A^H 1` and its per-subset counterparts
-# :math:`(A^k)^H 1` are precomputed once.
+# The sensitivity image :math:`A^T 1` and its per-subset counterparts
+# :math:`(A^k)^T 1` are precomputed once.
 
-# calculate A_k^H 1 for all subsets k, stored as (num_subsets, *in_shape)
+# calculate A_k^T 1 for all subsets k, stored as (num_subsets, *in_shape)
 subset_adjoint_ones = xp.zeros(
     (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
 )
@@ -316,7 +316,7 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
-# full sensitivity image A^H 1 = sum of all subset sensitivities
+# full sensitivity image A^T 1 = sum of all subset sensitivities
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
 
 # %%
@@ -325,7 +325,7 @@ adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
 #
 # The scanner's cylindrical field of view does not cover every voxel of the
 # image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity :math:`(A^H 1)_i = 0`.  Dividing by zero in the EM
+# their sensitivity :math:`(A^T 1)_i = 0`.  Dividing by zero in the EM
 # preconditioner would produce NaN / Inf values that corrupt the
 # reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
 # boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
@@ -390,7 +390,7 @@ print()
 # ----
 #
 # One MLEM iteration uses the full data (:math:`A`, :math:`y`, :math:`s`)
-# and the full sensitivity image :math:`A^H 1`.  It is guaranteed to
+# and the full sensitivity image :math:`A^T 1`.  It is guaranteed to
 # converge to the maximum-likelihood solution but requires one full data
 # pass per iteration.
 #
@@ -412,7 +412,7 @@ if run_mlem:
 #
 # One OSEM epoch cycles through all :math:`m` subsets, each using the
 # subset operator :math:`A^k`, subset data :math:`y^k`, contamination
-# :math:`s^k`, and subset sensitivity :math:`(A^k)^H 1`.  Fast empirical
+# :math:`s^k`, and subset sensitivity :math:`(A^k)^T 1`.  Fast empirical
 # convergence but no convergence guarantee.
 
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)

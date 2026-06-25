@@ -8,14 +8,16 @@ exact transmission Poisson likelihood with a strictly positive, smooth
 scatter background :math:`s` of known mean,
 
 .. math::
-    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i - \\bar{y}_i,
+    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i (\\mu) - \\bar{y}_i (\\mu),
     \\qquad
-    \\bar{y}_i = b_i e^{-(P \\mu)_i} + s_i,
+    \\bar{y}_i (\\mu) = \\bar{z}_i (\\mu) + s_i,
+    \\qquad
+    \\bar{z}_i (\\mu) = b_i e^{-(P \\mu)_i},
 
 reconstructed by preconditioned gradient ascent
 :math:`\\mu \\leftarrow [\\mu + D(\\mu)\\odot\\nabla_\\mu L]_+` with the MLTR
 (Newton-type) diagonal preconditioner
-:math:`D_j = 1/P^T[(P\\mathbf 1)\\,\\bar\\psi^2/\\bar y]_j`.
+:math:`D_j = 1/P^T[(P\\mathbf 1)\\,\\bar z^2/\\bar y]_j`.
 
 The sinogram is split into :math:`m` view subsets :math:`S_k` with
 subset projectors :math:`P_k`.  Three accelerations are compared against
@@ -29,8 +31,8 @@ subset projectors :math:`P_k`.  Three accelerations are compared against
 
   .. math::
       \\mu \\leftarrow \\Bigl[\\mu +
-        \\frac{P_k^T\\bigl[\\tfrac{\\bar\\psi_k}{\\bar y_k}(\\bar y_k - y_k)\\bigr]}
-             {P_k^T\\bigl[(P_k\\mathbf 1)\\,\\tfrac{\\bar\\psi_k^2}{\\bar y_k}\\bigr]}
+        \\frac{P_k^T\\bigl[\\tfrac{\\bar z_k}{\\bar y_k}(\\bar y_k - y_k)\\bigr]}
+             {P_k^T\\bigl[(P_k\\mathbf 1)\\,\\tfrac{\\bar z_k^2}{\\bar y_k}\\bigr]}
         \\Bigr]_+ .
 
   One epoch = :math:`m` subset updates ≈ one full data pass.  Like OSEM it

@@ -8,11 +8,14 @@ posteriori transmission reconstruction).  We now *minimise* the penalised
 objective
 
 .. math::
-    \\Phi(\\mu) = -L(\\mu) + \\beta R(\\mu),
+    \\Phi(\\mu) = -L(\\mu) + \\beta R(\\mu)
+
+.. math::
+    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i (\\mu) - \\bar{y}_i (\\mu),
     \\qquad
-    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i - \\bar{y}_i,
-    \\quad
-    \\bar{y}_i = b_i e^{-(P \\mu)_i} + s_i,
+    \\bar{y}_i (\\mu) = \\bar{z}_i (\\mu) + s_i,
+    \\qquad
+    \\bar{z}_i (\\mu) = b_i e^{-(P \\mu)_i},
 
 with a **log-cosh** roughness penalty on the nearest-neighbour finite
 differences :math:`G\\mu`,
@@ -32,12 +35,12 @@ linear regime while background noise is smoothed.
 emission MAP-EM one combines the EM step :math:`x/A^T\\mathbf 1` with the
 prior curvature; that is the harmonic mean of the two step sizes, i.e. the
 reciprocal of the *sum of curvatures*.  Here the MLTR denominator
-:math:`P^T[(P\\mathbf 1)\\,\\bar\\psi^2/\\bar y]` is exactly the separable
+:math:`P^T[(P\\mathbf 1)\\,\\bar z^2/\\bar y]` is exactly the separable
 diagonal majorant of the data Hessian (the analogue of :math:`A^T\\mathbf 1
 / x`), so the penalised preconditioner is
 
 .. math::
-    D(\\mu) = \\frac{1}{\\;P^T\\!\\left[(P\\mathbf 1)\\,\\bar\\psi^2/\\bar y\\right]
+    D(\\mu) = \\frac{1}{\\;P^T\\!\\left[(P\\mathbf 1)\\,\\bar z^2/\\bar y\\right]
                        + \\beta\\,\\kappa/\\delta\\;},
 
 where :math:`\\beta\\,\\kappa/\\delta` (with :math:`\\kappa = \\operatorname{diag}(G^TG)
