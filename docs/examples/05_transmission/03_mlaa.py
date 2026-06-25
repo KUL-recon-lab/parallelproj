@@ -8,11 +8,11 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t} = a_i \\, (P G \\lambda)_{i,t} + s_{i,t},
+    \\bar{y}_{i,t} = a_i \\, (P_\\text{tof} G \\lambda)_{i,t} + s_{i,t},
     \\qquad
     a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
 
-where :math:`P` is the **TOF emission projector**, :math:`G` is an
+where :math:`P_\\text{tof}` is the **TOF emission projector**, :math:`G` is an
 image-based Gaussian **resolution model** (PSF) applied to the activity
 :math:`\\lambda`, and :math:`P_\\text{nt}` is the **non-TOF** projector used
 for the attenuation line integrals.  The attenuation factor :math:`a_i` is the
@@ -22,56 +22,71 @@ detector response) blurs the apparent *activity*, not the bulk attenuation of
 the medium.  Finally :math:`s` is a strictly positive contamination (scatter +
 randoms); here it is assumed known and fixed (see the warning below).
 
-For implementation convenience the TOF projector :math:`P` and the resolution
-model :math:`G` are composed into a single linear operator ``A = P G`` (a
-:class:`.CompositeLinearOperator`); its transpose :math:`G^T P^T` is then
-assembled automatically, so the code uses ``A`` and ``A.adjoint`` wherever the
-equations below write :math:`P G` and :math:`G^T P^T`.
+For implementation convenience the TOF projector :math:`P_\\text{tof}` and the
+resolution model :math:`G` are composed into a single linear operator
+:math:`A = P_\\text{tof} G` (a :class:`.CompositeLinearOperator`); its transpose
+:math:`G^T P_\\text{tof}^T` is then assembled automatically, so the code uses
+``A`` and ``A.adjoint`` wherever the equations below write
+:math:`P_\\text{tof} G` and :math:`G^T P_\\text{tof}^T`.
 
 MLAA alternates two block updates of the penalised log-likelihood
 :math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`.
-Both are preconditioned gradient-ascent steps; writing
-:math:`\\bar z_{i,t} = a_i (P G \\lambda)_{i,t}` (so :math:`\\bar y_{i,t} =
-\\bar z_{i,t} + s_{i,t}`) and using :math:`\\beta/m` for the per-subset prior
-weight (:math:`m` = number of subsets):
+Both are preconditioned gradient-ascent steps.  In the equations below,
+operators (:math:`P_\\text{tof}`, :math:`G`, :math:`P_\\text{nt}` and their
+transposes) act on whole arrays; :math:`\\odot` and :math:`\\oslash` denote
+elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
+is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
+(P_\\text{tof} G \\lambda)` and :math:`\\bar y = \\bar z + s`; :math:`\\Sigma_t`
+sums over the TOF axis; and :math:`m` is the number of subsets.
 
-* **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in
-  the system matrix (the activity forward model is :math:`P G`):
+* **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in the
+  system matrix.  The back projection :math:`G^T P_\\text{tof}^T` already sums
+  over the TOF axis, so no intermediate sinogram is needed:
 
   .. math::
 
       \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda \\odot \\big(
-      G^T P^T\\big[a\\,(\\tfrac{y}{\\bar y} - 1)\\big]
+      G^T P_\\text{tof}^T\\big[a \\odot (y \\oslash \\bar y - \\mathbf 1)\\big]
       - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
-      \\quad
-      D_\\lambda = \\frac{\\lambda}{G^T P^T(a\\,\\mathbf 1)
-      + \\lambda\\,\\tfrac{\\beta_\\lambda}{m}\\kappa/\\delta_\\lambda} .
+
+  .. math::
+
+      D_\\lambda = \\lambda \\oslash \\big(G^T P_\\text{tof}^T(a \\odot \\mathbf 1)
+      + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
 
 * **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
   transmission reconstruction of the ``05_transmission`` examples with the
-  *blank scan* replaced by the activity forward projection :math:`P G \\lambda`.
-  Restricted to the object support,
+  *blank scan* replaced by the activity forward projection
+  :math:`P_\\text{tof} G \\lambda`.  Define the TOF-summed per-LOR gradient and
+  curvature sinograms (the only component-indexed quantities)
+
+  .. math::
+
+      g_i = \\Sigma_t\\, \\frac{\\bar z_{i,t}}{\\bar y_{i,t}}
+      (\\bar y_{i,t} - y_{i,t}),
+      \\qquad
+      c_i = \\Sigma_t\\, \\frac{\\bar z_{i,t}^2}{\\bar y_{i,t}} ;
+
+  then, restricted to the object support,
 
   .. math::
 
       \\mu \\leftarrow \\Big[\\mu + D_\\mu \\odot \\big(
-      \\nabla_\\mu L - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
-      \\quad
-      \\nabla_\\mu L = P_\\text{nt}^T\\Big[\\textstyle\\sum_t
-      \\tfrac{\\bar z_{i,t}}{\\bar y_{i,t}}(\\bar y_{i,t} - y_{i,t})\\Big],
+      P_\\text{nt}^T g - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
 
   .. math::
 
-      D_\\mu = \\Big( P_\\text{nt}^T\\big[(P_\\text{nt}\\mathbf 1)\\,
-      \\textstyle\\sum_t \\bar z_{i,t}^2/\\bar y_{i,t}\\big]
-      + \\tfrac{\\beta_\\mu}{m}\\kappa/\\delta_\\mu \\Big)^{-1} .
+      D_\\mu = \\mathbf 1 \\oslash \\big(
+      P_\\text{nt}^T\\big[(P_\\text{nt}\\mathbf 1) \\odot c\\big]
+      + \\tfrac{\\beta_\\mu}{m}\\,\\kappa / \\delta_\\mu\\big) .
 
 .. note::
-    **Exact TOF gradient vs. the TOF-summed approximation.**  The attenuation
-    gradient :math:`\\nabla_\\mu L` above forms the per-TOF-bin residual
+    **Exact TOF gradient vs. the TOF-summed approximation.**  The gradient
+    sinogram :math:`g_i` above forms the per-TOF-bin residual
     :math:`\\tfrac{\\bar z_{i,t}}{\\bar y_{i,t}}(\\bar y_{i,t} - y_{i,t})` and only
-    **then** sums over the TOF axis -- i.e. it is the *exact* gradient of the
-    full TOF log-likelihood with respect to :math:`\\mu`.  The MLTR update in
+    **then** sums over the TOF axis (:math:`\\Sigma_t`) -- i.e. :math:`P_\\text{nt}^T g`
+    is the *exact* gradient of the full TOF log-likelihood with respect to
+    :math:`\\mu`.  The MLTR update in
     :footcite:t:`Rezaei2012` (their Eq. 6) instead sums :math:`\\bar z`,
     :math:`s` and :math:`y` over TOF **first** and runs a non-TOF transmission
     step on the resulting TOF-summed sinogram.  Because the attenuation factor
@@ -472,7 +487,7 @@ for it in range(num_outer):
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # G^T P^T (a 1) (attenuated)
+        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # G^T P_\\text{tof}^T (a 1) (attenuated)
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
