@@ -8,43 +8,48 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t} = a_i \\, (P \\lambda)_{i,t} + s_{i,t},
+    \\bar{y}_{i,t} = a_i \\, (P G \\lambda)_{i,t} + s_{i,t},
     \\qquad
     a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
 
-where :math:`P` is the **TOF** emission projector -- here composed with an
-image-based Gaussian **resolution model** (PSF), so :math:`P\\lambda` really
-means (TOF projector) :math:`\\circ` (PSF) applied to :math:`\\lambda`.
-:math:`P_\\text{nt}` is the **non-TOF** projector used for the attenuation
-line integrals: the attenuation factor :math:`a_i` is the same for every TOF
-bin :math:`t` of a given LOR :math:`i` and carries **no** resolution model --
-the PET resolution loss (positron range, non-collinearity, detector
-response) blurs the apparent *activity*, not the bulk attenuation of the
-medium.  Finally :math:`s` is a strictly positive contamination (scatter +
+where :math:`P` is the **TOF emission projector**, :math:`G` is an
+image-based Gaussian **resolution model** (PSF) applied to the activity
+:math:`\\lambda`, and :math:`P_\\text{nt}` is the **non-TOF** projector used
+for the attenuation line integrals.  The attenuation factor :math:`a_i` is the
+same for every TOF bin :math:`t` of a given LOR :math:`i` and carries **no**
+resolution model -- the PET resolution loss (positron range, non-collinearity,
+detector response) blurs the apparent *activity*, not the bulk attenuation of
+the medium.  Finally :math:`s` is a strictly positive contamination (scatter +
 randoms); here it is assumed known and fixed (see the warning below).
+
+For implementation convenience the TOF projector :math:`P` and the resolution
+model :math:`G` are composed into a single linear operator ``A = P G`` (a
+:class:`.CompositeLinearOperator`); its transpose :math:`G^T P^T` is then
+assembled automatically, so the code uses ``A`` and ``A.adjoint`` wherever the
+equations below write :math:`P G` and :math:`G^T P^T`.
 
 MLAA alternates two block updates of the penalised log-likelihood
 :math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`.
 Both are preconditioned gradient-ascent steps; writing
-:math:`\\bar z_{i,t} = a_i (P\\lambda)_{i,t}` (so :math:`\\bar y_{i,t} =
+:math:`\\bar z_{i,t} = a_i (P G \\lambda)_{i,t}` (so :math:`\\bar y_{i,t} =
 \\bar z_{i,t} + s_{i,t}`) and using :math:`\\beta/m` for the per-subset prior
 weight (:math:`m` = number of subsets):
 
 * **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in
-  the system matrix.  With :math:`A` the TOF projector :math:`\\circ` PSF,
+  the system matrix (the activity forward model is :math:`P G`):
 
   .. math::
 
       \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda \\odot \\big(
-      A^T\\big[a\\,(\\tfrac{y}{\\bar y} - 1)\\big]
+      G^T P^T\\big[a\\,(\\tfrac{y}{\\bar y} - 1)\\big]
       - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
       \\quad
-      D_\\lambda = \\frac{\\lambda}{A^T(a\\,\\mathbf 1)
+      D_\\lambda = \\frac{\\lambda}{G^T P^T(a\\,\\mathbf 1)
       + \\lambda\\,\\tfrac{\\beta_\\lambda}{m}\\kappa/\\delta_\\lambda} .
 
 * **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
   transmission reconstruction of the ``05_transmission`` examples with the
-  *blank scan* replaced by the activity forward projection :math:`P\\lambda`.
+  *blank scan* replaced by the activity forward projection :math:`P G \\lambda`.
   Restricted to the object support,
 
   .. math::
@@ -467,7 +472,7 @@ for it in range(num_outer):
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # A^T 1 (attenuated)
+        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # G^T P^T (a 1) (attenuated)
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
