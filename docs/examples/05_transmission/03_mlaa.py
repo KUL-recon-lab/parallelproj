@@ -8,11 +8,11 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t}(\lambda, \mu) = \\bar z_{i,t}(\lambda, \mu) + s_{i,t},
+    \\bar{y}_{i,t}(\\lambda, \\mu) = \\bar z_{i,t}(\\lambda, \\mu) + s_{i,t},
     \\qquad
-    \\bar z_{i,t}(\lambda, \mu) = a_i(\mu) \\, (P_\\text{tof} B \\lambda)_{i,t},
+    \\bar z_{i,t}(\\lambda, \\mu) = a_i(\\mu) \\, (P_\\text{tof} B \\lambda)_{i,t},
     \\qquad
-    a_i(\mu) = e^{-(P_\\text{nt}\\,\\mu)_i},
+    a_i(\\mu) = e^{-(P_\\text{nt}\\,\\mu)_i},
 
 where :math:`\\bar z_{i,t}` is the expected (attenuated, resolution-blurred)
 emission contribution to TOF bin :math:`t` of LOR :math:`i`, :math:`\\bar y_{i,t}`
@@ -27,6 +27,17 @@ detector response) blurs the apparent *activity*, not the bulk attenuation of
 the medium.  Finally :math:`s` is a strictly positive contamination (scatter +
 randoms); here it is assumed known and fixed (see the warning below).
 
+.. tip::
+    MLAA reuses the machinery of two earlier examples and is much easier to
+    follow once you have run and understood them.  The activity block is an
+    ordered-subset **emission** update -- see
+    ``03_algorithms/00_run_mlem_osem_svrg.py`` (OSEM / SVRG) and
+    ``03_algorithms/01_run_sgd_svrg.py`` -- and the attenuation block is the
+    penalised **transmission** (MAP-TR) update of
+    ``05_transmission/02_run_maptr.py`` (which itself builds on
+    ``00_mltr_sps.py``).  The two MLAA blocks below are essentially those two
+    algorithms applied in alternation.
+
 For implementation convenience the TOF projector :math:`P_\\text{tof}` and the
 resolution model :math:`B` are composed into a single linear operator
 :math:`A = P_\\text{tof} B` (a :class:`.CompositeLinearOperator`); its transpose
@@ -34,9 +45,22 @@ resolution model :math:`B` are composed into a single linear operator
 ``A`` and ``A.adjoint`` wherever the equations below write
 :math:`P_\\text{tof} B` and :math:`B^T P_\\text{tof}^T`.
 
-MLAA alternates two block updates of the penalised log-likelihood
-:math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`.
-Both are preconditioned gradient-ascent steps.  In the equations below,
+MLAA maximises the penalised emission Poisson log-likelihood
+
+.. math::
+
+    \\Phi(\\lambda,\\mu) = L(\\lambda,\\mu)
+    - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu),
+    \\qquad
+    L(\\lambda,\\mu) = \\sum_{i,t}\\big(
+    y_{i,t}\\,\\log \\bar y_{i,t}(\\lambda,\\mu) - \\bar y_{i,t}(\\lambda,\\mu)
+    \\big)
+
+(:math:`L` is the Poisson log-likelihood up to a constant independent of
+:math:`\\lambda,\\mu`) by alternating two preconditioned gradient-ascent
+**block** updates -- one for :math:`\\lambda` (activity, :math:`\\mu` held
+fixed) and one for :math:`\\mu` (attenuation, :math:`\\lambda` held fixed).
+In the equations below,
 operators (:math:`P_\\text{tof}`, :math:`B`, :math:`P_\\text{nt}` and their
 transposes) act on whole arrays; :math:`\\odot` and :math:`\\oslash` denote
 elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
@@ -53,6 +77,26 @@ restricted to the LORs of subset :math:`k`, and :math:`y^{(k)}`,
 :math:`\\bar y^{(k)} = \\bar z^{(k)} + s^{(k)}` the corresponding
 subset sinograms.  The :math:`1/m` factor distributes the penalty gradient
 evenly across the :math:`m` subsets, so one full sweep applies it once.
+
+Differentiating :math:`L` restricted to the LORs of subset :math:`k` gives the
+two **subset log-likelihood gradients** that drive the updates:
+
+.. math::
+
+    \\nabla_\\lambda L^{(k)} = B^T (P_\\text{tof}^{(k)})^T\\big[
+    a^{(k)} \\odot (y^{(k)} \\oslash \\bar y^{(k)} - \\mathbf 1)\\big],
+
+.. math::
+
+    \\nabla_\\mu L^{(k)} = (P_\\text{nt}^{(k)})^T g^{(k)},
+    \\qquad
+    g^{(k)}_i = \\Sigma_t\\, \\frac{\\bar z^{(k)}_{i,t}}{\\bar y^{(k)}_{i,t}}
+    (\\bar y^{(k)}_{i,t} - y^{(k)}_{i,t}) .
+
+The activity back projection :math:`B^T (P_\\text{tof}^{(k)})^T` already sums
+over the TOF axis, so :math:`\\nabla_\\lambda L^{(k)}` needs no intermediate
+sinogram; the attenuation gradient first forms the TOF-summed per-LOR residual
+:math:`g^{(k)}` and then back-projects it through the non-TOF projector.
 
 Each penalty :math:`R` is an edge-preserving **log-cosh** roughness prior on
 the nearest-neighbour finite differences :math:`G x` of the image (the same
@@ -78,15 +122,13 @@ log-cosh **maximal curvature** (a valid diagonal majorant, since
 :math:`D_\\mu^{(k)}` through the :math:`\\beta\\,\\kappa/\\delta` term, which
 combines the data (sensitivity) and prior curvatures.
 
-* **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in the
-  system matrix.  The back projection :math:`B^T (P_\\text{tof}^{(k)})^T` already
-  sums over the TOF axis, so no intermediate sinogram is needed:
+* **activity** (:math:`\\mu` fixed) -- a penalised OSEM step driven by
+  :math:`\\nabla_\\lambda L^{(k)}`:
 
   .. math::
 
       \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda^{(k)} \\odot \\big(
-      B^T (P_\\text{tof}^{(k)})^T\\big[a^{(k)} \\odot
-      (y^{(k)} \\oslash \\bar y^{(k)} - \\mathbf 1)\\big]
+      \\nabla_\\lambda L^{(k)}
       - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
 
   .. math::
@@ -95,32 +137,27 @@ combines the data (sensitivity) and prior curvatures.
       B^T (P_\\text{tof}^{(k)})^T a^{(k)}
       + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
 
-* **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
-  transmission reconstruction of the ``05_transmission`` examples with the
-  *blank scan* replaced by the activity forward projection
-  :math:`P_\\text{tof}^{(k)} B \\lambda`.  Define, over the LORs :math:`i` of
-  subset :math:`k`, the TOF-summed per-LOR gradient and curvature sinograms
-  (the only component-indexed quantities)
-
-  .. math::
-
-      g^{(k)}_i = \\Sigma_t\\, \\frac{\\bar z^{(k)}_{i,t}}{\\bar y^{(k)}_{i,t}}
-      (\\bar y^{(k)}_{i,t} - y^{(k)}_{i,t}),
-      \\qquad
-      c^{(k)}_i = \\Sigma_t\\, \\frac{(\\bar z^{(k)}_{i,t})^2}{\\bar y^{(k)}_{i,t}} ;
-
-  then, restricted to the object support,
+* **attenuation** (:math:`\\lambda` fixed) -- a penalised **OS-MAPTR** step
+  driven by :math:`\\nabla_\\mu L^{(k)}`: the transmission update of
+  ``05_transmission/02_run_maptr.py`` with the *blank scan* replaced by the
+  activity forward projection :math:`P_\\text{tof}^{(k)} B \\lambda`, and
+  restricted to the object support:
 
   .. math::
 
       \\mu \\leftarrow \\Big[\\mu + D_\\mu^{(k)} \\odot \\big(
-      (P_\\text{nt}^{(k)})^T g^{(k)} - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
+      \\nabla_\\mu L^{(k)} - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
 
   .. math::
 
       D_\\mu^{(k)} = \\mathbf 1 \\oslash \\big(
       (P_\\text{nt}^{(k)})^T\\big[(P_\\text{nt}^{(k)}\\mathbf 1) \\odot c^{(k)}\\big]
-      + \\tfrac{\\beta_\\mu}{m}\\,\\kappa / \\delta_\\mu\\big) .
+      + \\tfrac{\\beta_\\mu}{m}\\,\\kappa / \\delta_\\mu\\big),
+      \\qquad
+      c^{(k)}_i = \\Sigma_t\\, \\frac{(\\bar z^{(k)}_{i,t})^2}{\\bar y^{(k)}_{i,t}},
+
+  where :math:`c^{(k)}` is the MLTR / SPS separable curvature (as in
+  ``02_run_maptr.py``).
 
 .. note::
     **Exact TOF gradient vs. the TOF-summed approximation.**  The gradient
