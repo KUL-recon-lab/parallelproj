@@ -100,7 +100,7 @@ sums over the TOF axis; and :math:`m` is the number of subsets.
     higher cost.
 
 The two blocks are interleaved at the **subset** level: every activity
-subset update is immediately followed by ``num_mltr_epochs`` attenuation
+subset update is immediately followed by ``num_att_updates_per_act_update`` attenuation
 subset updates, so the two images improve together rather than in separate
 full passes (the total number of activity and attenuation updates is
 unchanged).
@@ -183,7 +183,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # %%
 num_subsets = 28  # ordered view subsets (divides the 168 views evenly)
 num_outer = 10  # MLAA outer iterations
-num_mltr_epochs = 5  # OS-MAPTR updates per OS-MAPEM updates (MLTR is slower than MLEM)
+num_att_updates_per_act_update = 5  # attenuation (OS-MAPTR) subset updates per activity (OS-MAPEM) subset update (MLTR converges slower than MLEM)
 scatter_fraction = 0.6  # contamination relative to mean true emission
 count_factor = 5.0  # scales the activity (sets the count level / noise)
 support_threshold = 0.5  # body segmentation: fraction of the smoothed-NAC mean
@@ -471,9 +471,9 @@ lam_hist = [lam]
 mu_hist = [mu]
 
 # Updates are interleaved at the *subset* level: each activity (OS-MAPEM)
-# subset update is immediately followed by ``num_mltr_epochs`` attenuation
+# subset update is immediately followed by ``num_att_updates_per_act_update`` attenuation
 # (OS-MAPTR) subset updates.  Over one outer iteration this still amounts to
-# one activity pass (``num_subsets`` updates) and ``num_mltr_epochs``
+# one activity pass (``num_subsets`` updates) and ``num_att_updates_per_act_update``
 # attenuation passes, but the two images now improve in lock-step.  The
 # attenuation "blank scan" is the activity forward projection ``P lam``,
 # recomputed from the just-updated activity for every attenuation update.
@@ -493,10 +493,10 @@ for it in range(num_outer):
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
         lam = xp.clip(lam + D * g_pen, 0, None)
 
-        # --- num_mltr_epochs attenuation (OS-MAPTR) subset updates ---
+        # --- num_att_updates_per_act_update attenuation (OS-MAPTR) subset updates ---
         # the transmission update with the blank scan replaced by the current
         # activity forward projection P lam (TOF terms summed over TOF bins)
-        for _ in range(num_mltr_epochs):
+        for _ in range(num_att_updates_per_act_update):
             kt = att_k % num_subsets
             att_k += 1
             _, grad_sino, curv_sino = poisson_transmission_terms(
