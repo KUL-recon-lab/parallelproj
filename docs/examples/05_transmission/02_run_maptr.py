@@ -8,11 +8,14 @@ posteriori transmission reconstruction).  We now *minimise* the penalised
 objective
 
 .. math::
-    \\Phi(\\mu) = -L(\\mu) + \\beta R(\\mu),
+    \\Phi(\\mu) = -L(\\mu) + \\beta R(\\mu)
+
+.. math::
+    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i (\\mu) - \\bar{y}_i (\\mu),
     \\qquad
-    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i - \\bar{y}_i,
-    \\quad
-    \\bar{y}_i = b_i e^{-(P \\mu)_i} + s_i,
+    \\bar{y}_i (\\mu) = \\bar{z}_i (\\mu) + s_i,
+    \\qquad
+    \\bar{z}_i (\\mu) = b_i e^{-(P \\mu)_i},
 
 with a **log-cosh** roughness penalty on the nearest-neighbour finite
 differences :math:`G\\mu`,

@@ -8,11 +8,11 @@ into a weighted least squares problem) including a strictly positive,
 smooth scatter background :math:`s` with known mean:
 
 .. math::
-    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i - \\bar{y}_i,
+    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i (\\mu) - \\bar{y}_i (\\mu),
     \\qquad
-    \\bar{y}_i = \\bar{z}_i + s_i,
+    \\bar{y}_i (\\mu) = \\bar{z}_i (\\mu) + s_i,
     \\qquad
-    \\bar{z}_i = b_i e^{-(P \\mu)_i},
+    \\bar{z}_i (\\mu) = b_i e^{-(P \\mu)_i},
 
 where :math:`b_i` is the blank scan, :math:`P\\mu` are line integrals of
 :math:`\\mu`, and :math:`y_i` are the measured transmission counts.  Note

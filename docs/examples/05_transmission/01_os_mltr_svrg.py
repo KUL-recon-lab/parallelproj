@@ -8,9 +8,11 @@ exact transmission Poisson likelihood with a strictly positive, smooth
 scatter background :math:`s` of known mean,
 
 .. math::
-    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i - \\bar{y}_i,
+    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i (\\mu) - \\bar{y}_i (\\mu),
     \\qquad
-    \\bar{y}_i = b_i e^{-(P \\mu)_i} + s_i,
+    \\bar{y}_i (\\mu) = \\bar{z}_i (\\mu) + s_i,
+    \\qquad
+    \\bar{z}_i (\\mu) = b_i e^{-(P \\mu)_i},
 
 reconstructed by preconditioned gradient ascent
 :math:`\\mu \\leftarrow [\\mu + D(\\mu)\\odot\\nabla_\\mu L]_+` with the MLTR
