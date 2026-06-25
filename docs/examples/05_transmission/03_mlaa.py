@@ -10,14 +10,14 @@ measurement.  The TOF emission model is
 .. math::
     \\bar{y}_{i,t} = \\bar z_{i,t} + s_{i,t},
     \\qquad
-    \\bar z_{i,t} = a_i \\, (P_\\text{tof} G \\lambda)_{i,t},
+    \\bar z_{i,t} = a_i \\, (P_\\text{tof} B \\lambda)_{i,t},
     \\qquad
     a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
 
 where :math:`\\bar z_{i,t}` is the expected (attenuated, resolution-blurred)
 emission contribution to TOF bin :math:`t` of LOR :math:`i`, :math:`\\bar y_{i,t}`
 the expected data after adding the contamination :math:`s_{i,t}`,
-:math:`P_\\text{tof}` is the **TOF emission projector**, :math:`G` is an
+:math:`P_\\text{tof}` is the **TOF emission projector**, :math:`B` is an
 image-based Gaussian **resolution model** (PSF) applied to the activity
 :math:`\\lambda`, and :math:`P_\\text{nt}` is the **non-TOF** projector used
 for the attenuation line integrals.  The attenuation factor :math:`a_i` is the
@@ -28,20 +28,20 @@ the medium.  Finally :math:`s` is a strictly positive contamination (scatter +
 randoms); here it is assumed known and fixed (see the warning below).
 
 For implementation convenience the TOF projector :math:`P_\\text{tof}` and the
-resolution model :math:`G` are composed into a single linear operator
-:math:`A = P_\\text{tof} G` (a :class:`.CompositeLinearOperator`); its transpose
-:math:`G^T P_\\text{tof}^T` is then assembled automatically, so the code uses
+resolution model :math:`B` are composed into a single linear operator
+:math:`A = P_\\text{tof} B` (a :class:`.CompositeLinearOperator`); its transpose
+:math:`B^T P_\\text{tof}^T` is then assembled automatically, so the code uses
 ``A`` and ``A.adjoint`` wherever the equations below write
-:math:`P_\\text{tof} G` and :math:`G^T P_\\text{tof}^T`.
+:math:`P_\\text{tof} B` and :math:`B^T P_\\text{tof}^T`.
 
 MLAA alternates two block updates of the penalised log-likelihood
 :math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`.
 Both are preconditioned gradient-ascent steps.  In the equations below,
-operators (:math:`P_\\text{tof}`, :math:`G`, :math:`P_\\text{nt}` and their
+operators (:math:`P_\\text{tof}`, :math:`B`, :math:`P_\\text{nt}` and their
 transposes) act on whole arrays; :math:`\\odot` and :math:`\\oslash` denote
 elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
 is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
-(P_\\text{tof} G \\lambda)` and :math:`\\bar y = \\bar z + s` are the array
+(P_\\text{tof} B \\lambda)` and :math:`\\bar y = \\bar z + s` are the array
 (elementwise) forms of :math:`\\bar z_{i,t}` and :math:`\\bar y_{i,t}` above;
 :math:`\\Sigma_t` sums over the TOF axis; and :math:`m` is the number of
 (ordered-view) subsets.  Each update below operates on a **single subset**
@@ -49,42 +49,56 @@ is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
 :math:`P_\\text{nt}^{(k)}` are the emission and attenuation projectors
 restricted to the LORs of subset :math:`k`, and :math:`y^{(k)}`,
 :math:`s^{(k)}`, :math:`a^{(k)}`,
-:math:`\\bar z^{(k)} = a^{(k)} \\odot (P_\\text{tof}^{(k)} G \\lambda)` and
+:math:`\\bar z^{(k)} = a^{(k)} \\odot (P_\\text{tof}^{(k)} B \\lambda)` and
 :math:`\\bar y^{(k)} = \\bar z^{(k)} + s^{(k)}` the corresponding
 subset sinograms.  The :math:`1/m` factor distributes the penalty gradient
 evenly across the :math:`m` subsets, so one full sweep applies it once.
 
-The penalty :math:`R` is an edge-preserving **log-cosh** prior on the
-nearest-neighbour finite differences of the image: :math:`\\delta_\\lambda`
-and :math:`\\delta_\\mu` are its edge-preservation scales (differences much
-larger than :math:`\\delta` are penalised roughly linearly, much smaller ones
-quadratically), and :math:`\\kappa` is the prior curvature constant -- the
-diagonal of the finite-difference operator's normal matrix, equal to twice the
-number of image dimensions.  :math:`D_\\lambda^{(k)}` and :math:`D_\\mu^{(k)}`
-are the **harmonic-mean preconditioners** that combine the data (sensitivity)
-and prior curvatures, exactly as in ``05_transmission/02_run_maptr.py``.
+Each penalty :math:`R` is an edge-preserving **log-cosh** roughness prior on
+the nearest-neighbour finite differences :math:`G x` of the image (the same
+prior and preconditioner as in ``05_transmission/02_run_maptr.py``):
+
+.. math::
+
+    R(x) = \\delta \\sum_d \\sum_j \\log\\cosh\\!\\Big(\\frac{(G x)_{d,j}}{\\delta}\\Big),
+    \\qquad
+    \\nabla R(x) = G^T \\tanh(G x / \\delta),
+
+where :math:`x` is :math:`\\lambda` or :math:`\\mu`, :math:`G` is the
+**finite-difference** operator (the sum runs over the difference directions
+:math:`d` and voxels :math:`j`), and :math:`\\delta` -- :math:`\\delta_\\lambda`
+or :math:`\\delta_\\mu` -- is the edge-preservation scale: differences
+:math:`\\gg \\delta` are penalised roughly linearly (edges preserved),
+:math:`\\ll \\delta` quadratically (noise smoothed).  The constant
+:math:`\\kappa = \\operatorname{diag}(G^T G) \\approx 2\\,n_\\text{dim}` is the
+log-cosh **maximal curvature** (a valid diagonal majorant, since
+:math:`\\tfrac{d^2}{dz^2}\\,\\delta\\log\\cosh(z/\\delta) =
+\\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`); it enters the
+**harmonic-mean preconditioners** :math:`D_\\lambda^{(k)}` and
+:math:`D_\\mu^{(k)}` through the :math:`\\beta\\,\\kappa/\\delta` term, which
+combines the data (sensitivity) and prior curvatures.
 
 * **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in the
-  system matrix.  The back projection :math:`G^T (P_\\text{tof}^{(k)})^T` already
+  system matrix.  The back projection :math:`B^T (P_\\text{tof}^{(k)})^T` already
   sums over the TOF axis, so no intermediate sinogram is needed:
 
   .. math::
 
       \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda^{(k)} \\odot \\big(
-      G^T (P_\\text{tof}^{(k)})^T\\big[a^{(k)} \\odot
+      B^T (P_\\text{tof}^{(k)})^T\\big[a^{(k)} \\odot
       (y^{(k)} \\oslash \\bar y^{(k)} - \\mathbf 1)\\big]
       - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
 
   .. math::
 
       D_\\lambda^{(k)} = \\lambda \\oslash \\big(
-      G^T (P_\\text{tof}^{(k)})^T(a^{(k)} \\odot \\mathbf 1)
+      B^T (P_\\text{tof}^{(k)})^T(a^{(k)} \\odot \\mathbf 1)
       + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
 
 * **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
   transmission reconstruction of the ``05_transmission`` examples with the
   *blank scan* replaced by the activity forward projection
-  :math:`P_\\text{tof}^{(k)} G \\lambda`.  Define, over the LORs :math:`i` of
+  :math:`P_\\text{tof}^{(k)} B \\lambda`.  Define, over the LORs :math:`i` of
   subset :math:`k`, the TOF-summed per-LOR gradient and curvature sinograms
   (the only component-indexed quantities)
 
@@ -271,15 +285,15 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(
 
 fov_mask = proj_nt.fov_mask()
 
-# Image-based Gaussian resolution model (PSF) -- the operator G in the
+# Image-based Gaussian resolution model (PSF) -- the operator B in the
 # docstring -- for the *emission* path only.  Composing it with the TOF
 # projector into a single operator means the transpose (used in every
 # activity update) is assembled automatically in the right order -- no chance
-# of forgetting G^T.  The attenuation path keeps the bare geometric non-TOF
+# of forgetting B^T.  The attenuation path keeps the bare geometric non-TOF
 # projector (no PSF; see the module docstring).
 psf_sigma = tuple(psf_fwhm / 2.355 / vs for vs in voxel_size)  # voxels
-G = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
-A = parallelproj.operators.CompositeLinearOperator([proj, G])
+B = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
+A = parallelproj.operators.CompositeLinearOperator([proj, B])
 
 # %%
 # Ground-truth activity and attenuation -- DIFFERENT insert patterns
@@ -341,7 +355,7 @@ A_k = []  # subset emission operators: TOF projector composed with the PSF
 for k in range(num_subsets):
     p = copy(proj)
     p.views = subset_views[k]
-    A_k.append(parallelproj.operators.CompositeLinearOperator([p, G]))
+    A_k.append(parallelproj.operators.CompositeLinearOperator([p, B]))
     q = copy(proj_nt)
     q.views = subset_views[k]
     proj_nt_k.append(q)
@@ -352,9 +366,9 @@ s_k = [s[subset_slices[k]] for k in range(num_subsets)]
 ones_img = xp.ones(img_shape, dtype=xp.float32, device=dev)
 Pnt1_k = [proj_nt_k[k](ones_img) for k in range(num_subsets)]  # subset att sensitivity
 
-# finite-difference operator of the edge-preserving prior (NOT the PSF G above)
-fd = parallelproj.operators.FiniteForwardDifference(img_shape)
-kappa = 2.0 * len(img_shape)  # diag(fd^T fd) for forward differences = 2 * ndim
+# finite-difference operator G of the edge-preserving prior (NOT the PSF B above)
+G = parallelproj.operators.FiniteForwardDifference(img_shape)
+kappa = 2.0 * len(img_shape)  # diag(G^T G) for forward differences = 2 * ndim
 
 
 def emission_neg_logL(lam: Array, mu: Array) -> float:
@@ -437,8 +451,8 @@ for k in range(num_subsets):
     lam_warm = _safe(lam_warm * update, sens, fov_mask)
 
 delta_lam = 0.3 * float(xp.mean(lam_warm[lam_warm > 0]))
-reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), fd)
-reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), fd)
+reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), G)
+reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
 prior_curv_lam = beta_lam * kappa / delta_lam
 prior_curv_mu = beta_mu * kappa / delta_mu
 
@@ -517,7 +531,7 @@ for it in range(num_outer):
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # G^T P_tof^T (a * 1), attenuated
+        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # B^T P_tof^T (a * 1), attenuated
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
