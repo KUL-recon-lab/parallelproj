@@ -8,11 +8,11 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t} = \\bar z_{i,t} + s_{i,t},
+    \\bar{y}_{i,t}(\lambda, \mu) = \\bar z_{i,t}(\lambda, \mu) + s_{i,t},
     \\qquad
-    \\bar z_{i,t} = a_i \\, (P_\\text{tof} B \\lambda)_{i,t},
+    \\bar z_{i,t}(\lambda, \mu) = a_i(\mu) \\, (P_\\text{tof} B \\lambda)_{i,t},
     \\qquad
-    a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
+    a_i(\mu) = e^{-(P_\\text{nt}\\,\\mu)_i},
 
 where :math:`\\bar z_{i,t}` is the expected (attenuated, resolution-blurred)
 emission contribution to TOF bin :math:`t` of LOR :math:`i`, :math:`\\bar y_{i,t}`
@@ -92,7 +92,7 @@ combines the data (sensitivity) and prior curvatures.
   .. math::
 
       D_\\lambda^{(k)} = \\lambda \\oslash \\big(
-      B^T (P_\\text{tof}^{(k)})^T(a^{(k)} \\odot \\mathbf 1)
+      B^T (P_\\text{tof}^{(k)})^T a^{(k)}
       + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
 
 * **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
