@@ -10,9 +10,9 @@ smooth scatter background :math:`s` with known mean:
 .. math::
     L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i - \\bar{y}_i,
     \\qquad
-    \\bar{y}_i = \\bar{\\psi}_i + s_i,
+    \\bar{y}_i = \\bar{z}_i + s_i,
     \\qquad
-    \\bar{\\psi}_i = b_i e^{-(P \\mu)_i},
+    \\bar{z}_i = b_i e^{-(P \\mu)_i},
 
 where :math:`b_i` is the blank scan, :math:`P\\mu` are line integrals of
 :math:`\\mu`, and :math:`y_i` are the measured transmission counts.  Note
@@ -27,24 +27,24 @@ MLEM for the emission problem
 .. math::
     \\mu \\leftarrow \\bigl[\\, \\mu + D(\\mu) \\odot \\nabla_\\mu L \\,\\bigr]_+,
     \\qquad
-    \\nabla_\\mu L = P^T\\!\\left[\\tfrac{\\bar\\psi}{\\bar y}(\\bar y - y)\\right].
+    \\nabla_\\mu L = P^T\\!\\left[\\tfrac{\\bar z}{\\bar y}(\\bar y - y)\\right].
 
 They share the gradient :math:`\\nabla_\\mu L` and differ **only** in the
 diagonal preconditioner :math:`D`, the inverse of a separable majorant of
 the curvature (the weight choice :math:`\\alpha_j = 1` for MLTR):
 
 * **MLTR** (Nuyts et al. :footcite:p:`Nuyts1998`) uses the Newton-type curvature
-  :math:`\\bar\\psi^2/\\bar y`:
+  :math:`\\bar z^2/\\bar y`:
 
   .. math::
-      D_j = 1 \\,/\\, P^T\\!\\left[(P\\mathbf 1)\\,
-        \\tfrac{\\bar\\psi^2}{\\bar y}\\right]_j .
+      D_j = 1 \\,/\\, \\left( P^T\\!\\left[(P\\mathbf 1)\\,
+        \\tfrac{\\bar z^2}{\\bar y}\\right] \\right)_j .
 
   Derived from a quadratic *approximation* of :math:`L`, so a monotone
   increase of :math:`L` is **not guaranteed**.
 
 * **SPS** with optimal curvature (Erdogan and Fessler :footcite:p:`Erdogan1999`) replaces
-  :math:`\\bar\\psi^2/\\bar y` by the optimal curvature :math:`c_i`, the
+  :math:`\\bar z^2/\\bar y` by the optimal curvature :math:`c_i`, the
   smallest curvature whose parabola *majorises* the per-ray negative
   log-likelihood on :math:`l \\geq 0`:
 
@@ -185,7 +185,7 @@ fov_mask = proj.fov_mask()
 # Simulate transmission data
 # ---------------------------
 #
-# Noise-free unscattered transmission :math:`\bar{\psi}_i = b_i e^{-(P\mu)_i}`,
+# Noise-free unscattered transmission :math:`\bar{z}_i = b_i e^{-(P\mu)_i}`,
 # plus a smooth (here: constant) strictly positive scatter background with
 # known mean, then Poisson noise.
 
@@ -213,7 +213,7 @@ y = xp.asarray(
 # Both algorithms use the same gradient of the log-likelihood
 #
 # .. math::
-#     \nabla_\mu L = P^T\left[\frac{\bar{\psi}}{\bar{y}}(\bar{y} - y)\right]
+#     \nabla_\mu L = P^T\left[\frac{\bar{z}}{\bar{y}}(\bar{y} - y)\right]
 #
 # and the forward projection of an all-ones image :math:`P\mathbf{1}`, precomputed once.
 

@@ -15,7 +15,7 @@ scatter background :math:`s` of known mean,
 reconstructed by preconditioned gradient ascent
 :math:`\\mu \\leftarrow [\\mu + D(\\mu)\\odot\\nabla_\\mu L]_+` with the MLTR
 (Newton-type) diagonal preconditioner
-:math:`D_j = 1/P^T[(P\\mathbf 1)\\,\\bar\\psi^2/\\bar y]_j`.
+:math:`D_j = 1/P^T[(P\\mathbf 1)\\,\\bar z^2/\\bar y]_j`.
 
 The sinogram is split into :math:`m` view subsets :math:`S_k` with
 subset projectors :math:`P_k`.  Three accelerations are compared against
@@ -29,8 +29,8 @@ subset projectors :math:`P_k`.  Three accelerations are compared against
 
   .. math::
       \\mu \\leftarrow \\Bigl[\\mu +
-        \\frac{P_k^T\\bigl[\\tfrac{\\bar\\psi_k}{\\bar y_k}(\\bar y_k - y_k)\\bigr]}
-             {P_k^T\\bigl[(P_k\\mathbf 1)\\,\\tfrac{\\bar\\psi_k^2}{\\bar y_k}\\bigr]}
+        \\frac{P_k^T\\bigl[\\tfrac{\\bar z_k}{\\bar y_k}(\\bar y_k - y_k)\\bigr]}
+             {P_k^T\\bigl[(P_k\\mathbf 1)\\,\\tfrac{\\bar z_k^2}{\\bar y_k}\\bigr]}
         \\Bigr]_+ .
 
   One epoch = :math:`m` subset updates ≈ one full data pass.  Like OSEM it

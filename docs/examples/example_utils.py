@@ -437,7 +437,7 @@ def poisson_transmission_terms(
     For the transmission model
 
     .. math::
-        \bar{y} = \bar\psi + s, \qquad \bar\psi = b\,e^{-\ell},
+        \bar{y} = \bar z + s, \qquad \bar z = b\,e^{-\ell},
 
     with line integral :math:`\ell`, blank :math:`b`, contamination
     :math:`s` and measured counts :math:`y`, this returns the ingredients
@@ -471,11 +471,11 @@ def poisson_transmission_terms(
     expected_counts : Array
         :math:`\bar{y} = b\,e^{-\ell} + s` (full per-bin shape).
     gradient_sino : Array
-        :math:`\tfrac{\bar\psi}{\bar y}(\bar y - y)` -- back-project this to
+        :math:`\tfrac{\bar z}{\bar y}(\bar y - y)` -- back-project this to
         get the ascent gradient :math:`\nabla_\mu L`.  TOF-summed if
         ``tof_sum``.
     curvature_sino : Array
-        MLTR / SPS separable curvature :math:`\bar\psi^2/\bar y`; the
+        MLTR / SPS separable curvature :math:`\bar z^2/\bar y`; the
         preconditioner denominator is ``P^T[(P 1) * curvature_sino]``.
         TOF-summed if ``tof_sum``.
     """
