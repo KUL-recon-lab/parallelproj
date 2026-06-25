@@ -100,7 +100,7 @@ preview = ["pixi-build"]
 # iteration.  Bump when you've validated a new backend release.
 # ``channels`` is omitted so pixi uses its built-in defaults for resolving
 # the build backend and build-time conda deps.
-backend = { name = "pixi-build-python", version = "0.4.*" }
+backend = { name = "pixi-build-python", version = "0.6.*" }
 
 [tool.pixi.package.host-dependencies]
 # Build-time deps: what hatchling needs to produce the wheel.
