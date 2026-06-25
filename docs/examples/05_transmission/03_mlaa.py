@@ -24,18 +24,60 @@ medium.  Finally :math:`s` is a strictly positive contamination (scatter +
 randoms); here it is assumed known and fixed (see the warning below).
 
 MLAA alternates two block updates of the penalised log-likelihood
-:math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`:
+:math:`L(\\lambda,\\mu) - \\beta_\\lambda R(\\lambda) - \\beta_\\mu R(\\mu)`.
+Both are preconditioned gradient-ascent steps; writing
+:math:`\\bar z_{i,t} = a_i (P\\lambda)_{i,t}` (so :math:`\\bar y_{i,t} =
+\\bar z_{i,t} + s_{i,t}`) and using :math:`\\beta/m` for the per-subset prior
+weight (:math:`m` = number of subsets):
 
 * **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in
-  the system matrix -- preconditioned gradient ascent with the
-  EM/harmonic-mean preconditioner :math:`D_\\lambda = \\lambda /
-  (A^T\\mathbf 1 + \\lambda\\,\\beta_\\lambda\\kappa/\\delta_\\lambda)`;
-* **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- this is
-  exactly the transmission reconstruction of the ``05_transmission``
-  examples, with the *blank scan* replaced by the current activity forward
-  projection :math:`b = P\\lambda` (and, with TOF, the per-TOF-bin MLTR
-  weights summed over the TOF axis before back-projecting through the
-  non-TOF projector).
+  the system matrix.  With :math:`A` the TOF projector :math:`\\circ` PSF,
+
+  .. math::
+
+      \\lambda \\leftarrow \\Big[\\lambda + D_\\lambda \\odot \\big(
+      A^T\\big[a\\,(\\tfrac{y}{\\bar y} - 1)\\big]
+      - \\tfrac{\\beta_\\lambda}{m}\\nabla R(\\lambda)\\big)\\Big]_+,
+      \\quad
+      D_\\lambda = \\frac{\\lambda}{A^T(a\\,\\mathbf 1)
+      + \\lambda\\,\\tfrac{\\beta_\\lambda}{m}\\kappa/\\delta_\\lambda} .
+
+* **attenuation** (fix :math:`\\lambda`): penalised **OS-MAPTR** -- the
+  transmission reconstruction of the ``05_transmission`` examples with the
+  *blank scan* replaced by the activity forward projection :math:`P\\lambda`.
+  Restricted to the object support,
+
+  .. math::
+
+      \\mu \\leftarrow \\Big[\\mu + D_\\mu \\odot \\big(
+      \\nabla_\\mu L - \\tfrac{\\beta_\\mu}{m}\\nabla R(\\mu)\\big)\\Big]_+,
+      \\quad
+      \\nabla_\\mu L = P_\\text{nt}^T\\Big[\\textstyle\\sum_t
+      \\tfrac{\\bar z_{i,t}}{\\bar y_{i,t}}(\\bar y_{i,t} - y_{i,t})\\Big],
+
+  .. math::
+
+      D_\\mu = \\Big( P_\\text{nt}^T\\big[(P_\\text{nt}\\mathbf 1)\\,
+      \\textstyle\\sum_t \\bar z_{i,t}^2/\\bar y_{i,t}\\big]
+      + \\tfrac{\\beta_\\mu}{m}\\kappa/\\delta_\\mu \\Big)^{-1} .
+
+.. note::
+    **Exact TOF gradient vs. the TOF-summed approximation.**  The attenuation
+    gradient :math:`\\nabla_\\mu L` above forms the per-TOF-bin residual
+    :math:`\\tfrac{\\bar z_{i,t}}{\\bar y_{i,t}}(\\bar y_{i,t} - y_{i,t})` and only
+    **then** sums over the TOF axis -- i.e. it is the *exact* gradient of the
+    full TOF log-likelihood with respect to :math:`\\mu`.  The MLTR update in
+    :footcite:t:`Rezaei2012` (their Eq. 6) instead sums :math:`\\bar z`,
+    :math:`s` and :math:`y` over TOF **first** and runs a non-TOF transmission
+    step on the resulting TOF-summed sinogram.  Because the attenuation factor
+    :math:`a_i` is identical for every TOF bin, that TOF-summed sinogram is a
+    valid non-TOF transmission measurement; the two gradients coincide for a
+    single TOF bin or when the contamination vanishes (:math:`s = 0`), and
+    differ slightly otherwise (a sum of ratios :math:`\\sum_t
+    \\bar z_{i,t} y_{i,t}/\\bar y_{i,t}` vs. a ratio of sums).  Summing first is
+    cheaper -- it operates on the much smaller non-TOF sinogram -- whereas the
+    exact per-TOF form used here uses the full TOF information at slightly
+    higher cost.
 
 The two blocks are interleaved at the **subset** level: every activity
 subset update is immediately followed by ``num_mltr_epochs`` attenuation
