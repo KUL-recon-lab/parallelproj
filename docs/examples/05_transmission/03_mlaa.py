@@ -8,11 +8,16 @@ from a single (TOF) emission scan, without a separate transmission/CT
 measurement.  The TOF emission model is
 
 .. math::
-    \\bar{y}_{i,t} = a_i \\, (P_\\text{tof} G \\lambda)_{i,t} + s_{i,t},
+    \\bar{y}_{i,t} = \\bar z_{i,t} + s_{i,t},
+    \\qquad
+    \\bar z_{i,t} = a_i \\, (P_\\text{tof} G \\lambda)_{i,t},
     \\qquad
     a_i = e^{-(P_\\text{nt}\\,\\mu)_i},
 
-where :math:`P_\\text{tof}` is the **TOF emission projector**, :math:`G` is an
+where :math:`\\bar z_{i,t}` is the expected (attenuated, resolution-blurred)
+emission contribution to TOF bin :math:`t` of LOR :math:`i`, :math:`\\bar y_{i,t}`
+the expected data after adding the contamination :math:`s_{i,t}`,
+:math:`P_\\text{tof}` is the **TOF emission projector**, :math:`G` is an
 image-based Gaussian **resolution model** (PSF) applied to the activity
 :math:`\\lambda`, and :math:`P_\\text{nt}` is the **non-TOF** projector used
 for the attenuation line integrals.  The attenuation factor :math:`a_i` is the
@@ -36,8 +41,9 @@ operators (:math:`P_\\text{tof}`, :math:`G`, :math:`P_\\text{nt}` and their
 transposes) act on whole arrays; :math:`\\odot` and :math:`\\oslash` denote
 elementwise (Hadamard) product and division; :math:`a = e^{-P_\\text{nt}\\mu}`
 is per-LOR and broadcasts over the TOF axis; :math:`\\bar z = a \\odot
-(P_\\text{tof} G \\lambda)` and :math:`\\bar y = \\bar z + s`; :math:`\\Sigma_t`
-sums over the TOF axis; and :math:`m` is the number of subsets.
+(P_\\text{tof} G \\lambda)` and :math:`\\bar y = \\bar z + s` are the array
+(elementwise) forms of :math:`\\bar z_{i,t}` and :math:`\\bar y_{i,t}` above;
+:math:`\\Sigma_t` sums over the TOF axis; and :math:`m` is the number of subsets.
 
 * **activity** (fix :math:`\\mu`): penalised OSEM with the attenuation in the
   system matrix.  The back projection :math:`G^T P_\\text{tof}^T` already sums
