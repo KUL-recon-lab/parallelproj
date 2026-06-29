@@ -486,3 +486,22 @@ def test_fov_mask(xp: ModuleType, dev: str) -> None:
                 sl = [slice(None)] * 3
                 sl[symmetry_axis] = s
                 assert bool(xp.all(mask[tuple(sl)] == mask[tuple(ref_sl)]))
+
+
+def test_adjointness_test_default_namespace(xp: ModuleType, dev: str) -> None:
+    """``adjointness_test`` can be called without ``xp`` / ``dev`` on a
+    projector: it infers the namespace (``self.xp``) and device (``self._dev``)
+    from the operator itself.  (``dtype`` is still given because the projector
+    kernels are single precision.)"""
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings=2, symmetry_axis=2)
+    lor_desc = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, max_ring_difference=1, span=1),
+        radial_trim=260,
+    )
+    proj = ppp.RegularPolygonPETProjector(
+        lor_desc, img_shape=(20, 20, 2), voxel_size=(4.0, 4.0, 4.0)
+    )
+
+    # no xp/dev passed -> inferred from the projector (device-correct on GPU too)
+    assert proj.adjointness_test(dtype=xp.float32)

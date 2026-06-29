@@ -462,3 +462,25 @@ def test_gaussian_array_api_strict(xp: ModuleType, dev: str):
     x = xp_strict.asarray(nprnd.rand(8, 8))
     y = op._apply(x)
     assert y.shape == (8, 8)
+
+
+def test_resolve_namespace_device_requires_xp(xp: ModuleType, dev: str) -> None:
+    """Backend-agnostic operators expose no ``xp``, so ``adjointness_test`` /
+    ``norm`` called without arguments raise a clear ``ValueError``; passing
+    ``xp`` / ``dev`` explicitly still works."""
+    op = ppo.FiniteForwardDifference((4, 5))
+
+    with pytest.raises(ValueError, match="array namespace"):
+        op.adjointness_test()
+    with pytest.raises(ValueError, match="array namespace"):
+        op.norm()
+
+    # explicit arguments still work
+    assert op.adjointness_test(xp, dev)
+
+    # an operator that exposes ``xp`` infers the namespace without an explicit
+    # argument; explicitly-passed values always take precedence
+    mop = ppo.MatrixOperator(xp.asarray([[1.0, 0.0], [0.0, 2.0]], device=dev))
+    rxp, _ = mop._resolve_namespace_device(None, None)
+    assert rxp is mop.xp
+    assert mop._resolve_namespace_device(xp, "explicit-dev") == (xp, "explicit-dev")
