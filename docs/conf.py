@@ -23,6 +23,12 @@ project = "parallelproj"
 with open(Path(__file__).parent.parent / "pyproject.toml", "rb") as _f:
     release = tomllib.load(_f)["project"]["version"]
 
+# The documentation is English-only (and intended to stay that way).  Set the
+# language explicitly so the HTML ``lang`` attribute, full-text-search stemming
+# and date formatting are correct, and so local builds match Read the Docs
+# without relying on the ``-D language=en`` CLI override.
+language = "en"
+
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
