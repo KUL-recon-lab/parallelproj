@@ -4,7 +4,7 @@ PET non-TOF sinogram projector
 
 In this example we will show how to setup and use a PET sinogram projector
 consisting of a geometrical forward projector (Joseph's method),
-a resolution model and a correction for attenuation.
+a resolution model and the modeling of attenuation.
 
 .. note::
 
