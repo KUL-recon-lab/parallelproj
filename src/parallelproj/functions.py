@@ -980,12 +980,17 @@ class SumC1Function(C1Function):
     ----------
     functions : Sequence[C1Function]
         The functions :math:`f_k` to sum.  Must contain at least one element;
-        an empty sequence will raise an ``IndexError`` when evaluated.
+        an empty sequence raises a ``ValueError``.
     """
 
     def __init__(self, functions: Sequence[C1Function]):
         super().__init__()
-        self._functions = functions
+        self._functions = tuple(functions)
+        if len(self._functions) < 1:
+            raise ValueError(
+                f"{type(self).__name__} requires at least one function, "
+                "got an empty sequence."
+            )
 
     def _call(self, x: Array) -> float:
         return sum(f(x) for f in self._functions)

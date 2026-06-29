@@ -206,12 +206,12 @@ def test_regular_polygon_lor_desc_span(xp: ModuleType, dev: str) -> None:
     assert lor_desc_s3.span == 3
     assert lor_desc_s3.num_planes > 0
 
-    # lines 324-328: start_plane_index raises for span > 1
-    with pytest.raises(AttributeError):
+    # start_plane_index raises for span > 1
+    with pytest.raises(ValueError):
         _ = lor_desc_s3.start_plane_index
 
-    # lines 333-337: end_plane_index raises for span > 1
-    with pytest.raises(AttributeError):
+    # end_plane_index raises for span > 1
+    with pytest.raises(ValueError):
         _ = lor_desc_s3.end_plane_index
 
     # lines 342, 347, 352, 357: same properties accessible for span > 1
@@ -1225,7 +1225,7 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
     desc = ppl.RegularPolygonPETLORDescriptor(scanner, ge)
     assert desc.span is None
     assert int(desc.num_planes) == int(ge.num_planes) == 31
-    with pytest.raises(AttributeError):
+    with pytest.raises(ValueError):
         _ = desc.start_plane_index
 
 
