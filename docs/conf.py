@@ -166,5 +166,102 @@ def _auto_minigallery(app, what, name, obj, options, lines):
         lines += ["", ".. rubric:: Examples", "", f".. minigallery:: {name}", ""]
 
 
+# Submodules shown in the API "Modules" grid, in display order.
+# Each entry is (module, api_doc_page, card_title, one_line_description).
+# Only this doc-structure metadata is hand maintained; the symbol *names* in
+# each card are introspected from the package at build time (never hand
+# maintained), so the import lines can never drift from the code.
+_IMPORT_MAP_MODULES = [
+    ("parallelproj.pet_scanners", "api_pet_scanners", "PET scanner geometries",
+     "Regular-polygon, demo and general modular / block scanner geometries."),
+    ("parallelproj.pet_lors", "api_pet_lors", "PET LOR / sinogram descriptors",
+     "Michelogram axial layout, sinogram ordering, LOR descriptors and axial compression."),
+    ("parallelproj.projectors", "api_projectors", "PET projectors",
+     "Sinogram and list-mode forward / back projectors -- the operators you reconstruct with."),
+    ("parallelproj.tof", "api_tof", "PET TOF parameters",
+     "``TOFParameters``: the time-of-flight kernel (bin width, resolution, centre offset)."),
+    ("parallelproj.operators", "api_operators", "Linear operators",
+     "Building blocks: resolution models, finite differences, compositions and stacking."),
+    ("parallelproj.functions", "api_functions", "Functions",
+     "Data-fidelity terms and priors: Poisson log-likelihood, squared-L2, log-cosh, affine objectives."),
+    ("parallelproj.sinogram_symmetries", "api_pet_sino_symmetries", "PET sinogram symmetries",
+     "Plane / view / radial symmetry classes and sinogram reduction / expansion helpers."),
+    ("parallelproj.unlist", "api_pet_unlist", "PET LM unlisting",
+     "Turn detected events into sinograms; TOF-bin assignment from arrival times."),
+    ("parallelproj.data", "api_data", "Data",
+     "Memory-mapped subset helpers for large list-mode datasets."),
+]
+
+
+def _public_api_names(module):
+    """Public, concrete classes/functions *defined* in ``module``.
+
+    Excludes private names, re-imports (``__module__`` mismatch) and abstract
+    base classes (``inspect.isabstract``) -- the import map should list the
+    things a user actually imports and constructs, not the ABCs they subclass.
+    """
+    import inspect
+
+    return sorted(
+        name
+        for name, obj in inspect.getmembers(module)
+        if not name.startswith("_")
+        and (inspect.isclass(obj) or inspect.isfunction(obj))
+        and getattr(obj, "__module__", None) == module.__name__
+        and not (inspect.isclass(obj) and inspect.isabstract(obj))
+    )
+
+
+def _import_statement(modname, names):
+    """Lines of a ``from <modname> import (...)`` statement (no indentation)."""
+    if len(names) == 1:
+        return [f"from {modname} import {names[0]}"]
+    return [f"from {modname} import ("] + [f"    {n}," for n in names] + [")"]
+
+
+def _indent(lines, n):
+    pad = " " * n
+    return [pad + ln if ln else "" for ln in lines]
+
+
+def _code_block(stmt_lines):
+    """A python ``code-block`` directive (col 0) wrapping ``stmt_lines``."""
+    return [".. code-block:: python", ""] + _indent(stmt_lines, 3)
+
+
+def _generate_import_map(app, config):
+    """Write ``_import_map.rst`` from the live package so the module grid in
+    ``api.rst`` can never drift.  Each submodule is a sphinx-design card
+    combining a link to its API page (in the footer) with a collapsible
+    dropdown holding its exact import line."""
+    import importlib
+
+    lines = [".. grid:: 1 2 2 2", "   :gutter: 3", ""]
+
+    for modname, doc, title, desc in _IMPORT_MAP_MODULES:
+        try:
+            mod = importlib.import_module(modname)
+        except Exception:  # pragma: no cover - keep the docs build resilient
+            continue
+        names = _public_api_names(mod)
+        if not names:
+            continue
+        # card body (col 0); indented by 3 to sit under the grid below
+        card = [f".. grid-item-card:: {title}", ""]
+        card += _indent([desc], 3)
+        card += [""]
+        card += _indent([".. dropdown:: import statement", ""], 3)
+        card += _indent(_code_block(_import_statement(modname, names)), 6)
+        card += ["", "   +++", ""]
+        card += _indent([f":doc:`Full reference → <{doc}>`"], 3)
+        lines += _indent(card, 3)
+        lines.append("")
+
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_import_map.rst")
+    with open(out, "w") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
+
+
 def setup(app):
     app.connect("autodoc-process-docstring", _auto_minigallery)
+    app.connect("config-inited", _generate_import_map)
