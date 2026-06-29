@@ -3,7 +3,7 @@ Accelerating MLTR with ordered subsets (OS-MLTR) and SVRG
 =========================================================
 
 This example accelerates the transmission MLTR reconstruction of
-``00_run_mltr_sps.py`` with subset-based algorithms.  The model is the
+``00_mltr_sps.py`` with subset-based algorithms.  The model is the
 exact transmission Poisson likelihood with a strictly positive, smooth
 scatter background :math:`s` of known mean,
 

@@ -295,7 +295,7 @@ adjoint_ones = pet_lin_op.adjoint(
 # :math:`\sum_k f_k(x) = F(x)`.
 #
 # ``delta`` is set to ``delta_rel`` times the maximum of the ground truth
-# image.  With ``delta_rel = 0.1`` edges with gradient equal to the image
+# image.  With ``delta_rel = 0.05`` edges with gradient equal to the image
 # maximum are placed firmly in the linear (edge-preserving) regime, while
 # smooth-region gradients near zero remain quadratic.
 

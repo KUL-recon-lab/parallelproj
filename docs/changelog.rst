@@ -20,7 +20,8 @@ Breaking Changes
   that the TOF function names were also reordered
   (e.g. ``joseph3d_fwd_tof_sino`` → ``joseph3d_tof_sino_fwd``).
 - **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``, and
-  ``to_numpy_array`` are exported from ``parallelproj`` directly. Everything else
+  ``to_numpy_array`` (plus the ``__version__``, ``__citation__`` and ``__bibtex__``
+  dunders) are exported from ``parallelproj`` directly. Everything else
   must be imported from the relevant submodule:
 
   .. code-block:: python
