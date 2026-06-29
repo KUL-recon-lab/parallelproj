@@ -164,8 +164,8 @@ _RO = parallelproj.pet_scanners.RingEndpointOrdering
 configs = [
     (_RO.CLOCKWISE, 0.0, "CW, phi0=0"),
     (_RO.COUNTERCLOCKWISE, 0.0, "CCW, phi0=0"),
-    (_RO.CLOCKWISE, math.pi / 3, "CW, phi0=pi/3"),
-    (_RO.COUNTERCLOCKWISE, math.pi / 3, "CCW, phi0=pi/3"),
+    (_RO.CLOCKWISE, math.pi / 8, "CW, phi0=pi/8"),
+    (_RO.COUNTERCLOCKWISE, math.pi / 8, "CCW, phi0=pi/8"),
 ]
 
 fig3, axes = plt.subplots(
@@ -283,5 +283,5 @@ ax5b.set_title(
     "Subblock layout (4x4 crystals, 4 mm intra / 6 mm inter)", fontsize="medium"
 )
 
-fig5.suptitle("28-sided scanner, 16 crystals per side", fontsize=12)
+fig5.suptitle("6-sided scanner, 16 crystals per side", fontsize=12)
 fig5.show()

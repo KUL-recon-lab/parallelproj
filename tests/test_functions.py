@@ -1661,3 +1661,18 @@ def test_half_sq_l2_prox_moreau_identity(xp: ModuleType, dev: str):
     p = f.prox(x, sigma)
     q = f.prox_convex_conj(x / sigma, 1.0 / sigma)
     assert allclose(p + sigma * q, x, atol=1e-6, rtol=1e-6)
+
+
+def test_sum_function_empty_raises(xp: ModuleType, dev: str) -> None:
+    """``SumC1Function`` / ``SumC2Function`` reject an empty sequence at
+    construction with a clear ``ValueError`` (instead of an ``IndexError``
+    surfacing later on the first evaluation)."""
+    with pytest.raises(ValueError, match="at least one function"):
+        ppf.SumC1Function([])
+    with pytest.raises(ValueError, match="at least one function"):
+        ppf.SumC2Function([])
+
+    # one element is fine
+    f = ppf.HalfSquaredL2Deviation()
+    assert ppf.SumC1Function([f]) is not None
+    assert ppf.SumC2Function([f]) is not None

@@ -118,10 +118,36 @@ class LinearOperator(abc.ABC):
         else:
             return self._scale.conjugate() * self._adjoint(y)
 
+    def _resolve_namespace_device(
+        self, xp: ModuleType | None, dev: str | None
+    ) -> tuple[ModuleType, str | None]:
+        """Fill in ``xp`` / ``dev`` from the operator when not given.
+
+        Many operators expose their array namespace (``xp`` / ``_xp``) and
+        device (``dev`` / ``_dev``); for those, :meth:`adjointness_test` and
+        :meth:`norm` can be called without arguments.  Backend-agnostic
+        operators (e.g. :class:`FiniteForwardDifference`,
+        :class:`CompositeLinearOperator`) expose neither, so ``xp`` must then be
+        passed explicitly.
+        """
+        if xp is None:
+            xp = getattr(self, "xp", None) or getattr(self, "_xp", None)
+            if xp is None:
+                raise ValueError(
+                    "could not infer the array namespace from this operator; "
+                    "pass `xp` explicitly (e.g. "
+                    "`import array_api_compat.numpy as xp`)."
+                )
+        if dev is None:
+            dev = getattr(self, "dev", None)
+            if dev is None:
+                dev = getattr(self, "_dev", None)
+        return xp, dev
+
     def adjointness_test(
         self,
-        xp: ModuleType,
-        dev: str,
+        xp: ModuleType | None = None,
+        dev: str | None = None,
         verbose: bool = False,
         iscomplex: bool = False,
         dtype: type | None = None,
@@ -131,10 +157,12 @@ class LinearOperator(abc.ABC):
 
         Parameters
         ----------
-        xp : ModuleType
-            array module to use
-        dev : str
-            device (cpu or cuda)
+        xp : ModuleType, optional
+            array module to use.  Defaults to the operator's own namespace
+            (``self.xp``) when it exposes one; otherwise must be given.
+        dev : str, optional
+            device (cpu or cuda).  Defaults to the operator's own device
+            (``self.dev``) when it exposes one, else the default device.
         verbose : bool, optional
             verbose output
         iscomplex : bool, optional
@@ -149,6 +177,8 @@ class LinearOperator(abc.ABC):
         bool
             whether the adjoint is correctly implemented
         """
+
+        xp, dev = self._resolve_namespace_device(xp, dev)
 
         if dtype is None:
             if iscomplex:
@@ -187,8 +217,8 @@ class LinearOperator(abc.ABC):
 
     def norm(
         self,
-        xp: ModuleType,
-        dev: str,
+        xp: ModuleType | None = None,
+        dev: str | None = None,
         num_iter: int = 30,
         iscomplex: bool = False,
         verbose: bool = False,
@@ -197,10 +227,12 @@ class LinearOperator(abc.ABC):
 
         Parameters
         ----------
-        xp : ModuleType
-            array module to use
-        dev : str
-            device (cpu or cuda)
+        xp : ModuleType, optional
+            array module to use.  Defaults to the operator's own namespace
+            (``self.xp``) when it exposes one; otherwise must be given.
+        dev : str, optional
+            device (cpu or cuda).  Defaults to the operator's own device
+            (``self.dev``) when it exposes one, else the default device.
         num_iter : int, optional
             number of power iterations
         iscomplex : bool, optional
@@ -213,6 +245,8 @@ class LinearOperator(abc.ABC):
         float
             the norm of the linear operator
         """
+
+        xp, dev = self._resolve_namespace_device(xp, dev)
 
         if iscomplex:
             dtype = xp.complex128

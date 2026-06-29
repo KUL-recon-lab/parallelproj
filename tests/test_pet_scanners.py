@@ -449,3 +449,32 @@ def test_pet_scanner_module_get_raw_lor_endpoints_not_implemented(
     mod = MinimalModule(xp, dev, num_lor_endpoints=4)
     with pytest.raises(NotImplementedError):
         mod.get_raw_lor_endpoints()
+
+
+def test_regular_polygon_scanner_required_args(xp: ModuleType, dev: str) -> None:
+    """``ring_positions`` / ``symmetry_axis`` are required keyword-only args, so
+    omitting them raises ``TypeError`` (naming the missing argument) instead of
+    failing later with an ``AttributeError``; an out-of-range axis raises
+    ``ValueError``."""
+    rp = xp.linspace(-4.0, 4.0, 3, device=dev)
+    common = dict(
+        radius=100.0, num_sides=12, num_lor_endpoints_per_side=8, lor_spacing=4.0
+    )
+
+    with pytest.raises(TypeError, match="ring_positions"):
+        pps.RegularPolygonPETScannerGeometry(xp, dev, symmetry_axis=2, **common)
+
+    with pytest.raises(TypeError, match="symmetry_axis"):
+        pps.RegularPolygonPETScannerGeometry(xp, dev, ring_positions=rp, **common)
+
+    # an out-of-range symmetry_axis is still rejected with ValueError
+    with pytest.raises(ValueError, match="symmetry_axis must be"):
+        pps.RegularPolygonPETScannerGeometry(
+            xp, dev, ring_positions=rp, symmetry_axis=3, **common
+        )
+
+    # the valid call builds fine
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, ring_positions=rp, symmetry_axis=2, **common
+    )
+    assert scanner.num_rings == 3

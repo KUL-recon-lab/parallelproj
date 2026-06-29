@@ -7,6 +7,7 @@ in :mod:`parallelproj.projectors`.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 #: Speed of light in mm per nanosecond.
@@ -44,6 +45,15 @@ class TOFParameters:
         A non-zero value is needed when systematic timing offsets are present,
         e.g. due to unequal cable lengths or electronics delays.
 
+    Raises
+    ------
+    ValueError
+        If ``num_tofbins`` is not a positive integer, if ``tofbin_width``,
+        ``sigma_tof`` or ``num_sigmas`` is not strictly positive, or if any
+        value is not finite.  A common cause is passing timing quantities in
+        seconds/ps instead of the expected spatial **mm** (see the conversion
+        above).
+
     Example
     -------
     A scanner with 385 ps FWHM TOF resolution and 13 fine bins of 0.01302 ns
@@ -68,3 +78,21 @@ class TOFParameters:
     sigma_tof: float
     num_sigmas: float = 3.0
     tofcenter_offset: float = 0
+
+    def __post_init__(self) -> None:
+        if int(self.num_tofbins) != self.num_tofbins or self.num_tofbins < 1:
+            raise ValueError(
+                f"num_tofbins must be a positive integer, got {self.num_tofbins!r}"
+            )
+        if not (self.tofbin_width > 0):
+            raise ValueError(
+                f"tofbin_width must be > 0 (mm), got {self.tofbin_width!r}"
+            )
+        if not (self.sigma_tof > 0):
+            raise ValueError(f"sigma_tof must be > 0 (mm), got {self.sigma_tof!r}")
+        if not (self.num_sigmas > 0):
+            raise ValueError(f"num_sigmas must be > 0, got {self.num_sigmas!r}")
+        if not math.isfinite(self.tofcenter_offset):
+            raise ValueError(
+                f"tofcenter_offset must be finite (mm), got {self.tofcenter_offset!r}"
+            )

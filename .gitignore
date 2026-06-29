@@ -78,6 +78,7 @@ docs/auto_examples/
 docs/gen_modules/
 docs/sg_execution_times.rst
 docs/source/sg_execution_times.rst
+docs/_import_map.rst
 
 # PyBuilder
 target/

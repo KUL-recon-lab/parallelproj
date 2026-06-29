@@ -35,6 +35,11 @@ resolution and attenuation models) is built on top of this.
 A few things worth knowing
 --------------------------
 
+* **Imports come from submodules.** The top-level ``parallelproj`` namespace is
+  intentionally minimal, so classes are imported from their submodule
+  (``from parallelproj.projectors import RegularPolygonPETProjector``).  The
+  :ref:`import map <api_import_map>` in the API reference lists where each
+  public name lives.
 * **Arrays are float32.** Projectors expect and return single-precision arrays;
   create your images with ``dtype=xp.float32``.
 * **Same code on CPU and GPU.** ``parallelproj`` is

@@ -169,7 +169,7 @@ First check that the backend imports and report whether it was compiled with CUD
    print(parallelproj.__version__)  # print version of parallelproj python package
 
    import parallelproj_core
-   print(parallelproj_core.__version)  # print version of compiled projector backend core library
+   print(parallelproj_core.__version__)  # print version of compiled projector backend core library
    print(parallelproj_core.cuda_enabled)  # 1 = CUDA enabled, 0 = CPU only
 
 Then confirm that the full stack works end to end by building a small projector

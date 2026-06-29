@@ -1192,6 +1192,15 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._span = self._michelogram.span
 
         self._num_rad = scanner.num_lor_endpoints_per_ring - 1 - 2 * self._radial_trim
+        if self._num_rad < 1:
+            raise ValueError(
+                f"radial_trim={self._radial_trim} is too large for this scanner: "
+                f"it leaves num_rad={self._num_rad} radial bins "
+                f"(num_lor_endpoints_per_ring={scanner.num_lor_endpoints_per_ring}, "
+                f"num_rad = num_lor_endpoints_per_ring - 1 - 2*radial_trim). "
+                f"Reduce radial_trim to at most "
+                f"{(scanner.num_lor_endpoints_per_ring - 2) // 2}."
+            )
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
         self._sinogram_order = sinogram_order
@@ -1265,7 +1274,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def start_plane_index(self) -> Array:
         """start ring index for all planes (only defined for single-ring-pair planes)"""
         if self._michelogram.max_multiplicity > 1:
-            raise AttributeError(
+            raise ValueError(
                 "start_plane_index is only defined when every plane is a single "
                 "ring pair (span=1). Use start_plane_z instead."
             )
@@ -1276,7 +1285,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def end_plane_index(self) -> Array:
         """end ring index for all planes (only defined for single-ring-pair planes)"""
         if self._michelogram.max_multiplicity > 1:
-            raise AttributeError(
+            raise ValueError(
                 "end_plane_index is only defined when every plane is a single "
                 "ring pair (span=1). Use end_plane_z instead."
             )
@@ -1376,7 +1385,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         arrays of ring indices (the first column of the Michelogram's padded
         layout).  For ``span > 1`` they remain ``None`` and the
         :attr:`start_plane_index` / :attr:`end_plane_index` properties raise
-        ``AttributeError``; the padded per-plane ring indices are available
+        ``ValueError``; the padded per-plane ring indices are available
         via ``self.michelogram.plane_start_rings`` / ``plane_end_rings``.
         """
         m = self._michelogram

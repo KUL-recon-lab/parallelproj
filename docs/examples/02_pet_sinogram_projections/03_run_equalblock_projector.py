@@ -131,7 +131,8 @@ voxel_size = (0.5, 0.5, 1.0)
 img = xp.ones(img_shape, dtype=xp.float32, device=dev)
 
 proj = parallelproj.projectors.EqualBlockPETProjector(lor_desc, img_shape, voxel_size)
-assert proj.adjointness_test(xp, dev, dtype=xp.float32)
+# xp / dev are inferred from the projector; only dtype is needed (single precision)
+assert proj.adjointness_test(dtype=xp.float32)
 
 # %%
 # Visualize the projector geometry and all LORs
@@ -187,7 +188,7 @@ proj_tof.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0, num_sigmas=3.0
 )
 
-assert proj_tof.adjointness_test(xp, dev, dtype=xp.float32)
+assert proj_tof.adjointness_test(dtype=xp.float32)
 
 # %%
 # TOF forward project an image full of ones. The forward projection has the

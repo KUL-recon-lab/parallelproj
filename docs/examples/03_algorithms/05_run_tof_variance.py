@@ -33,7 +33,7 @@ with diameter :math:`D`, where the SNR gain is approximately
     G_\\text{TOF} \\approx \\sqrt{0.66 \\frac{D}{\\text{FWHM}_\\text{TOF}}}.
 
 For :math:`D = 240` mm and :math:`\\text{FWHM} = 30` mm this gives
-:math:`G \\approx 2.0`, i.e. a roughly two-fold noise reduction at the
+:math:`G \\approx 2.3`, i.e. more than a two-fold noise reduction at the
 centre.
 
 The convergence-speed trap
