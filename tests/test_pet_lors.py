@@ -1469,3 +1469,29 @@ def test_show_tof_bins(xp: ModuleType, dev: str) -> None:
     plt.close(fig)
 
 
+
+
+def test_regular_polygon_lor_descriptor_radial_trim_validation(
+    xp: ModuleType, dev: str
+) -> None:
+    """A ``radial_trim`` that leaves ``num_rad < 1`` raises a clear
+    ``ValueError`` pointing at the parameter instead of producing a degenerate
+    (negative-size) sinogram."""
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=100.0,
+        num_sides=12,
+        num_lor_endpoints_per_side=8,
+        lor_spacing=4.0,
+        ring_positions=xp.linspace(-4.0, 4.0, 3, device=dev),
+        symmetry_axis=2,
+    )
+    mich = ppl.Michelogram(scanner.num_rings, max_ring_difference=2, span=1)
+
+    with pytest.raises(ValueError, match="radial_trim"):
+        ppl.RegularPolygonPETLORDescriptor(scanner, mich, radial_trim=1000)
+
+    # a sensible radial_trim builds a positive-width sinogram
+    desc = ppl.RegularPolygonPETLORDescriptor(scanner, mich, radial_trim=10)
+    assert desc.num_rad >= 1

@@ -849,10 +849,11 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
         dev: str,
         radius: float,
         num_sides: int,
+        ring_positions: Array,
+        symmetry_axis: int,
+        *,
         num_lor_endpoints_per_side: int | None = None,
         lor_spacing: float | None = None,
-        ring_positions: Array = None,
-        symmetry_axis: int = None,
         phis: None | Array = None,
         ring_endpoint_ordering: RingEndpointOrdering = RingEndpointOrdering.CLOCKWISE,
         phi0: float = 0.0,
@@ -869,16 +870,16 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             inner radius of the regular polygon (distance from centre to detector face) in mm
         num_sides : int
             number of sides (faces) of each regular polygon
+        ring_positions : Array
+            1D array with the coordinate of the rings along the ring axis
+        symmetry_axis : int
+            the ring axis (0,1,2)
         num_lor_endpoints_per_side : int or None, optional
             number of LOR endpoints in each side.  Required when
             ``lor_endpoint_positions`` is not given; ignored otherwise.
         lor_spacing : float or None, optional
             uniform spacing between LOR endpoints in mm.  Required when
             ``lor_endpoint_positions`` is not given; ignored otherwise.
-        ring_positions : Array
-            1D array with the coordinate of the rings along the ring axis
-        symmetry_axis : int
-            the ring axis (0,1,2)
         phis : None | Array, optional
             angle of each side, by default None
             means that the sides are equally spaced around a circle

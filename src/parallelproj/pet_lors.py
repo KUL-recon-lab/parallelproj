@@ -1192,6 +1192,15 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         self._span = self._michelogram.span
 
         self._num_rad = scanner.num_lor_endpoints_per_ring - 1 - 2 * self._radial_trim
+        if self._num_rad < 1:
+            raise ValueError(
+                f"radial_trim={self._radial_trim} is too large for this scanner: "
+                f"it leaves num_rad={self._num_rad} radial bins "
+                f"(num_lor_endpoints_per_ring={scanner.num_lor_endpoints_per_ring}, "
+                f"num_rad = num_lor_endpoints_per_ring - 1 - 2*radial_trim). "
+                f"Reduce radial_trim to at most "
+                f"{(scanner.num_lor_endpoints_per_ring - 2) // 2}."
+            )
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
         self._sinogram_order = sinogram_order

@@ -40,9 +40,18 @@ Breaking Changes
   ``cuda_present``, ``cupy_enabled``, ``torch_enabled``, ``num_visible_cuda_devices``,
   ``lib_parallelproj_c_fname``, ``lib_parallelproj_cuda_fname``, ``cuda_kernel_file``,
   ``is_cuda_array``. Use ``parallelproj_core.cuda_enabled`` for CUDA detection.
+- **``RegularPolygonPETScannerGeometry`` signature changed**: ``ring_positions``
+  and ``symmetry_axis`` are now **required** (and no longer accept ``None``); all
+  remaining arguments after them (``num_lor_endpoints_per_side``, ``lor_spacing``,
+  ``phis``, ``ring_endpoint_ordering``, ``phi0``, ``lor_endpoint_positions``) are
+  **keyword-only**. Omitting a required argument now raises a clear ``TypeError``
+  instead of failing later. Calls that already pass these by keyword
+  (the documented style) are unaffected; calls that passed them positionally
+  must switch to keywords.
 - **``RegularPolygonPETLORDescriptor`` signature changed**: ``max_ring_difference``
   parameter replaced by a ``michelogram`` parameter that accepts a ``Michelogram``
-  object. See new ``Michelogram`` class below.
+  object. See new ``Michelogram`` class below. It now also raises a ``ValueError``
+  if ``radial_trim`` is so large that no radial bins remain (``num_rad < 1``).
 - **``TOFNonTOFElementwiseMultiplicationOperator`` removed**.
 - **``ParallelViewProjector3D`` signature changed**: the ``span`` and
   ``max_ring_diff`` keyword arguments have been replaced by a single
