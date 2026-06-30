@@ -131,6 +131,13 @@ fig1.show()
 #
 # Forward-project a simple phantom through the fine projector to get a fine
 # emission sinogram, then mash it with ``mode="sum"`` (counts add).
+#
+# (By default ``coarse_radial_trim`` is derived as
+# ``lor_desc.radial_trim // transaxial_factor`` so the coarse radial extent
+# matches the fine data.  With ``coarse_radial_trim=0`` the coarse sinogram
+# would keep extra peripheral radial bins that have no fine contributor -- they
+# would stay empty and the mashed sinogram would appear to lose counts at the
+# largest radial offsets.)
 
 img_shape = (100, 100, num_rings)
 voxel_size = (4.0, 4.0, 3.5)

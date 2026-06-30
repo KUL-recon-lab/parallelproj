@@ -2331,8 +2331,12 @@ class SinogramMashingOperator(LinearOperator):
         number of neighbouring rings to mash (``M``), default 1.
     mode : {"sum", "average"}, optional
         reduction mode, default ``"sum"``.
-    coarse_radial_trim : int, optional
-        radial trim of the coarse descriptor, default 0 (keep all radial bins).
+    coarse_radial_trim : int or None, optional
+        radial trim of the coarse descriptor.  ``None`` (default) derives it as
+        ``lor_descriptor.radial_trim // transaxial_factor`` so the coarse radial
+        extent matches the fine data; using ``0`` keeps empty peripheral coarse
+        radial bins and makes the mashed sinogram appear to lose counts at the
+        largest radial offsets.
     num_tof_bins : int or None, optional
         if given, the operator acts on a 4D TOF sinogram whose trailing axis is
         passed through unchanged (an approximation: the averaged LOR direction
@@ -2350,7 +2354,7 @@ class SinogramMashingOperator(LinearOperator):
         transaxial_factor: int = 1,
         axial_factor: int = 1,
         mode: str = "sum",
-        coarse_radial_trim: int = 0,
+        coarse_radial_trim: int | None = None,
         num_tof_bins: int | None = None,
     ) -> None:
         from .pet_scanners import RegularPolygonPETScannerGeometry
@@ -2365,8 +2369,16 @@ class SinogramMashingOperator(LinearOperator):
             raise ValueError("axial_factor must be a positive integer")
         if mode not in ("sum", "average"):
             raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
+        if coarse_radial_trim is None:
+            # match the fine data extent: the fine descriptor trimmed
+            # ``radial_trim`` near-tangential radial bins per side, which is
+            # ~``radial_trim / transaxial_factor`` bins on the coarse grid.  Using
+            # ``0`` instead would keep empty peripheral coarse radial bins (no fine
+            # contributor), making the mashed sinogram appear to lose counts at the
+            # largest radial offsets.
+            coarse_radial_trim = lor_descriptor.radial_trim // transaxial_factor
         if not isinstance(coarse_radial_trim, int) or coarse_radial_trim < 0:
-            raise ValueError("coarse_radial_trim must be a non-negative integer")
+            raise ValueError("coarse_radial_trim must be a non-negative integer or None")
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
         ):
