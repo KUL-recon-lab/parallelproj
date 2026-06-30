@@ -78,14 +78,21 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 )
 
 # %%
-# Mash 4 crystals around the ring and 2 rings axially
-# ---------------------------------------------------
+# Mash neighbouring crystals around the ring and rings axially
+# ------------------------------------------------------------
 #
-# ``transaxial_factor`` must divide the number of crystals per side and
-# ``axial_factor`` must divide the number of rings.  Here both are 2.
+# ``transaxial_factor`` (``N``) must divide the number of crystals per side and
+# ``axial_factor`` (``M``) must divide the number of rings.  Both operators
+# below share the same factors, so their coarse grids match.
+
+transaxial_factor = 4  # mash this many neighbouring within-side crystals (N)
+axial_factor = 2  # mash this many neighbouring rings (M)
 
 mash = parallelproj.pet_lors.SinogramMashingOperator(
-    lor_desc, transaxial_factor=4, axial_factor=2, mode="sum"
+    lor_desc,
+    transaxial_factor=transaxial_factor,
+    axial_factor=axial_factor,
+    mode="sum",
 )
 coarse_desc = mash.coarse_lor_descriptor
 
@@ -121,7 +128,7 @@ ax1.scatter(fine_pts[:, tax[0]], fine_pts[:, tax[1]], s=12, color="tab:blue",
 ax1.scatter(coarse_pts[:, tax[0]], coarse_pts[:, tax[1]], s=90, marker="x",
             color="tab:red", label=f"mashed virtual ({coarse_pts.shape[0]}/ring)")
 ax1.set_aspect("equal")
-ax1.set_title("Transaxial detector mashing (one ring, N=2)")
+ax1.set_title(f"Transaxial detector mashing (one ring, N={transaxial_factor})")
 ax1.legend(loc="upper right", fontsize="small")
 fig1.show()
 
@@ -187,7 +194,10 @@ fig2.show()
 # model when that difference matters, and the fast coarse projector otherwise.
 
 mash_avg = parallelproj.pet_lors.SinogramMashingOperator(
-    lor_desc, transaxial_factor=2, axial_factor=2, mode="average"
+    lor_desc,
+    transaxial_factor=transaxial_factor,
+    axial_factor=axial_factor,
+    mode="average",
 )
 proj_coarse = parallelproj.projectors.RegularPolygonPETProjector(
     mash_avg.coarse_lor_descriptor, img_shape, voxel_size
@@ -216,5 +226,49 @@ for a in ax3:
     a.set_xlabel("radial")
     a.set_ylabel("view")
 fig3.show()
+
+# %%
+# Upsampling a coarse sinogram back to the fine grid
+# --------------------------------------------------
+#
+# Sometimes a quantity is estimated cheaply on the coarse grid (a classic
+# example is the **scatter expectation**) but the reconstruction runs on the
+# fine grid, so it must be upsampled.  The mashing operator's **adjoint** does
+# this with no extra dependency -- and the mode picks the normalisation:
+#
+# * ``mash_sum.adjoint`` **replicates**: every fine bin gets its coarse bin's
+#   value unchanged.  This preserves the per-LOR **value/rate** (each fine LOR
+#   inherits the coarse value) but does **not** conserve the total -- the sum
+#   grows by roughly the mashing factor.  Use this for rate-like quantities
+#   such as a scatter estimate or a forward model.
+# * ``mash_avg.adjoint`` **spreads**: every fine bin gets ``coarse / multiplicity``.
+#   This **conserves the total counts** (the fine bins of a group sum back to
+#   the coarse value) but lowers the per-bin value.  Use this for counts you
+#   want to redistribute.
+#
+# (Interpolation is another option for smooth quantities like scatter, but the
+# array API standard has no interpolation primitive; you would hand-roll linear
+# interpolation or briefly drop to NumPy/SciPy.  The two adjoints below are
+# array-API compliant and need nothing extra.)
+
+coarse = mash(fine_sino)  # a coarse (counts) sinogram to upsample
+up_replicate = mash.adjoint(coarse)       # sum-mode adjoint: copy (rate-preserving)
+up_spread = mash_avg.adjoint(coarse)      # average-mode adjoint: /multiplicity (count-preserving)
+
+print(f"sum(coarse)                  = {float(xp.sum(coarse)):.1f}")
+print(f"sum(replicate, sum-adjoint)  = {float(xp.sum(up_replicate)):.1f}  (total NOT preserved)")
+print(f"sum(spread, average-adjoint) = {float(xp.sum(up_spread)):.1f}  (total preserved)")
+
+fig4, ax4 = plt.subplots(1, 2, figsize=(11, 5), tight_layout=True)
+r = _central_plane(up_replicate, lor_desc).T
+s = _central_plane(up_spread, lor_desc).T
+ax4[0].imshow(r, aspect="auto", cmap="Greys")
+ax4[0].set_title("upsampled: mash.adjoint (replicate)\nper-bin value preserved")
+ax4[1].imshow(s, aspect="auto", cmap="Greys")
+ax4[1].set_title("upsampled: mash_avg.adjoint (spread)\ntotal counts preserved")
+for a in ax4:
+    a.set_xlabel("radial")
+    a.set_ylabel("view")
+fig4.show()
 
 plt.show()
