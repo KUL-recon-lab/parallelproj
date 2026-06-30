@@ -129,6 +129,15 @@ New Features
 - **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
   that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
   ``mode="average"``).
+- **``SinogramMashingOperator``** (``parallelproj.pet_lors``): detector mashing for a
+  span-1 regular-polygon sinogram.  Groups ``transaxial_factor`` within-side crystals
+  and ``axial_factor`` rings into larger virtual detectors at the averaged endpoint
+  position, mapping the fine sinogram to a much smaller mashed one (``mode="sum"`` for
+  counts, ``mode="average"`` for multiplicative factors) with a genuine transpose and
+  closed-form norm.  The mashed geometry is exposed as ``coarse_scanner`` /
+  ``coarse_lor_descriptor`` (a regular-polygon descriptor), so a standard
+  ``RegularPolygonPETProjector`` projects directly along the mashed LORs.  See the
+  ``01_pet_geometry/07_run_detector_mashing.py`` example.
 - **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
   adjoint of any operator via ``A.H``.
 - **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
