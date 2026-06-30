@@ -56,16 +56,16 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # A fine ("true") scanner and its sinogram descriptor
 # ---------------------------------------------------
 #
-# A cylindrical scanner with 28 sides, 4 crystals per side (112 crystals per
+# A cylindrical scanner with 14 sides, 8 crystals per side (112 crystals per
 # ring) and 8 rings.
 
 num_rings = 8
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
-    radius=110.0,
-    num_sides=28,
-    num_lor_endpoints_per_side=4,
+    radius=95.0,
+    num_sides=14,
+    num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
     ring_positions=xp.linspace(-14.0, 14.0, num_rings, device=dev),
     symmetry_axis=2,
@@ -78,14 +78,14 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 )
 
 # %%
-# Mash 2 crystals around the ring and 2 rings axially
+# Mash 4 crystals around the ring and 2 rings axially
 # ---------------------------------------------------
 #
 # ``transaxial_factor`` must divide the number of crystals per side and
 # ``axial_factor`` must divide the number of rings.  Here both are 2.
 
 mash = parallelproj.pet_lors.SinogramMashingOperator(
-    lor_desc, transaxial_factor=2, axial_factor=2, mode="sum"
+    lor_desc, transaxial_factor=4, axial_factor=2, mode="sum"
 )
 coarse_desc = mash.coarse_lor_descriptor
 
