@@ -265,6 +265,16 @@ _keep.append(
 #
 # So the average-mode adjoint is the one to use when the upsampled sinogram
 # should be compared to the fine one.
+#
+# .. note::
+#
+#    To **upsample** a coarse (mashed) sinogram back to the fine TOF grid, use
+#    the operator's ``adjoint``.  The adjoint is **not** the inverse -- mashing
+#    discards information, so ``tof_mash.adjoint(tof_mash(x)) != x``.  Choose the
+#    mode by what you want to keep: the ``mode="sum"`` adjoint **replicates** the
+#    coarse value into every fine bin (per-bin value preserved, total grows ~ G),
+#    while the ``mode="average"`` adjoint **spreads** it (divides by G; total
+#    counts preserved, per-bin value lowered and comparable to the fine data).
 
 tof_mash_avg = parallelproj.pet_lors.TOFBinMashingOperator(
     fine_tof,

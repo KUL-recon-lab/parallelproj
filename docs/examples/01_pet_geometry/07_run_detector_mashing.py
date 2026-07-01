@@ -240,7 +240,7 @@ _keep.append(show_vol_cuts(_canonical(mashed_sino, coarse_desc), axis_labels=_la
 #
 # Mashing a sinogram of ones (``mode="sum"``) yields, per mashed bin, the number
 # of fine LORs that fold into it -- its **multiplicity**.  It is largest in the
-# interior (~``transaxial_factor``^2 x ``axial_factor``^2) and smaller toward the
+# interior (~ ``transaxial_factor**2 * axial_factor**2``) and smaller toward the
 # radial / axial edges, where fewer fine LORs contribute.
 
 ones_fine = xp.ones(lor_desc.spatial_sinogram_shape, dtype=xp.float32, device=dev)
@@ -310,6 +310,16 @@ _keep.append(show_vol_cuts(exact_c - fast_c, axis_labels=_labels,
 #   This **conserves the total counts** (the fine bins of a group sum back to
 #   the coarse value) but lowers the per-bin value.  Use this for counts you
 #   want to redistribute.
+#
+# .. note::
+#
+#    To **upsample** a coarse sinogram back to the fine grid, use the operator's
+#    ``adjoint``.  The adjoint is **not** the inverse -- mashing discards
+#    information, so ``mash.adjoint(mash(x)) != x``.  Choose the mode by what you
+#    want to keep: the ``mode="sum"`` adjoint **replicates** the coarse value
+#    into every fine bin (per-bin value/rate preserved, total grows ~ mashing
+#    factor), while the ``mode="average"`` adjoint **spreads** it
+#    (``coarse / multiplicity``; total counts preserved, per-bin value lowered).
 #
 # (Interpolation is another option for smooth quantities like scatter, but the
 # array API standard has no interpolation primitive; you would hand-roll linear
