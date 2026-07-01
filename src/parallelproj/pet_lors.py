@@ -2926,14 +2926,15 @@ class TOFBinMashingOperator(LinearOperator):
     def _adjoint(self, y: Array) -> Array:
         xp = array_api_compat.array_namespace(y)
         G = self._mashing_factor
+        # divide by G on the small coarse array (before replicating) so the
+        # scaling touches num_out instead of num_out * G elements
+        if self._mode == "average":
+            y = y / G
         expanded = xp.reshape(y, self._non_tof_data_shape + (self._num_out, 1))
         replicated = xp.broadcast_to(
             expanded, self._non_tof_data_shape + (self._num_out, G)
         )
-        x = xp.reshape(replicated, self._in_shape)
-        if self._mode == "average":
-            x = x / G
-        return x
+        return xp.reshape(replicated, self._in_shape)
 
     def norm(
         self,
