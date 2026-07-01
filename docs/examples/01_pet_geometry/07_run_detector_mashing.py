@@ -73,7 +73,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=7, span=1),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=3, span=1),
     radial_trim=11,
 )
 
@@ -166,6 +166,26 @@ mash.coarse_scanner.show_lor_endpoints(axv2, show_linear_index=False)
 coarse_desc.show_views(axv2, views=view_coarse, planes=central_coarse, lw=0.5)
 axv2.set_title("mashed: one view, central plane")
 figv.show()
+
+# %%
+# The two Michelograms (axial plane layout)
+# -----------------------------------------
+#
+# Axial mashing (``M``) merges neighbouring rings, so the mashed scanner has
+# fewer rings and therefore a smaller Michelogram -- i.e. fewer sinogram planes.
+# Left: the fine span-1 Michelogram; right: the mashed one.
+
+figmg, axmg = plt.subplots(1, 2, figsize=(11, 5), tight_layout=True)
+lor_desc.show_michelogram(axmg[0])
+axmg[0].set_title(
+    f"fine Michelogram\n{scanner.num_rings} rings, {lor_desc.num_planes} planes"
+)
+coarse_desc.show_michelogram(axmg[1])
+axmg[1].set_title(
+    f"mashed Michelogram\n{mash.coarse_scanner.num_rings} rings, "
+    f"{coarse_desc.num_planes} planes"
+)
+figmg.show()
 
 # %%
 # Mash a (simulated) emission sinogram
