@@ -74,7 +74,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=7, span=1),
-    radial_trim=10,
+    radial_trim=11,
 )
 
 # %%
@@ -108,8 +108,9 @@ print(f"LOR reduction factor  : {n_fine / n_coarse:.1f}x")
 # -----------------------------------
 #
 # The mashed (virtual) crystals lie at the **average** position of the
-# within-side blocks they replace.  We plot one ring, transaxially: small dots
-# are the fine crystals, large crosses the mashed virtual crystals.
+# within-side blocks they replace.  Left: one ring, transaxially -- small dots
+# are the fine crystals, large crosses the mashed virtual crystals.  Middle /
+# right: all endpoints of the fine and mashed scanners in 3D.
 
 fine_pts = to_numpy_array(scanner.all_lor_endpoints).reshape(
     scanner.num_rings, scanner.num_lor_endpoints_per_ring, 3
@@ -122,15 +123,49 @@ coarse_pts = to_numpy_array(mash.coarse_scanner.all_lor_endpoints).reshape(
 # transaxial plane = the two axes orthogonal to the symmetry axis
 tax = [a for a in range(3) if a != scanner.symmetry_axis]
 
-fig1, ax1 = plt.subplots(figsize=(6, 6), tight_layout=True)
-ax1.scatter(fine_pts[:, tax[0]], fine_pts[:, tax[1]], s=12, color="tab:blue",
-            label=f"fine crystals ({fine_pts.shape[0]}/ring)")
-ax1.scatter(coarse_pts[:, tax[0]], coarse_pts[:, tax[1]], s=90, marker="x",
-            color="tab:red", label=f"mashed virtual ({coarse_pts.shape[0]}/ring)")
-ax1.set_aspect("equal")
-ax1.set_title(f"Transaxial detector mashing (one ring, N={transaxial_factor})")
-ax1.legend(loc="upper right", fontsize="small")
+fig1 = plt.figure(figsize=(16, 5), tight_layout=True)
+ax1a = fig1.add_subplot(1, 3, 1)
+ax1a.scatter(fine_pts[:, tax[0]], fine_pts[:, tax[1]], s=12, color="tab:blue",
+             label=f"fine crystals ({fine_pts.shape[0]}/ring)")
+ax1a.scatter(coarse_pts[:, tax[0]], coarse_pts[:, tax[1]], s=90, marker="x",
+             color="tab:red", label=f"mashed virtual ({coarse_pts.shape[0]}/ring)")
+ax1a.set_aspect("equal")
+ax1a.set_title(f"one ring, transaxial (N={transaxial_factor})")
+ax1a.legend(loc="upper right", fontsize="small")
+
+ax1b = fig1.add_subplot(1, 3, 2, projection="3d")
+scanner.show_lor_endpoints(ax1b, show_linear_index=False)
+ax1b.set_title("fine scanner endpoints")
+
+ax1c = fig1.add_subplot(1, 3, 3, projection="3d")
+mash.coarse_scanner.show_lor_endpoints(ax1c, show_linear_index=False)
+ax1c.set_title("mashed scanner endpoints")
 fig1.show()
+
+# %%
+# A single view of the central plane, fine vs. mashed
+# ---------------------------------------------------
+#
+# :meth:`.RegularPolygonPETLORDescriptor.show_views` draws the actual LORs for
+# a set of views and planes.  Showing one view of the central plane makes the
+# LOR thinning explicit: the mashed descriptor has far fewer (and longer,
+# averaged) LORs for the same projection angle.
+
+central_fine = xp.asarray([lor_desc.num_planes // 2], device=dev)
+central_coarse = xp.asarray([coarse_desc.num_planes // 2], device=dev)
+view_fine = xp.asarray([lor_desc.num_views // 4], device=dev)
+view_coarse = xp.asarray([coarse_desc.num_views // 4], device=dev)
+
+figv = plt.figure(figsize=(11, 5), tight_layout=True)
+axv1 = figv.add_subplot(1, 2, 1, projection="3d")
+scanner.show_lor_endpoints(axv1, show_linear_index=False)
+lor_desc.show_views(axv1, views=view_fine, planes=central_fine, lw=0.5)
+axv1.set_title("fine: one view, central plane")
+axv2 = figv.add_subplot(1, 2, 2, projection="3d")
+mash.coarse_scanner.show_lor_endpoints(axv2, show_linear_index=False)
+coarse_desc.show_views(axv2, views=view_coarse, planes=central_coarse, lw=0.5)
+axv2.set_title("mashed: one view, central plane")
+figv.show()
 
 # %%
 # Mash a (simulated) emission sinogram
@@ -180,6 +215,28 @@ ax2[1].set_title(f"mashed sinogram (central plane)\n{mash.out_shape}")
 ax2[1].set_xlabel("radial")
 ax2[1].set_ylabel("view")
 fig2.show()
+
+# %%
+# How many fine LORs does each mashed LOR combine?
+# ------------------------------------------------
+#
+# Mashing a sinogram of ones (``mode="sum"``) yields, per mashed bin, the number
+# of fine LORs that fold into it -- its **multiplicity**.  It is largest in the
+# interior (~``transaxial_factor``^2 x ``axial_factor``^2) and smaller toward the
+# radial / axial edges, where fewer fine LORs contribute.
+
+ones_fine = xp.ones(lor_desc.spatial_sinogram_shape, dtype=xp.float32, device=dev)
+multiplicity_sino = mash(ones_fine)  # sum mode -> per-mashed-bin count
+
+figm, axm = plt.subplots(figsize=(6, 5), tight_layout=True)
+im = axm.imshow(
+    _central_plane(multiplicity_sino, coarse_desc).T, aspect="auto", cmap="viridis"
+)
+axm.set_title("multiplicity of the mashed LORs (central plane)\n(# fine LORs per mashed LOR)")
+axm.set_xlabel("radial")
+axm.set_ylabel("view")
+figm.colorbar(im, ax=axm)
+figm.show()
 
 # %%
 # Fast coarse projector vs. the exact mashed model
