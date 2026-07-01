@@ -46,7 +46,7 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from example_utils import suggest_array_backend_and_device, show_vol_cuts
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")
@@ -214,27 +214,25 @@ img[60:75, 60:75, :] = 2.0
 fine_sino = proj_fine(img)
 mashed_sino = mash(fine_sino)
 
-# show the central plane of each sinogram (radial x view)
-rax, vax, pax = lor_desc.radial_axis_num, lor_desc.view_axis_num, lor_desc.plane_axis_num
+# The sinograms are 3D arrays.  ``show_vol_cuts`` shows orthogonal cuts with a
+# slider per axis, so you can scroll through radial, view and plane.
 
 
-def _central_plane(sino, desc):
+def _canonical(sino, desc):
+    """Return the sinogram as a ``(radial, view, plane)`` numpy array."""
     s = to_numpy_array(sino)
-    s = np.moveaxis(s, (desc.radial_axis_num, desc.view_axis_num, desc.plane_axis_num),
-                    (0, 1, 2))
-    return s[:, :, s.shape[2] // 2]
+    return np.moveaxis(
+        s, (desc.radial_axis_num, desc.view_axis_num, desc.plane_axis_num), (0, 1, 2)
+    )
 
 
-fig2, ax2 = plt.subplots(1, 2, figsize=(11, 5), tight_layout=True)
-ax2[0].imshow(_central_plane(fine_sino, lor_desc).T, aspect="auto", cmap="Greys")
-ax2[0].set_title(f"fine sinogram (central plane)\n{mash.in_shape}")
-ax2[0].set_xlabel("radial")
-ax2[0].set_ylabel("view")
-ax2[1].imshow(_central_plane(mashed_sino, coarse_desc).T, aspect="auto", cmap="Greys")
-ax2[1].set_title(f"mashed sinogram (central plane)\n{mash.out_shape}")
-ax2[1].set_xlabel("radial")
-ax2[1].set_ylabel("view")
-fig2.show()
+_labels = ("radial", "view", "plane")
+_keep = []  # keep references so the interactive slider callbacks are not GC'd
+
+_keep.append(show_vol_cuts(_canonical(fine_sino, lor_desc), axis_labels=_labels,
+                           fig_title=f"fine sinogram {mash.in_shape}", cmap="Greys"))
+_keep.append(show_vol_cuts(_canonical(mashed_sino, coarse_desc), axis_labels=_labels,
+                           fig_title=f"mashed sinogram {mash.out_shape}", cmap="Greys"))
 
 # %%
 # How many fine LORs does each mashed LOR combine?
@@ -248,15 +246,10 @@ fig2.show()
 ones_fine = xp.ones(lor_desc.spatial_sinogram_shape, dtype=xp.float32, device=dev)
 multiplicity_sino = mash(ones_fine)  # sum mode -> per-mashed-bin count
 
-figm, axm = plt.subplots(figsize=(6, 5), tight_layout=True)
-im = axm.imshow(
-    _central_plane(multiplicity_sino, coarse_desc).T, aspect="auto", cmap="viridis"
-)
-axm.set_title("multiplicity of the mashed LORs (central plane)\n(# fine LORs per mashed LOR)")
-axm.set_xlabel("radial")
-axm.set_ylabel("view")
-figm.colorbar(im, ax=axm)
-figm.show()
+_keep.append(show_vol_cuts(
+    _canonical(multiplicity_sino, coarse_desc), axis_labels=_labels,
+    fig_title="multiplicity: # fine LORs per mashed LOR", cmap="viridis",
+))
 
 # %%
 # Fast coarse projector vs. the exact mashed model
@@ -289,20 +282,15 @@ rel = float(
 )
 print(f"relative difference  ||mash_avg(P_fine x) - P_coarse x|| / ||P_coarse x|| = {rel:.3f}")
 
-fig3, ax3 = plt.subplots(1, 3, figsize=(15, 5), tight_layout=True)
-e = _central_plane(exact, mash_avg.coarse_lor_descriptor).T
-f = _central_plane(fast, mash_avg.coarse_lor_descriptor).T
-vmax = float(max(e.max(), f.max()))
-ax3[0].imshow(e, aspect="auto", cmap="Greys", vmin=0, vmax=vmax)
-ax3[0].set_title("exact:  mash_avg(P_fine x)")
-ax3[1].imshow(f, aspect="auto", cmap="Greys", vmin=0, vmax=vmax)
-ax3[1].set_title("fast:   P_coarse x")
-ax3[2].imshow(e - f, aspect="auto", cmap="RdBu")
-ax3[2].set_title("difference")
-for a in ax3:
-    a.set_xlabel("radial")
-    a.set_ylabel("view")
-fig3.show()
+exact_c = _canonical(exact, mash_avg.coarse_lor_descriptor)
+fast_c = _canonical(fast, mash_avg.coarse_lor_descriptor)
+_vmax = float(max(exact_c.max(), fast_c.max()))
+_keep.append(show_vol_cuts(exact_c, axis_labels=_labels, vmin=0, vmax=_vmax,
+                           fig_title="exact:  mash_avg(P_fine x)", cmap="Greys"))
+_keep.append(show_vol_cuts(fast_c, axis_labels=_labels, vmin=0, vmax=_vmax,
+                           fig_title="fast:   P_coarse x", cmap="Greys"))
+_keep.append(show_vol_cuts(exact_c - fast_c, axis_labels=_labels,
+                           fig_title="difference (exact - fast)", cmap="RdBu"))
 
 # %%
 # Upsampling a coarse sinogram back to the fine grid
@@ -336,16 +324,13 @@ print(f"sum(coarse)                  = {float(xp.sum(coarse)):.1f}")
 print(f"sum(replicate, sum-adjoint)  = {float(xp.sum(up_replicate)):.1f}  (total NOT preserved)")
 print(f"sum(spread, average-adjoint) = {float(xp.sum(up_spread)):.1f}  (total preserved)")
 
-fig4, ax4 = plt.subplots(1, 2, figsize=(11, 5), tight_layout=True)
-r = _central_plane(up_replicate, lor_desc).T
-s = _central_plane(up_spread, lor_desc).T
-ax4[0].imshow(r, aspect="auto", cmap="Greys")
-ax4[0].set_title("upsampled: mash.adjoint (replicate)\nper-bin value preserved")
-ax4[1].imshow(s, aspect="auto", cmap="Greys")
-ax4[1].set_title("upsampled: mash_avg.adjoint (spread)\ntotal counts preserved")
-for a in ax4:
-    a.set_xlabel("radial")
-    a.set_ylabel("view")
-fig4.show()
+_keep.append(show_vol_cuts(
+    _canonical(up_replicate, lor_desc), axis_labels=_labels, cmap="Greys",
+    fig_title="upsampled: mash.adjoint (replicate, per-bin value preserved)",
+))
+_keep.append(show_vol_cuts(
+    _canonical(up_spread, lor_desc), axis_labels=_labels, cmap="Greys",
+    fig_title="upsampled: mash_avg.adjoint (spread, total counts preserved)",
+))
 
 plt.show()
