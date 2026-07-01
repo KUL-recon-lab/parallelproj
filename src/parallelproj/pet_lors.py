@@ -17,6 +17,7 @@ import enum
 from types import ModuleType
 
 import numpy as np
+import array_api_compat
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from matplotlib.axes import Axes
@@ -2202,4 +2203,795 @@ class SinogramAxialCompressionOperator(LinearOperator):
             f"target_span={self._target_span}, mode={self._mode!r}, "
             f"num_planes: {self._num_planes_1} -> {self._num_planes_n}, "
             f"max_multiplicity={self._max_mult}{tof_str})"
+        )
+
+
+def _grouped_gather_index(
+    target: np.ndarray, n_out: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Build a padded gather index from a many-to-one ``target`` map.
+
+    Parameters
+    ----------
+    target : np.ndarray, shape (n_in,), int
+        For every input bin, the output bin index it maps to, or ``-1`` if the
+        input bin does not map into the output sinogram.
+    n_out : int
+        number of output bins.
+
+    Returns
+    -------
+    idx2d : (n_out, max_mult) int64
+        Padded input indices contributing to each output bin (right-padded with
+        ``0``; padding is masked out by ``mask2d``).
+    mask2d : (n_out, max_mult) float32
+        ``1.0`` for valid entries, ``0.0`` for padding.
+    multiplicity : (n_out,) int64
+        number of input bins mapped to each output bin.
+    max_mult : int
+        the largest multiplicity (>= 1).
+    """
+    target = np.asarray(target).astype(np.int64)
+    valid = target >= 0
+    multiplicity = np.bincount(target[valid], minlength=n_out).astype(np.int64)
+    # defensive only: the callers always pass targets < n_out, so this never
+    # triggers; kept as a guard against a future stray out-of-range target.
+    if multiplicity.shape[0] > n_out:  # pragma: no cover
+        multiplicity = multiplicity[:n_out]
+    max_mult = max(int(multiplicity.max()) if multiplicity.size else 0, 1)
+
+    idx2d = np.zeros((n_out, max_mult), dtype=np.int64)
+    mask2d = np.zeros((n_out, max_mult), dtype=np.float32)
+
+    in_idx = np.nonzero(valid)[0]
+    tgt = target[in_idx]
+    order = np.argsort(tgt, kind="stable")
+    in_sorted = in_idx[order]
+    tgt_sorted = tgt[order]
+    offsets = np.zeros(n_out, dtype=np.int64)
+    if n_out > 1:
+        offsets[1:] = np.cumsum(multiplicity)[:-1]
+    slot = np.arange(in_sorted.shape[0], dtype=np.int64) - offsets[tgt_sorted]
+    idx2d[tgt_sorted, slot] = in_sorted
+    mask2d[tgt_sorted, slot] = 1.0
+    return idx2d, mask2d, multiplicity, max_mult
+
+
+def _masked_gather_sum(xp, arr, idx_flat, mask2d, n_out, max_mult, axis):
+    """``sum_{j in group(n)} arr[..., j, ...]`` along ``axis`` via a 1-D take.
+
+    ``idx_flat`` has shape ``(n_out * max_mult,)``; ``mask2d`` has shape
+    ``(n_out, max_mult)`` and zeroes out right-padding.
+    """
+    gathered = xp.take(arr, idx_flat, axis=axis)
+    new_shape = list(arr.shape)
+    new_shape[axis] = n_out
+    new_shape.insert(axis + 1, max_mult)
+    gathered = xp.reshape(gathered, tuple(new_shape))
+    mshape = [1] * gathered.ndim
+    mshape[axis] = n_out
+    mshape[axis + 1] = max_mult
+    gathered = gathered * xp.reshape(mask2d, tuple(mshape))
+    return xp.sum(gathered, axis=axis + 1)
+
+
+def _scatter(xp, arr, target_clamped, valid_mask, axis):
+    """``arr[..., target[k], ...]`` along ``axis`` (the transpose of a gather).
+
+    ``target_clamped`` is the per-output index (with ``-1`` replaced by ``0``);
+    ``valid_mask`` zeroes out entries whose original target was ``-1``.
+    """
+    out = xp.take(arr, target_clamped, axis=axis)
+    vshape = [1] * out.ndim
+    vshape[axis] = target_clamped.shape[0]
+    return out * xp.reshape(valid_mask, tuple(vshape))
+
+
+class SinogramMashingOperator(LinearOperator):
+    """Detector mashing for a span-1 regular-polygon PET sinogram.
+
+    Groups neighbouring detectors into larger **virtual** detectors located at
+    the *average* endpoint position, dramatically reducing the number of LORs.
+
+    * ``transaxial_factor`` (:math:`N`) groups :math:`N` neighbouring crystals
+      **within each polygon side**;
+    * ``axial_factor`` (:math:`M`) groups :math:`M` neighbouring rings.
+
+    Because within-side averaging of uniformly spaced crystals (and of ring
+    positions) again yields a regular polygon, the mashed geometry is itself a
+    :class:`.RegularPolygonPETScannerGeometry`, exposed as
+    :attr:`coarse_scanner`, with a matching span-1
+    :attr:`coarse_lor_descriptor`.  A standard
+    :class:`.RegularPolygonPETProjector` built on the latter projects directly
+    along the mashed LORs (the fast, approximate forward model), while this
+    operator composed with the fine projector is the exact mashed model.
+
+    The operator maps every fine sinogram bin to the coarse bin whose two
+    virtual detectors contain the fine bin's two endpoints, and
+
+    * ``mode="sum"`` (default) **sums** the contributing fine bins -- the
+      natural reduction for counts-like data (emission, measured counts);
+    * ``mode="average"`` takes their **mean** -- appropriate for
+      multiplicative factors (attenuation, normalisation) and matching a single
+      coarse-geometry projector.
+
+    The adjoint scatters/broadcasts accordingly.  Each fine bin maps to exactly
+    one coarse bin, so :math:`G G^T = \\operatorname{diag}(m_n)` and the
+    closed-form 2-norms are :math:`\\|G_{\\rm sum}\\| = \\sqrt{\\max_n m_n}`,
+    :math:`\\|G_{\\rm avg}\\| = 1/\\sqrt{\\min_n m_n}` with :math:`m_n` the
+    per-coarse-bin multiplicity; :meth:`norm` returns these directly.
+
+    Constraints (v1): the input descriptor must have ``span == 1``, ``N`` must
+    divide ``num_lor_endpoints_per_side`` and ``M`` must divide ``num_rings``.
+
+    Parameters
+    ----------
+    lor_descriptor : RegularPolygonPETLORDescriptor
+        the fine (un-mashed) span-1 descriptor.
+    transaxial_factor : int, optional
+        number of neighbouring within-side crystals to mash (``N``), default 1.
+    axial_factor : int, optional
+        number of neighbouring rings to mash (``M``), default 1.
+    mode : {"sum", "average"}, optional
+        reduction mode, default ``"sum"``.
+    coarse_radial_trim : int or None, optional
+        radial trim of the coarse descriptor.  ``None`` (default) derives it
+        automatically from the fine->coarse mapping so that every coarse radial
+        bin with at least one non-degenerate fine contributor is kept (no
+        trimming-induced count loss) while no empty peripheral coarse radial bins
+        remain.  Pass an explicit non-negative integer to override this (a larger
+        value trims additional radial bins and will discard the fine LORs that
+        map into them).
+    num_tof_bins : int or None, optional
+        if given, the operator acts on a 4D TOF sinogram whose trailing axis is
+        passed through unchanged (an approximation: the averaged LOR direction
+        differs slightly from the fine LORs).
+
+    Notes
+    -----
+    TOF binning of the mashed LOR is approximate because the averaged endpoints
+    define a slightly different LOR direction than the individual fine LORs.
+    """
+
+    def __init__(
+        self,
+        lor_descriptor: RegularPolygonPETLORDescriptor,
+        transaxial_factor: int = 1,
+        axial_factor: int = 1,
+        mode: str = "sum",
+        coarse_radial_trim: int | None = None,
+        num_tof_bins: int | None = None,
+    ) -> None:
+        from .pet_scanners import RegularPolygonPETScannerGeometry
+
+        if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
+            raise TypeError("lor_descriptor must be a RegularPolygonPETLORDescriptor")
+        if lor_descriptor.span != 1:
+            raise ValueError("input lor_descriptor must have span=1")
+        if not isinstance(transaxial_factor, int) or transaxial_factor < 1:
+            raise ValueError("transaxial_factor must be a positive integer")
+        if not isinstance(axial_factor, int) or axial_factor < 1:
+            raise ValueError("axial_factor must be a positive integer")
+        if mode not in ("sum", "average"):
+            raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
+        auto_coarse_radial_trim = coarse_radial_trim is None
+        if not auto_coarse_radial_trim and (
+            not isinstance(coarse_radial_trim, int) or coarse_radial_trim < 0
+        ):
+            raise ValueError("coarse_radial_trim must be a non-negative integer or None")
+        if num_tof_bins is not None and (
+            not isinstance(num_tof_bins, int) or num_tof_bins < 1
+        ):
+            raise ValueError("num_tof_bins must be a positive integer or None")
+
+        scanner = lor_descriptor.scanner
+        per_side = scanner.num_lor_endpoints_per_side
+        N = transaxial_factor
+        M = axial_factor
+        if per_side % N != 0:
+            raise ValueError(
+                f"transaxial_factor ({N}) must divide num_lor_endpoints_per_side "
+                f"({per_side})"
+            )
+        if scanner.num_rings % M != 0:
+            raise ValueError(
+                f"axial_factor ({M}) must divide num_rings ({scanner.num_rings})"
+            )
+
+        super().__init__()
+
+        self._lor_descriptor = lor_descriptor
+        self._transaxial_factor = N
+        self._axial_factor = M
+        self._mode = mode
+        self._num_tof_bins = num_tof_bins
+        self._xp = lor_descriptor.xp
+        self._dev = lor_descriptor.dev
+        self._ra = lor_descriptor.radial_axis_num
+        self._va = lor_descriptor.view_axis_num
+        self._pa = lor_descriptor.plane_axis_num
+
+        xp = self._xp
+        dev = self._dev
+
+        # ---- coarse scanner: within-side averaged endpoints -> regular polygon
+        per_side_c = per_side // N
+        nrings_c = scanner.num_rings // M
+        fine_pos = np.asarray(
+            to_numpy_array(scanner.lor_endpoint_positions), dtype=np.float64
+        )
+        coarse_pos = fine_pos.reshape(per_side_c, N).mean(axis=1)
+        fine_rings = np.asarray(
+            to_numpy_array(scanner.ring_positions), dtype=np.float64
+        )
+        coarse_rings = fine_rings.reshape(nrings_c, M).mean(axis=1)
+        fine_phis = np.asarray(
+            to_numpy_array(scanner.modules[0].phis), dtype=np.float64
+        )
+
+        self._coarse_scanner = RegularPolygonPETScannerGeometry(
+            xp,
+            dev,
+            radius=scanner.radius,
+            num_sides=scanner.num_sides,
+            ring_positions=xp.asarray(coarse_rings, dtype=xp.float32, device=dev),
+            symmetry_axis=scanner.symmetry_axis,
+            lor_endpoint_positions=xp.asarray(
+                coarse_pos, dtype=xp.float32, device=dev
+            ),
+            phis=xp.asarray(fine_phis, dtype=xp.float32, device=dev),
+            ring_endpoint_ordering=scanner.ring_endpoint_ordering,
+        )
+
+        # ---- coarse michelogram covering every mashed ring pair, then descriptor
+        s_ring = np.asarray(
+            to_numpy_array(lor_descriptor.start_plane_index)
+        ).astype(np.int64)
+        e_ring = np.asarray(
+            to_numpy_array(lor_descriptor.end_plane_index)
+        ).astype(np.int64)
+        cs_ring = s_ring // M
+        ce_ring = e_ring // M
+        coarse_max_rd = int(np.max(np.abs(cs_ring - ce_ring))) if s_ring.size else 0
+        coarse_max_rd = min(coarse_max_rd, nrings_c - 1)
+        coarse_mich = Michelogram(nrings_c, coarse_max_rd, span=1)
+
+        if auto_coarse_radial_trim:
+            # Derive the coarse radial trim directly from the fine->coarse map:
+            # trim exactly the outer coarse radial bins that would receive *no*
+            # non-degenerate fine LOR.  This keeps every fine LOR that has a
+            # distinct coarse counterpart (no trimming-induced loss) while leaving
+            # no empty peripheral coarse radial bins.  (The only fine LORs still
+            # dropped are the most tangential ones whose two endpoints collapse
+            # into the *same* coarse virtual detector -- a self-pair with no
+            # coarse LOR, which is geometrically unavoidable.)
+            coarse_radial_trim = self._auto_coarse_radial_trim(
+                lor_descriptor,
+                self._coarse_scanner,
+                coarse_mich,
+                N,
+                per_side,
+                per_side_c,
+            )
+        self._coarse_lor_descriptor = RegularPolygonPETLORDescriptor(
+            self._coarse_scanner,
+            coarse_mich,
+            radial_trim=coarse_radial_trim,
+            sinogram_order=lor_descriptor.sinogram_order,
+            zig_zag_order=lor_descriptor.zig_zag_order,
+        )
+        cdesc = self._coarse_lor_descriptor
+
+        self._R_f = lor_descriptor.num_rad
+        self._V_f = lor_descriptor.num_views
+        self._P_f = lor_descriptor.num_planes
+        self._R_c = cdesc.num_rad
+        self._V_c = cdesc.num_views
+        self._P_c = cdesc.num_planes
+        self._n_t_c = self._R_c * self._V_c
+
+        self._build_index_maps(scanner, cdesc, N, M, per_side, per_side_c, nrings_c)
+
+        spatial_in = tuple(lor_descriptor.spatial_sinogram_shape)
+        spatial_out = tuple(cdesc.spatial_sinogram_shape)
+        if num_tof_bins is None:
+            self._in_shape = spatial_in
+            self._out_shape = spatial_out
+        else:
+            self._in_shape = spatial_in + (int(num_tof_bins),)
+            self._out_shape = spatial_out + (int(num_tof_bins),)
+
+    @staticmethod
+    def _auto_coarse_radial_trim(ld, coarse_scanner, coarse_mich, N, per_side, per_side_c):
+        """Largest symmetric coarse radial trim that keeps every coarse radial bin
+        which receives at least one non-degenerate fine LOR.
+
+        A ``radial_trim=0`` coarse descriptor is built to enumerate every coarse
+        radial bin; each fine LOR is mapped to its coarse crystal pair (dropping
+        degenerate self-pairs whose endpoints share a virtual detector) and hence
+        to a coarse radial bin.  Returning ``min(r_min, (num_rad0-1) - r_max)``
+        trims as many outer bins as possible without discarding any occupied bin.
+        """
+        cdesc0 = RegularPolygonPETLORDescriptor(
+            coarse_scanner,
+            coarse_mich,
+            radial_trim=0,
+            sinogram_order=ld.sinogram_order,
+            zig_zag_order=ld.zig_zag_order,
+        )
+        K_c = coarse_scanner.num_lor_endpoints_per_ring
+        V_c0 = cdesc0.num_views
+        R_c0 = cdesc0.num_rad
+
+        def coarse_in_ring(c):
+            side = c // per_side
+            pos = c % per_side
+            return side * per_side_c + (pos // N)
+
+        s_in = np.asarray(to_numpy_array(ld.start_in_ring_index)).astype(np.int64)
+        e_in = np.asarray(to_numpy_array(ld.end_in_ring_index)).astype(np.int64)
+        cs_in = coarse_in_ring(s_in)
+        ce_in = coarse_in_ring(e_in)
+
+        cstart = np.asarray(to_numpy_array(cdesc0.start_in_ring_index)).astype(np.int64)
+        cend = np.asarray(to_numpy_array(cdesc0.end_in_ring_index)).astype(np.int64)
+        _, r_c = np.meshgrid(np.arange(V_c0), np.arange(R_c0), indexing="ij")
+        pair2r = np.full((K_c, K_c), -1, dtype=np.int64)
+        pair2r[cstart.ravel(), cend.ravel()] = r_c.ravel()
+        pair2r[cend.ravel(), cstart.ravel()] = r_c.ravel()
+
+        nondegen = cs_in != ce_in
+        r_map = pair2r[np.clip(cs_in, 0, K_c - 1), np.clip(ce_in, 0, K_c - 1)]
+        occ = r_map[nondegen & (r_map >= 0)]
+        if occ.size == 0:  # pragma: no cover - defensive: a real sinogram always
+            return 0  # has non-degenerate (cross-side) LORs
+        return int(min(int(occ.min()), (R_c0 - 1) - int(occ.max())))
+
+    def _build_index_maps(self, scanner, cdesc, N, M, per_side, per_side_c, nrings_c):
+        """Build the transaxial (joint view/radial) and axial (plane) fine->coarse
+        maps as masked gather indices (for ``_apply``) and scatter targets (for
+        ``_adjoint``)."""
+        xp = self._xp
+        dev = self._dev
+        ld = self._lor_descriptor
+
+        # ---- transaxial: fine (view, radial) -> coarse transaxial bin ----
+        K_c = self._coarse_scanner.num_lor_endpoints_per_ring
+
+        def coarse_in_ring(c):
+            side = c // per_side
+            pos = c % per_side
+            return side * per_side_c + (pos // N)
+
+        s_in = np.asarray(to_numpy_array(ld.start_in_ring_index)).astype(np.int64)
+        e_in = np.asarray(to_numpy_array(ld.end_in_ring_index)).astype(np.int64)
+        cs_in = coarse_in_ring(s_in)  # (V_f, R_f)
+        ce_in = coarse_in_ring(e_in)
+
+        cstart = np.asarray(to_numpy_array(cdesc.start_in_ring_index)).astype(np.int64)
+        cend = np.asarray(to_numpy_array(cdesc.end_in_ring_index)).astype(np.int64)
+        v_c, r_c = np.meshgrid(
+            np.arange(self._V_c), np.arange(self._R_c), indexing="ij"
+        )
+        tflat_c = (r_c * self._V_c + v_c).astype(np.int64)  # radial-major flat
+        pair2t = np.full((K_c, K_c), -1, dtype=np.int64)
+        pair2t[cstart.ravel(), cend.ravel()] = tflat_c.ravel()
+        pair2t[cend.ravel(), cstart.ravel()] = tflat_c.ravel()
+
+        degenerate = cs_in == ce_in
+        t_grid = np.where(
+            degenerate,
+            -1,
+            pair2t[np.clip(cs_in, 0, K_c - 1), np.clip(ce_in, 0, K_c - 1)],
+        )
+        # fine transaxial flat index = radial * V_f + view  -> reorder [v, r] grid
+        target_t = t_grid.T.reshape(-1).astype(np.int64)
+        idx_t, mask_t, mult_t, maxm_t = _grouped_gather_index(target_t, self._n_t_c)
+
+        # ---- axial: fine plane -> coarse plane ----
+        cstart_p = np.asarray(to_numpy_array(cdesc.start_plane_index)).astype(np.int64)
+        cend_p = np.asarray(to_numpy_array(cdesc.end_plane_index)).astype(np.int64)
+        ringpair2plane = np.full((nrings_c, nrings_c), -1, dtype=np.int64)
+        plane_ids = np.arange(cstart_p.shape[0])
+        ringpair2plane[cstart_p, cend_p] = plane_ids
+        ringpair2plane[cend_p, cstart_p] = plane_ids
+        s_ring = np.asarray(to_numpy_array(ld.start_plane_index)).astype(np.int64)
+        e_ring = np.asarray(to_numpy_array(ld.end_plane_index)).astype(np.int64)
+        target_a = ringpair2plane[
+            np.clip(s_ring // M, 0, nrings_c - 1),
+            np.clip(e_ring // M, 0, nrings_c - 1),
+        ].astype(np.int64)
+        idx_a, mask_a, mult_a, maxm_a = _grouped_gather_index(target_a, self._P_c)
+
+        # ---- store everything as xp arrays ----
+        def f32(a):
+            return xp.asarray(a.astype(np.float32), device=dev)
+
+        def i(a):
+            return xp.asarray(a, device=dev)
+
+        self._idx_t = i(idx_t.reshape(-1))
+        self._mask_t = f32(mask_t)
+        self._maxm_t = maxm_t
+        self._idx_a = i(idx_a.reshape(-1))
+        self._mask_a = f32(mask_a)
+        self._maxm_a = maxm_a
+
+        self._target_t_clamped = i(np.clip(target_t, 0, None))
+        self._valid_t = f32((target_t >= 0).astype(np.float32))
+        self._target_a_clamped = i(np.clip(target_a, 0, None))
+        self._valid_a = f32((target_a >= 0).astype(np.float32))
+
+        inv_t = np.where(mult_t > 0, 1.0 / np.maximum(mult_t, 1), 0.0)
+        inv_a = np.where(mult_a > 0, 1.0 / np.maximum(mult_a, 1), 0.0)
+        self._inv_t = f32(inv_t)
+        self._inv_a = f32(inv_a)
+        self._mult_t = mult_t
+        self._mult_a = mult_a
+
+        # closed-form norm ingredients (total multiplicity = m_t * m_a)
+        self._max_mult = int(mult_t.max() * mult_a.max())
+        nz_t = mult_t[mult_t > 0]
+        nz_a = mult_a[mult_a > 0]
+        self._min_mult = int(nz_t.min() * nz_a.min()) if nz_t.size and nz_a.size else 0
+
+    # ------------------------------------------------------------------
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        """fine spatial sinogram shape (optionally with a trailing TOF axis)."""
+        return self._in_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        """coarse spatial sinogram shape (optionally with a trailing TOF axis)."""
+        return self._out_shape
+
+    def _canonical_perm(self, has_tof: bool):
+        perm = [self._ra, self._va, self._pa]
+        if has_tof:
+            perm = perm + [3]
+        return tuple(perm), tuple(int(j) for j in np.argsort(perm))
+
+    def _apply(self, x: Array) -> Array:
+        xp = self._xp
+        has_tof = self._num_tof_bins is not None
+        perm, inv_perm = self._canonical_perm(has_tof)
+        xc = xp.permute_dims(x, perm)  # (R_f, V_f, P_f[, tof])
+        tail = (xc.shape[3],) if has_tof else ()
+        xc = xp.reshape(xc, (self._R_f * self._V_f, self._P_f) + tail)
+
+        # transaxial sum along axis 0
+        t = _masked_gather_sum(
+            xp, xc, self._idx_t, self._mask_t, self._n_t_c, self._maxm_t, 0
+        )
+        if self._mode == "average":
+            sh = [1] * t.ndim
+            sh[0] = self._n_t_c
+            t = t * xp.reshape(self._inv_t, tuple(sh))
+
+        # axial sum along axis 1
+        a = _masked_gather_sum(
+            xp, t, self._idx_a, self._mask_a, self._P_c, self._maxm_a, 1
+        )
+        if self._mode == "average":
+            sh = [1] * a.ndim
+            sh[1] = self._P_c
+            a = a * xp.reshape(self._inv_a, tuple(sh))
+
+        out = xp.reshape(a, (self._R_c, self._V_c, self._P_c) + tail)
+        return xp.permute_dims(out, inv_perm)
+
+    def _adjoint(self, y: Array) -> Array:
+        xp = self._xp
+        has_tof = self._num_tof_bins is not None
+        perm, inv_perm = self._canonical_perm(has_tof)
+        yc = xp.permute_dims(y, perm)  # (R_c, V_c, P_c[, tof])
+        tail = (yc.shape[3],) if has_tof else ()
+        yc = xp.reshape(yc, (self._n_t_c, self._P_c) + tail)
+
+        if self._mode == "average":
+            sh = [1] * yc.ndim
+            sh[1] = self._P_c
+            yc = yc * xp.reshape(self._inv_a, tuple(sh))
+        # scatter axial (axis 1): coarse plane -> fine plane
+        b = _scatter(xp, yc, self._target_a_clamped, self._valid_a, 1)
+        if self._mode == "average":
+            sh = [1] * b.ndim
+            sh[0] = self._n_t_c
+            b = b * xp.reshape(self._inv_t, tuple(sh))
+        # scatter transaxial (axis 0): coarse transaxial bin -> fine (view, radial)
+        b = _scatter(xp, b, self._target_t_clamped, self._valid_t, 0)
+
+        out = xp.reshape(b, (self._R_f, self._V_f, self._P_f) + tail)
+        return xp.permute_dims(out, inv_perm)
+
+    def norm(
+        self,
+        xp: ModuleType | None = None,
+        dev: str | None = None,
+        num_iter: int = 30,
+        iscomplex: bool = False,
+        verbose: bool = False,
+    ) -> float:
+        """Closed-form operator 2-norm (arguments accepted but ignored).
+
+        ``mode="sum"`` -> ``sqrt(max multiplicity)``;
+        ``mode="average"`` -> ``1 / sqrt(min multiplicity)``.
+        """
+        if self._mode == "sum":
+            return float(np.sqrt(self._max_mult))
+        return float(1.0 / np.sqrt(self._min_mult))
+
+    @property
+    def lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
+        """the fine (input) LOR descriptor."""
+        return self._lor_descriptor
+
+    @property
+    def coarse_lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
+        """the mashed (output) LOR descriptor."""
+        return self._coarse_lor_descriptor
+
+    @property
+    def coarse_scanner(self):
+        """the mashed (averaged-endpoint) regular-polygon scanner geometry."""
+        return self._coarse_scanner
+
+    @property
+    def transaxial_factor(self) -> int:
+        """number of within-side crystals mashed together (``N``)."""
+        return self._transaxial_factor
+
+    @property
+    def axial_factor(self) -> int:
+        """number of rings mashed together (``M``)."""
+        return self._axial_factor
+
+    @property
+    def mode(self) -> str:
+        """reduction mode, ``"sum"`` or ``"average"``."""
+        return self._mode
+
+    @property
+    def num_tof_bins(self) -> int | None:
+        """number of TOF bins, or ``None`` for a non-TOF operator."""
+        return self._num_tof_bins
+
+    def __str__(self) -> str:
+        tof_str = (
+            f", {self._num_tof_bins} TOF bins" if self._num_tof_bins is not None else ""
+        )
+        return (
+            f"{self.__class__.__name__}("
+            f"transaxial_factor={self._transaxial_factor}, "
+            f"axial_factor={self._axial_factor}, mode={self._mode!r}, "
+            f"num_LORs: {int(np.prod(self._in_shape))} -> "
+            f"{int(np.prod(self._out_shape))}{tof_str})"
+        )
+
+
+class TOFBinMashingOperator(LinearOperator):
+    """Linear operator that mashes (groups) neighbouring TOF bins.
+
+    Groups every ``mashing_factor`` (:math:`G`) consecutive TOF bins of a
+    TOF-binned data array into a single coarse bin.  The reduction acts only on
+    the **trailing** (TOF) axis; all leading (non-TOF) axes -- e.g. the spatial
+    sinogram axes, or listmode/block indices -- are passed through unchanged.
+    The operator is therefore geometry-agnostic: it works on any array whose
+    last axis is the TOF axis (a plain length-``num_tofbins`` vector included).
+
+    With :math:`G` dividing the number of fine TOF bins, the fine bin index
+    :math:`t` maps to coarse bin :math:`t // G`, i.e. coarse bin :math:`c`
+    collects the fine bins :math:`\\{cG, cG+1, \\dots, cG+G-1\\}`.
+
+    Two reduction modes are supported:
+
+    * ``mode="sum"`` (default) -- the coarse bin is the **sum** of its :math:`G`
+      fine bins:
+
+      .. math::
+
+          y_c \\;=\\; \\sum_{g=0}^{G-1} x_{\\,cG+g}
+          \\qquad
+          \\left(A^T y\\right)_t \\;=\\; y_{\\,t // G}\\,.
+
+      This is the natural reduction for **counts-like** TOF data.  Because a
+      TOF-bin weight is a Gaussian integrated over the bin's extent and
+      integrals over adjacent bins add exactly to the integral over their
+      union, sum-mashing a TOF forward projection is (up to the ``num_sigmas``
+      truncation) **identical** to projecting directly onto the coarse TOF grid
+      described by :attr:`coarse_tof_parameters`.
+
+    * ``mode="average"`` -- the coarse bin is the **mean** of its :math:`G` fine
+      bins:
+
+      .. math::
+
+          y_c \\;=\\; \\frac{1}{G} \\sum_{g=0}^{G-1} x_{\\,cG+g}
+          \\qquad
+          \\left(A_{\\rm avg}^T y\\right)_t \\;=\\; \\frac{y_{\\,t // G}}{G}\\,.
+
+    The closed-form operator 2-norms follow from :math:`A A^T = G\\,I`
+    (``sum``) and :math:`A_{\\rm avg} A_{\\rm avg}^T = (1/G)\\,I`:
+
+    .. math::
+
+        \\|A_{\\rm sum}\\|_2 = \\sqrt{G}\\,, \\qquad
+        \\|A_{\\rm avg}\\|_2 = 1 / \\sqrt{G}\\,.
+
+    :meth:`norm` returns these directly without power iteration.
+
+    Parameters
+    ----------
+    tof_parameters : TOFParameters
+        TOF parameters of the fine (input) data.  ``num_tofbins`` sets the fine
+        TOF axis length; the mashed parameters are exposed as
+        :attr:`coarse_tof_parameters`.
+    non_tof_data_shape : tuple of int
+        Shape of the leading (non-TOF) axes.  For a standard TOF sinogram pass
+        ``lor_descriptor.spatial_sinogram_shape``; pass ``()`` to act on a bare
+        length-``num_tofbins`` TOF vector.
+    mashing_factor : int, optional
+        Number of neighbouring TOF bins grouped together (:math:`G`), default
+        ``1`` (identity along the TOF axis).  Must divide
+        ``tof_parameters.num_tofbins``.
+    mode : {"sum", "average"}, optional
+        Reduction mode, default ``"sum"``.
+
+    Notes
+    -----
+    TOF-bin centring is a matter of convention and is **not** altered by this
+    operator: for an odd ``num_tofbins`` the centre is the central bin (the LOR
+    midpoint at TOF position 0); for an even ``num_tofbins`` the centre sits
+    between the two central bins.  Choose ``num_tofbins`` and ``mashing_factor``
+    so the coarse grid keeps the centring you want (e.g. an odd ``num_tofbins``
+    with an odd ``mashing_factor`` yields an odd coarse bin count and keeps a
+    central bin).
+
+    Examples
+    --------
+    >>> import array_api_compat.numpy as xp
+    >>> import parallelproj.tof as ppt
+    >>> import parallelproj.pet_lors as ppl
+    >>> tp = ppt.TOFParameters(num_tofbins=27, tofbin_width=25.0, sigma_tof=40.0)
+    >>> op = ppl.TOFBinMashingOperator(tp, (5, 8), mashing_factor=3)
+    >>> op.in_shape, op.out_shape
+    ((5, 8, 27), (5, 8, 9))
+    >>> op.coarse_tof_parameters.num_tofbins, op.coarse_tof_parameters.tofbin_width
+    (9, 75.0)
+    >>> op.adjointness_test(xp, "cpu")
+    True
+    """
+
+    def __init__(
+        self,
+        tof_parameters: TOFParameters,
+        non_tof_data_shape: tuple[int, ...],
+        mashing_factor: int = 1,
+        mode: str = "sum",
+    ) -> None:
+        if not isinstance(tof_parameters, TOFParameters):
+            raise TypeError("tof_parameters must be a TOFParameters instance")
+        try:
+            non_tof_data_shape = tuple(int(s) for s in non_tof_data_shape)
+        except TypeError as exc:
+            raise TypeError(
+                "non_tof_data_shape must be a tuple of ints (use () for a bare "
+                "TOF vector)"
+            ) from exc
+        if any(s < 1 for s in non_tof_data_shape):
+            raise ValueError("non_tof_data_shape entries must be positive integers")
+        if not isinstance(mashing_factor, int) or mashing_factor < 1:
+            raise ValueError("mashing_factor must be a positive integer")
+        num_tofbins = int(tof_parameters.num_tofbins)
+        if num_tofbins % mashing_factor != 0:
+            raise ValueError(
+                f"mashing_factor ({mashing_factor}) must divide num_tofbins "
+                f"({num_tofbins})"
+            )
+        if mode not in ("sum", "average"):
+            raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
+
+        super().__init__()
+
+        self._tof_parameters = tof_parameters
+        self._non_tof_data_shape = non_tof_data_shape
+        self._mashing_factor = int(mashing_factor)
+        self._mode = mode
+        self._num_tofbins = num_tofbins
+        self._num_out = num_tofbins // mashing_factor
+
+        self._in_shape = non_tof_data_shape + (self._num_tofbins,)
+        self._out_shape = non_tof_data_shape + (self._num_out,)
+
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        """fine data shape ``non_tof_data_shape + (num_tofbins,)``."""
+        return self._in_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        """mashed data shape ``non_tof_data_shape + (num_tofbins // G,)``."""
+        return self._out_shape
+
+    def _apply(self, x: Array) -> Array:
+        xp = array_api_compat.array_namespace(x)
+        G = self._mashing_factor
+        grouped = xp.reshape(x, self._non_tof_data_shape + (self._num_out, G))
+        y = xp.sum(grouped, axis=-1)
+        if self._mode == "average":
+            y = y / G
+        return y
+
+    def _adjoint(self, y: Array) -> Array:
+        xp = array_api_compat.array_namespace(y)
+        G = self._mashing_factor
+        # divide by G on the small coarse array (before replicating) so the
+        # scaling touches num_out instead of num_out * G elements
+        if self._mode == "average":
+            y = y / G
+        expanded = xp.reshape(y, self._non_tof_data_shape + (self._num_out, 1))
+        replicated = xp.broadcast_to(
+            expanded, self._non_tof_data_shape + (self._num_out, G)
+        )
+        return xp.reshape(replicated, self._in_shape)
+
+    def norm(
+        self,
+        xp: ModuleType | None = None,
+        dev: str | None = None,
+        num_iter: int = 30,
+        iscomplex: bool = False,
+        verbose: bool = False,
+    ) -> float:
+        """Closed-form operator 2-norm (arguments accepted but ignored).
+
+        ``mode="sum"`` -> ``sqrt(mashing_factor)``;
+        ``mode="average"`` -> ``1 / sqrt(mashing_factor)``.
+        """
+        if self._mode == "sum":
+            return float(np.sqrt(self._mashing_factor))
+        return float(1.0 / np.sqrt(self._mashing_factor))
+
+    @property
+    def coarse_tof_parameters(self) -> TOFParameters:
+        """TOF parameters of the mashed grid.
+
+        ``num_tofbins`` is divided by ``mashing_factor`` and ``tofbin_width`` is
+        multiplied by it; ``sigma_tof`` (the physical timing resolution),
+        ``num_sigmas`` and ``tofcenter_offset`` are unchanged.
+        """
+        return TOFParameters(
+            num_tofbins=self._num_out,
+            tofbin_width=self._tof_parameters.tofbin_width * self._mashing_factor,
+            sigma_tof=self._tof_parameters.sigma_tof,
+            num_sigmas=self._tof_parameters.num_sigmas,
+            tofcenter_offset=self._tof_parameters.tofcenter_offset,
+        )
+
+    @property
+    def tof_parameters(self) -> TOFParameters:
+        """the fine (input) TOF parameters."""
+        return self._tof_parameters
+
+    @property
+    def non_tof_data_shape(self) -> tuple[int, ...]:
+        """shape of the leading (non-TOF) axes."""
+        return self._non_tof_data_shape
+
+    @property
+    def mashing_factor(self) -> int:
+        """number of neighbouring TOF bins mashed together (``G``)."""
+        return self._mashing_factor
+
+    @property
+    def mode(self) -> str:
+        """reduction mode, ``"sum"`` or ``"average"``."""
+        return self._mode
+
+    def __str__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(mashing_factor={self._mashing_factor}, "
+            f"mode={self._mode!r}, num_tofbins: {self._num_tofbins} -> "
+            f"{self._num_out}, non_tof_data_shape={self._non_tof_data_shape})"
         )

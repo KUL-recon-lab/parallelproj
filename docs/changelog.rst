@@ -129,6 +129,29 @@ New Features
 - **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
   that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
   ``mode="average"``).
+- **``SinogramMashingOperator``** (``parallelproj.pet_lors``): detector mashing for a
+  span-1 regular-polygon sinogram.  Groups ``transaxial_factor`` within-side crystals
+  and ``axial_factor`` rings into larger virtual detectors at the averaged endpoint
+  position, mapping the fine sinogram to a much smaller mashed one (``mode="sum"`` for
+  counts, ``mode="average"`` for multiplicative factors) with a genuine transpose and
+  closed-form norm.  The mashed geometry is exposed as ``coarse_scanner`` /
+  ``coarse_lor_descriptor`` (a regular-polygon descriptor), so a standard
+  ``RegularPolygonPETProjector`` projects directly along the mashed LORs.  By default
+  the coarse radial trim is derived automatically from the fine->coarse mapping so
+  that no fine LOR is lost to trimming and no empty peripheral coarse radial bins
+  remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
+  ``coarse_radial_trim`` to override.  See the
+  ``01_pet_geometry/07_run_detector_mashing.py`` example.
+- **``TOFBinMashingOperator``** (``parallelproj.pet_lors``): mashes (groups) every
+  ``mashing_factor`` neighbouring TOF bins along the trailing TOF axis into fewer,
+  wider bins (``mode="sum"`` for counts, ``mode="average"`` for multiplicative
+  factors), with a genuine transpose and closed-form norm (``sqrt(G)`` / ``1/sqrt(G)``).
+  Geometry-agnostic (takes ``tof_parameters`` and the leading ``non_tof_data_shape``),
+  it exposes the matching ``coarse_tof_parameters`` so a projector can target the
+  mashed TOF grid, and composes with ``SinogramMashingOperator`` via
+  ``CompositeLinearOperator``.  For ``mode="sum"`` the mashed forward projection equals
+  a direct coarse-TOF projection (erf additivity over adjacent bins).  See the
+  ``01_pet_geometry/08_run_tof_bin_mashing.py`` example.
 - **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
   adjoint of any operator via ``A.H``.
 - **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
