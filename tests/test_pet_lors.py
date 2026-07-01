@@ -1832,6 +1832,8 @@ def test_tof_bin_mashing_validation(xp: ModuleType, dev: str) -> None:
 
     with pytest.raises(TypeError, match="TOFParameters"):
         ppl.TOFBinMashingOperator("nonsense", (4, 5), mashing_factor=3)
+    with pytest.raises(TypeError, match="non_tof_data_shape must be a tuple"):
+        ppl.TOFBinMashingOperator(tp, 5, mashing_factor=3)  # not iterable
     with pytest.raises(ValueError, match="non_tof_data_shape"):
         ppl.TOFBinMashingOperator(tp, (4, 0), mashing_factor=3)
     with pytest.raises(ValueError, match="mashing_factor"):
