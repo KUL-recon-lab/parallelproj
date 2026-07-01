@@ -17,6 +17,7 @@ import enum
 from types import ModuleType
 
 import numpy as np
+import array_api_compat
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from matplotlib.axes import Axes
@@ -2766,4 +2767,230 @@ class SinogramMashingOperator(LinearOperator):
             f"axial_factor={self._axial_factor}, mode={self._mode!r}, "
             f"num_LORs: {int(np.prod(self._in_shape))} -> "
             f"{int(np.prod(self._out_shape))}{tof_str})"
+        )
+
+
+class TOFBinMashingOperator(LinearOperator):
+    """Linear operator that mashes (groups) neighbouring TOF bins.
+
+    Groups every ``mashing_factor`` (:math:`G`) consecutive TOF bins of a
+    TOF-binned data array into a single coarse bin.  The reduction acts only on
+    the **trailing** (TOF) axis; all leading (non-TOF) axes -- e.g. the spatial
+    sinogram axes, or listmode/block indices -- are passed through unchanged.
+    The operator is therefore geometry-agnostic: it works on any array whose
+    last axis is the TOF axis (a plain length-``num_tofbins`` vector included).
+
+    With :math:`G` dividing the number of fine TOF bins, the fine bin index
+    :math:`t` maps to coarse bin :math:`t // G`, i.e. coarse bin :math:`c`
+    collects the fine bins :math:`\\{cG, cG+1, \\dots, cG+G-1\\}`.
+
+    Two reduction modes are supported:
+
+    * ``mode="sum"`` (default) -- the coarse bin is the **sum** of its :math:`G`
+      fine bins:
+
+      .. math::
+
+          y_c \\;=\\; \\sum_{g=0}^{G-1} x_{\\,cG+g}
+          \\qquad
+          \\left(A^T y\\right)_t \\;=\\; y_{\\,t // G}\\,.
+
+      This is the natural reduction for **counts-like** TOF data.  Because a
+      TOF-bin weight is a Gaussian integrated over the bin's extent and
+      integrals over adjacent bins add exactly to the integral over their
+      union, sum-mashing a TOF forward projection is (up to the ``num_sigmas``
+      truncation) **identical** to projecting directly onto the coarse TOF grid
+      described by :attr:`coarse_tof_parameters`.
+
+    * ``mode="average"`` -- the coarse bin is the **mean** of its :math:`G` fine
+      bins:
+
+      .. math::
+
+          y_c \\;=\\; \\frac{1}{G} \\sum_{g=0}^{G-1} x_{\\,cG+g}
+          \\qquad
+          \\left(A_{\\rm avg}^T y\\right)_t \\;=\\; \\frac{y_{\\,t // G}}{G}\\,.
+
+    The closed-form operator 2-norms follow from :math:`A A^T = G\\,I`
+    (``sum``) and :math:`A_{\\rm avg} A_{\\rm avg}^T = (1/G)\\,I`:
+
+    .. math::
+
+        \\|A_{\\rm sum}\\|_2 = \\sqrt{G}\\,, \\qquad
+        \\|A_{\\rm avg}\\|_2 = 1 / \\sqrt{G}\\,.
+
+    :meth:`norm` returns these directly without power iteration.
+
+    Parameters
+    ----------
+    tof_parameters : TOFParameters
+        TOF parameters of the fine (input) data.  ``num_tofbins`` sets the fine
+        TOF axis length; the mashed parameters are exposed as
+        :attr:`coarse_tof_parameters`.
+    non_tof_data_shape : tuple of int
+        Shape of the leading (non-TOF) axes.  For a standard TOF sinogram pass
+        ``lor_descriptor.spatial_sinogram_shape``; pass ``()`` to act on a bare
+        length-``num_tofbins`` TOF vector.
+    mashing_factor : int, optional
+        Number of neighbouring TOF bins grouped together (:math:`G`), default
+        ``1`` (identity along the TOF axis).  Must divide
+        ``tof_parameters.num_tofbins``.
+    mode : {"sum", "average"}, optional
+        Reduction mode, default ``"sum"``.
+
+    Notes
+    -----
+    TOF-bin centring is a matter of convention and is **not** altered by this
+    operator: for an odd ``num_tofbins`` the centre is the central bin (the LOR
+    midpoint at TOF position 0); for an even ``num_tofbins`` the centre sits
+    between the two central bins.  Choose ``num_tofbins`` and ``mashing_factor``
+    so the coarse grid keeps the centring you want (e.g. an odd ``num_tofbins``
+    with an odd ``mashing_factor`` yields an odd coarse bin count and keeps a
+    central bin).
+
+    Examples
+    --------
+    >>> import array_api_compat.numpy as xp
+    >>> import parallelproj.tof as ppt
+    >>> import parallelproj.pet_lors as ppl
+    >>> tp = ppt.TOFParameters(num_tofbins=27, tofbin_width=25.0, sigma_tof=40.0)
+    >>> op = ppl.TOFBinMashingOperator(tp, (5, 8), mashing_factor=3)
+    >>> op.in_shape, op.out_shape
+    ((5, 8, 27), (5, 8, 9))
+    >>> op.coarse_tof_parameters.num_tofbins, op.coarse_tof_parameters.tofbin_width
+    (9, 75.0)
+    >>> op.adjointness_test(xp, "cpu")
+    True
+    """
+
+    def __init__(
+        self,
+        tof_parameters: TOFParameters,
+        non_tof_data_shape: tuple[int, ...],
+        mashing_factor: int = 1,
+        mode: str = "sum",
+    ) -> None:
+        if not isinstance(tof_parameters, TOFParameters):
+            raise TypeError("tof_parameters must be a TOFParameters instance")
+        try:
+            non_tof_data_shape = tuple(int(s) for s in non_tof_data_shape)
+        except TypeError as exc:
+            raise TypeError(
+                "non_tof_data_shape must be a tuple of ints (use () for a bare "
+                "TOF vector)"
+            ) from exc
+        if any(s < 1 for s in non_tof_data_shape):
+            raise ValueError("non_tof_data_shape entries must be positive integers")
+        if not isinstance(mashing_factor, int) or mashing_factor < 1:
+            raise ValueError("mashing_factor must be a positive integer")
+        num_tofbins = int(tof_parameters.num_tofbins)
+        if num_tofbins % mashing_factor != 0:
+            raise ValueError(
+                f"mashing_factor ({mashing_factor}) must divide num_tofbins "
+                f"({num_tofbins})"
+            )
+        if mode not in ("sum", "average"):
+            raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
+
+        super().__init__()
+
+        self._tof_parameters = tof_parameters
+        self._non_tof_data_shape = non_tof_data_shape
+        self._mashing_factor = int(mashing_factor)
+        self._mode = mode
+        self._num_tofbins = num_tofbins
+        self._num_out = num_tofbins // mashing_factor
+
+        self._in_shape = non_tof_data_shape + (self._num_tofbins,)
+        self._out_shape = non_tof_data_shape + (self._num_out,)
+
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        """fine data shape ``non_tof_data_shape + (num_tofbins,)``."""
+        return self._in_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        """mashed data shape ``non_tof_data_shape + (num_tofbins // G,)``."""
+        return self._out_shape
+
+    def _apply(self, x: Array) -> Array:
+        xp = array_api_compat.array_namespace(x)
+        G = self._mashing_factor
+        grouped = xp.reshape(x, self._non_tof_data_shape + (self._num_out, G))
+        y = xp.sum(grouped, axis=-1)
+        if self._mode == "average":
+            y = y / G
+        return y
+
+    def _adjoint(self, y: Array) -> Array:
+        xp = array_api_compat.array_namespace(y)
+        G = self._mashing_factor
+        expanded = xp.reshape(y, self._non_tof_data_shape + (self._num_out, 1))
+        replicated = xp.broadcast_to(
+            expanded, self._non_tof_data_shape + (self._num_out, G)
+        )
+        x = xp.reshape(replicated, self._in_shape)
+        if self._mode == "average":
+            x = x / G
+        return x
+
+    def norm(
+        self,
+        xp: ModuleType | None = None,
+        dev: str | None = None,
+        num_iter: int = 30,
+        iscomplex: bool = False,
+        verbose: bool = False,
+    ) -> float:
+        """Closed-form operator 2-norm (arguments accepted but ignored).
+
+        ``mode="sum"`` -> ``sqrt(mashing_factor)``;
+        ``mode="average"`` -> ``1 / sqrt(mashing_factor)``.
+        """
+        if self._mode == "sum":
+            return float(np.sqrt(self._mashing_factor))
+        return float(1.0 / np.sqrt(self._mashing_factor))
+
+    @property
+    def coarse_tof_parameters(self) -> TOFParameters:
+        """TOF parameters of the mashed grid.
+
+        ``num_tofbins`` is divided by ``mashing_factor`` and ``tofbin_width`` is
+        multiplied by it; ``sigma_tof`` (the physical timing resolution),
+        ``num_sigmas`` and ``tofcenter_offset`` are unchanged.
+        """
+        return TOFParameters(
+            num_tofbins=self._num_out,
+            tofbin_width=self._tof_parameters.tofbin_width * self._mashing_factor,
+            sigma_tof=self._tof_parameters.sigma_tof,
+            num_sigmas=self._tof_parameters.num_sigmas,
+            tofcenter_offset=self._tof_parameters.tofcenter_offset,
+        )
+
+    @property
+    def tof_parameters(self) -> TOFParameters:
+        """the fine (input) TOF parameters."""
+        return self._tof_parameters
+
+    @property
+    def non_tof_data_shape(self) -> tuple[int, ...]:
+        """shape of the leading (non-TOF) axes."""
+        return self._non_tof_data_shape
+
+    @property
+    def mashing_factor(self) -> int:
+        """number of neighbouring TOF bins mashed together (``G``)."""
+        return self._mashing_factor
+
+    @property
+    def mode(self) -> str:
+        """reduction mode, ``"sum"`` or ``"average"``."""
+        return self._mode
+
+    def __str__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(mashing_factor={self._mashing_factor}, "
+            f"mode={self._mode!r}, num_tofbins: {self._num_tofbins} -> "
+            f"{self._num_out}, non_tof_data_shape={self._non_tof_data_shape})"
         )

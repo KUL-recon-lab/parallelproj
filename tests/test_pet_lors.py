@@ -1681,3 +1681,162 @@ def test_sinogram_mashing_validation(xp: ModuleType, dev: str) -> None:
     )
     with pytest.raises(ValueError, match="span=1"):
         ppl.SinogramMashingOperator(span3, transaxial_factor=2, axial_factor=2)
+
+
+def _tof_mash_fine_descriptor(xp, dev):
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=8, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, 4, device=dev),
+        symmetry_axis=2,
+    )
+    return ppl.RegularPolygonPETLORDescriptor(
+        scanner, ppl.Michelogram(scanner.num_rings, 2, span=1), radial_trim=1
+    )
+
+
+def test_tof_bin_mashing_operator(xp: ModuleType, dev: str) -> None:
+    """TOF-bin mashing: shapes, coarse parameters, adjointness, count
+    conservation, closed-form norm, the bare-vector and identity cases."""
+    import math
+    import numpy as _np
+
+    tp = tof.TOFParameters(num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0)
+    non_tof = (4, 5)
+    G = 3
+    op = ppl.TOFBinMashingOperator(tp, non_tof, mashing_factor=G, mode="sum")
+
+    # shapes and read-only properties
+    assert op.in_shape == non_tof + (27,)
+    assert op.out_shape == non_tof + (9,)
+    assert op.mashing_factor == G
+    assert op.mode == "sum"
+    assert op.tof_parameters is tp
+    assert op.non_tof_data_shape == non_tof
+    assert isinstance(str(op), str)
+
+    # coarse TOF parameters: bins /= G, width *= G, resolution/offset unchanged
+    ctp = op.coarse_tof_parameters
+    assert ctp.num_tofbins == 9
+    assert math.isclose(ctp.tofbin_width, tp.tofbin_width * G)
+    assert ctp.sigma_tof == tp.sigma_tof
+    assert ctp.num_sigmas == tp.num_sigmas
+    assert ctp.tofcenter_offset == tp.tofcenter_offset
+
+    # adjointness (operator is backend-agnostic -> pass xp/dev explicitly)
+    assert op.adjointness_test(xp, dev, dtype=xp.float64)
+
+    rng = _np.random.default_rng(0)
+    x = xp.asarray(rng.uniform(0.0, 1.0, op.in_shape).astype(_np.float64), device=dev)
+    y = op(x)
+    # sum mode conserves total counts and equals an explicit grouped sum
+    assert math.isclose(float(xp.sum(y)), float(xp.sum(x)), rel_tol=1e-12)
+    assert _np.allclose(
+        to_numpy_array(y), to_numpy_array(x).reshape(non_tof + (9, G)).sum(-1)
+    )
+
+    # closed-form norm matches power iteration, both modes
+    for mode, expected in (("sum", math.sqrt(G)), ("average", 1.0 / math.sqrt(G))):
+        opm = ppl.TOFBinMashingOperator(tp, non_tof, mashing_factor=G, mode=mode)
+        assert math.isclose(opm.norm(), expected, rel_tol=1e-12)
+        assert math.isclose(opm.norm(xp, dev), expected, rel_tol=1e-12)
+        assert opm.adjointness_test(xp, dev, dtype=xp.float64)
+        v = xp.asarray(rng.standard_normal(opm.in_shape), device=dev, dtype=xp.float64)
+        nrm = 1.0
+        for _ in range(30):
+            v = opm.adjoint(opm(v))
+            nrm = float(xp.sqrt(xp.sum(v * v)))
+            v = v / nrm
+        assert math.isclose(nrm**0.5, expected, rel_tol=1e-6)
+
+    # bare TOF vector (empty non_tof_data_shape)
+    opv = ppl.TOFBinMashingOperator(tp, (), mashing_factor=G)
+    assert opv.in_shape == (27,) and opv.out_shape == (9,)
+    xv = xp.asarray(rng.uniform(0.0, 1.0, (27,)).astype(_np.float64), device=dev)
+    assert math.isclose(float(xp.sum(opv(xv))), float(xp.sum(xv)), rel_tol=1e-12)
+
+    # mashing_factor == 1 is the identity along the TOF axis
+    op1 = ppl.TOFBinMashingOperator(tp, non_tof, mashing_factor=1)
+    assert op1.out_shape == op1.in_shape
+    assert float(xp.max(xp.abs(op1(x) - x))) == 0.0
+
+
+def test_tof_bin_mashing_exactness(xp: ModuleType, dev: str) -> None:
+    """For mode='sum', mashing a TOF forward projection equals projecting
+    directly onto the coarse TOF grid (erf integrals over adjacent bins add up),
+    up to the num_sigmas truncation at the profile tails."""
+    import numpy as _np
+    import parallelproj.projectors as ppp
+
+    fine = _tof_mash_fine_descriptor(xp, dev)
+    tp = tof.TOFParameters(
+        num_tofbins=27, tofbin_width=1.0, sigma_tof=3.0, num_sigmas=4.0
+    )
+    G = 3
+    tof_mash = ppl.TOFBinMashingOperator(
+        tp, fine.spatial_sinogram_shape, mashing_factor=G, mode="sum"
+    )
+
+    img_shape = (32, 32, 4)
+    voxel_size = (4.0, 4.0, 4.0)
+    img = xp.zeros(img_shape, dtype=xp.float32, device=dev)
+    img[12:20, 12:20, :] = 1.0
+
+    proj_fine = ppp.RegularPolygonPETProjector(fine, img_shape, voxel_size)
+    proj_fine.tof_parameters = tp
+    fine_sino = proj_fine(img)
+    assert tuple(fine_sino.shape) == tof_mash.in_shape
+
+    proj_coarse = ppp.RegularPolygonPETProjector(fine, img_shape, voxel_size)
+    proj_coarse.tof_parameters = tof_mash.coarse_tof_parameters
+    coarse_sino = proj_coarse(img)
+    assert tuple(coarse_sino.shape) == tof_mash.out_shape
+
+    lhs = to_numpy_array(tof_mash(fine_sino))
+    rhs = to_numpy_array(coarse_sino)
+    rel = float(_np.linalg.norm(lhs - rhs) / _np.linalg.norm(rhs))
+    assert rel < 1e-3
+
+
+def test_tof_bin_mashing_composition(xp: ModuleType, dev: str) -> None:
+    """TOF-bin mashing composes with geometric SinogramMashingOperator: the
+    composite equals applying the two operators in sequence, and is adjoint."""
+    import numpy as _np
+    from parallelproj.operators import CompositeLinearOperator
+
+    fine = _tof_mash_fine_descriptor(xp, dev)
+    tp = tof.TOFParameters(num_tofbins=27, tofbin_width=1.0, sigma_tof=3.0)
+    G, num_out = 3, 9
+
+    tof_mash = ppl.TOFBinMashingOperator(
+        tp, fine.spatial_sinogram_shape, mashing_factor=G, mode="sum"
+    )
+    spatial_mash = ppl.SinogramMashingOperator(
+        fine, transaxial_factor=2, axial_factor=2, mode="sum", num_tof_bins=num_out
+    )
+    # apply tof_mash (innermost) then spatial_mash (outermost)
+    full = CompositeLinearOperator([spatial_mash, tof_mash])
+
+    assert full.in_shape == tof_mash.in_shape
+    assert full.out_shape == spatial_mash.out_shape
+
+    rng = _np.random.default_rng(1)
+    x = xp.asarray(rng.uniform(0.0, 1.0, full.in_shape).astype(_np.float64), device=dev)
+    seq = spatial_mash(tof_mash(x))
+    assert float(xp.max(xp.abs(full(x) - seq))) < 1e-9
+    assert full.adjointness_test(xp, dev, dtype=xp.float64)
+
+
+def test_tof_bin_mashing_validation(xp: ModuleType, dev: str) -> None:
+    """Constraint violations raise clear errors."""
+    tp = tof.TOFParameters(num_tofbins=27, tofbin_width=0.8, sigma_tof=2.0)
+
+    with pytest.raises(TypeError, match="TOFParameters"):
+        ppl.TOFBinMashingOperator("nonsense", (4, 5), mashing_factor=3)
+    with pytest.raises(ValueError, match="non_tof_data_shape"):
+        ppl.TOFBinMashingOperator(tp, (4, 0), mashing_factor=3)
+    with pytest.raises(ValueError, match="mashing_factor"):
+        ppl.TOFBinMashingOperator(tp, (4, 5), mashing_factor=0)
+    with pytest.raises(ValueError, match="must divide num_tofbins"):
+        ppl.TOFBinMashingOperator(tp, (4, 5), mashing_factor=4)
+    with pytest.raises(ValueError, match="mode"):
+        ppl.TOFBinMashingOperator(tp, (4, 5), mashing_factor=3, mode="bad")

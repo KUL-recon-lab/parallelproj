@@ -142,6 +142,16 @@ New Features
   remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
   ``coarse_radial_trim`` to override.  See the
   ``01_pet_geometry/07_run_detector_mashing.py`` example.
+- **``TOFBinMashingOperator``** (``parallelproj.pet_lors``): mashes (groups) every
+  ``mashing_factor`` neighbouring TOF bins along the trailing TOF axis into fewer,
+  wider bins (``mode="sum"`` for counts, ``mode="average"`` for multiplicative
+  factors), with a genuine transpose and closed-form norm (``sqrt(G)`` / ``1/sqrt(G)``).
+  Geometry-agnostic (takes ``tof_parameters`` and the leading ``non_tof_data_shape``),
+  it exposes the matching ``coarse_tof_parameters`` so a projector can target the
+  mashed TOF grid, and composes with ``SinogramMashingOperator`` via
+  ``CompositeLinearOperator``.  For ``mode="sum"`` the mashed forward projection equals
+  a direct coarse-TOF projection (erf additivity over adjacent bins).  See the
+  ``01_pet_geometry/08_run_tof_bin_mashing.py`` example.
 - **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
   adjoint of any operator via ``A.H``.
 - **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
