@@ -2334,11 +2334,13 @@ class SinogramMashingOperator(LinearOperator):
     mode : {"sum", "average"}, optional
         reduction mode, default ``"sum"``.
     coarse_radial_trim : int or None, optional
-        radial trim of the coarse descriptor.  ``None`` (default) derives it as
-        ``lor_descriptor.radial_trim // transaxial_factor`` so the coarse radial
-        extent matches the fine data; using ``0`` keeps empty peripheral coarse
-        radial bins and makes the mashed sinogram appear to lose counts at the
-        largest radial offsets.
+        radial trim of the coarse descriptor.  ``None`` (default) derives it
+        automatically from the fine->coarse mapping so that every coarse radial
+        bin with at least one non-degenerate fine contributor is kept (no
+        trimming-induced count loss) while no empty peripheral coarse radial bins
+        remain.  Pass an explicit non-negative integer to override this (a larger
+        value trims additional radial bins and will discard the fine LORs that
+        map into them).
     num_tof_bins : int or None, optional
         if given, the operator acts on a 4D TOF sinogram whose trailing axis is
         passed through unchanged (an approximation: the averaged LOR direction
@@ -2371,15 +2373,10 @@ class SinogramMashingOperator(LinearOperator):
             raise ValueError("axial_factor must be a positive integer")
         if mode not in ("sum", "average"):
             raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
-        if coarse_radial_trim is None:
-            # match the fine data extent: the fine descriptor trimmed
-            # ``radial_trim`` near-tangential radial bins per side, which is
-            # ~``radial_trim / transaxial_factor`` bins on the coarse grid.  Using
-            # ``0`` instead would keep empty peripheral coarse radial bins (no fine
-            # contributor), making the mashed sinogram appear to lose counts at the
-            # largest radial offsets.
-            coarse_radial_trim = lor_descriptor.radial_trim // transaxial_factor
-        if not isinstance(coarse_radial_trim, int) or coarse_radial_trim < 0:
+        auto_coarse_radial_trim = coarse_radial_trim is None
+        if not auto_coarse_radial_trim and (
+            not isinstance(coarse_radial_trim, int) or coarse_radial_trim < 0
+        ):
             raise ValueError("coarse_radial_trim must be a non-negative integer or None")
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
@@ -2457,6 +2454,24 @@ class SinogramMashingOperator(LinearOperator):
         coarse_max_rd = int(np.max(np.abs(cs_ring - ce_ring))) if s_ring.size else 0
         coarse_max_rd = min(coarse_max_rd, nrings_c - 1)
         coarse_mich = Michelogram(nrings_c, coarse_max_rd, span=1)
+
+        if auto_coarse_radial_trim:
+            # Derive the coarse radial trim directly from the fine->coarse map:
+            # trim exactly the outer coarse radial bins that would receive *no*
+            # non-degenerate fine LOR.  This keeps every fine LOR that has a
+            # distinct coarse counterpart (no trimming-induced loss) while leaving
+            # no empty peripheral coarse radial bins.  (The only fine LORs still
+            # dropped are the most tangential ones whose two endpoints collapse
+            # into the *same* coarse virtual detector -- a self-pair with no
+            # coarse LOR, which is geometrically unavoidable.)
+            coarse_radial_trim = self._auto_coarse_radial_trim(
+                lor_descriptor,
+                self._coarse_scanner,
+                coarse_mich,
+                N,
+                per_side,
+                per_side_c,
+            )
         self._coarse_lor_descriptor = RegularPolygonPETLORDescriptor(
             self._coarse_scanner,
             coarse_mich,
@@ -2484,6 +2499,52 @@ class SinogramMashingOperator(LinearOperator):
         else:
             self._in_shape = spatial_in + (int(num_tof_bins),)
             self._out_shape = spatial_out + (int(num_tof_bins),)
+
+    @staticmethod
+    def _auto_coarse_radial_trim(ld, coarse_scanner, coarse_mich, N, per_side, per_side_c):
+        """Largest symmetric coarse radial trim that keeps every coarse radial bin
+        which receives at least one non-degenerate fine LOR.
+
+        A ``radial_trim=0`` coarse descriptor is built to enumerate every coarse
+        radial bin; each fine LOR is mapped to its coarse crystal pair (dropping
+        degenerate self-pairs whose endpoints share a virtual detector) and hence
+        to a coarse radial bin.  Returning ``min(r_min, (num_rad0-1) - r_max)``
+        trims as many outer bins as possible without discarding any occupied bin.
+        """
+        cdesc0 = RegularPolygonPETLORDescriptor(
+            coarse_scanner,
+            coarse_mich,
+            radial_trim=0,
+            sinogram_order=ld.sinogram_order,
+            zig_zag_order=ld.zig_zag_order,
+        )
+        K_c = coarse_scanner.num_lor_endpoints_per_ring
+        V_c0 = cdesc0.num_views
+        R_c0 = cdesc0.num_rad
+
+        def coarse_in_ring(c):
+            side = c // per_side
+            pos = c % per_side
+            return side * per_side_c + (pos // N)
+
+        s_in = np.asarray(to_numpy_array(ld.start_in_ring_index)).astype(np.int64)
+        e_in = np.asarray(to_numpy_array(ld.end_in_ring_index)).astype(np.int64)
+        cs_in = coarse_in_ring(s_in)
+        ce_in = coarse_in_ring(e_in)
+
+        cstart = np.asarray(to_numpy_array(cdesc0.start_in_ring_index)).astype(np.int64)
+        cend = np.asarray(to_numpy_array(cdesc0.end_in_ring_index)).astype(np.int64)
+        _, r_c = np.meshgrid(np.arange(V_c0), np.arange(R_c0), indexing="ij")
+        pair2r = np.full((K_c, K_c), -1, dtype=np.int64)
+        pair2r[cstart.ravel(), cend.ravel()] = r_c.ravel()
+        pair2r[cend.ravel(), cstart.ravel()] = r_c.ravel()
+
+        nondegen = cs_in != ce_in
+        r_map = pair2r[np.clip(cs_in, 0, K_c - 1), np.clip(ce_in, 0, K_c - 1)]
+        occ = r_map[nondegen & (r_map >= 0)]
+        if occ.size == 0:
+            return 0
+        return int(min(int(occ.min()), (R_c0 - 1) - int(occ.max())))
 
     def _build_index_maps(self, scanner, cdesc, N, M, per_side, per_side_c, nrings_c):
         """Build the transaxial (joint view/radial) and axial (plane) fine->coarse

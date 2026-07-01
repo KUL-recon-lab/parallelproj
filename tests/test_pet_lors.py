@@ -1591,6 +1591,43 @@ def test_sinogram_mashing_operator(xp: ModuleType, dev: str) -> None:
         assert float(xp.max(xp.abs(yt[..., t] - mash(xt[..., t])))) < 1e-9
 
 
+def test_sinogram_mashing_auto_coarse_radial_trim(xp: ModuleType, dev: str) -> None:
+    """The default (auto-derived) ``coarse_radial_trim`` keeps every coarse
+    radial bin with a non-degenerate fine contributor (no trimming-induced count
+    loss) while leaving no empty peripheral coarse radial bins."""
+    import numpy as _np
+
+    N, M = 2, 2
+    # a descriptor whose radial_trim is not a clean multiple of N, so the old
+    # ``radial_trim // N`` heuristic would over-trim and drop peripheral LORs
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=8, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, 4, device=dev),
+        symmetry_axis=2,
+    )
+    fine = ppl.RegularPolygonPETLORDescriptor(
+        scanner, ppl.Michelogram(scanner.num_rings, 3, span=1), radial_trim=3
+    )
+    ones = xp.ones(fine.spatial_sinogram_shape, dtype=xp.float64, device=dev)
+
+    mash_auto = ppl.SinogramMashingOperator(fine, transaxial_factor=N, axial_factor=M)
+    # a full-extent coarse grid (radial_trim=0) has no trimming loss -- only the
+    # irreducible degenerate self-pairs are dropped.  The auto trim must conserve
+    # exactly as many counts, i.e. it introduces no additional trimming loss.
+    mash_full = ppl.SinogramMashingOperator(
+        fine, transaxial_factor=N, axial_factor=M, coarse_radial_trim=0
+    )
+    assert float(xp.sum(mash_auto(ones))) == float(xp.sum(mash_full(ones)))
+
+    # ...but unlike the full grid, the auto grid leaves no empty coarse radial bin
+    mult = to_numpy_array(mash_auto(ones))
+    cdesc = mash_auto.coarse_lor_descriptor
+    radial_profile = _np.moveaxis(mult, cdesc.radial_axis_num, 0).reshape(
+        mult.shape[cdesc.radial_axis_num], -1
+    ).sum(axis=1)
+    assert _np.all(radial_profile > 0)
+
+
 def test_sinogram_mashing_forward_model(xp: ModuleType, dev: str) -> None:
     """The coarse projector (single averaged LOR) approximates the averaged
     bundle of fine LORs: ``mash_avg(P_fine x) ~ P_coarse x``."""

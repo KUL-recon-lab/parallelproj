@@ -136,7 +136,11 @@ New Features
   counts, ``mode="average"`` for multiplicative factors) with a genuine transpose and
   closed-form norm.  The mashed geometry is exposed as ``coarse_scanner`` /
   ``coarse_lor_descriptor`` (a regular-polygon descriptor), so a standard
-  ``RegularPolygonPETProjector`` projects directly along the mashed LORs.  See the
+  ``RegularPolygonPETProjector`` projects directly along the mashed LORs.  By default
+  the coarse radial trim is derived automatically from the fine->coarse mapping so
+  that no fine LOR is lost to trimming and no empty peripheral coarse radial bins
+  remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
+  ``coarse_radial_trim`` to override.  See the
   ``01_pet_geometry/07_run_detector_mashing.py`` example.
 - **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
   adjoint of any operator via ``A.H``.
