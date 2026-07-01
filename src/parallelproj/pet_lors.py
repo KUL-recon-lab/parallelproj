@@ -2542,8 +2542,8 @@ class SinogramMashingOperator(LinearOperator):
         nondegen = cs_in != ce_in
         r_map = pair2r[np.clip(cs_in, 0, K_c - 1), np.clip(ce_in, 0, K_c - 1)]
         occ = r_map[nondegen & (r_map >= 0)]
-        if occ.size == 0:
-            return 0
+        if occ.size == 0:  # pragma: no cover - defensive: a real sinogram always
+            return 0  # has non-degenerate (cross-side) LORs
         return int(min(int(occ.min()), (R_c0 - 1) - int(occ.max())))
 
     def _build_index_maps(self, scanner, cdesc, N, M, per_side, per_side_c, nrings_c):
