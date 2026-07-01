@@ -2233,7 +2233,9 @@ def _grouped_gather_index(
     target = np.asarray(target).astype(np.int64)
     valid = target >= 0
     multiplicity = np.bincount(target[valid], minlength=n_out).astype(np.int64)
-    if multiplicity.shape[0] > n_out:  # guard against stray out-of-range targets
+    # defensive only: the callers always pass targets < n_out, so this never
+    # triggers; kept as a guard against a future stray out-of-range target.
+    if multiplicity.shape[0] > n_out:  # pragma: no cover
         multiplicity = multiplicity[:n_out]
     max_mult = max(int(multiplicity.max()) if multiplicity.size else 0, 1)
 

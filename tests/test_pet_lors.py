@@ -1525,6 +1525,13 @@ def test_sinogram_mashing_operator(xp: ModuleType, dev: str) -> None:
     assert int(_np.prod(mash.out_shape)) < int(_np.prod(mash.in_shape))
     assert isinstance(str(mash), str)
 
+    # read-only properties
+    assert mash.lor_descriptor is fine
+    assert mash.transaxial_factor == N
+    assert mash.axial_factor == M
+    assert mash.mode == "sum"
+    assert mash.num_tof_bins is None
+
     # adjointness (xp/dev inferred from the operator)
     assert mash.adjointness_test(dtype=xp.float64)
 
@@ -1575,6 +1582,7 @@ def test_sinogram_mashing_operator(xp: ModuleType, dev: str) -> None:
         fine, transaxial_factor=N, axial_factor=M, mode="sum", num_tof_bins=4
     )
     assert mt.adjointness_test(dtype=xp.float64)
+    assert mt.num_tof_bins == 4
     xt = xp.asarray(
         rng.uniform(0.0, 1.0, mt.in_shape).astype(_np.float64), device=dev
     )
@@ -1610,12 +1618,26 @@ def test_sinogram_mashing_validation(xp: ModuleType, dev: str) -> None:
     """Constraint violations raise clear errors."""
     fine = _mash_fine_descriptor(xp, dev)  # per_side=4, num_rings=4, span=1
 
+    with pytest.raises(TypeError, match="RegularPolygonPETLORDescriptor"):
+        ppl.SinogramMashingOperator("not a descriptor", transaxial_factor=2, axial_factor=2)
+    with pytest.raises(ValueError, match="transaxial_factor"):
+        ppl.SinogramMashingOperator(fine, transaxial_factor=0, axial_factor=1)
+    with pytest.raises(ValueError, match="axial_factor"):
+        ppl.SinogramMashingOperator(fine, transaxial_factor=1, axial_factor=0)
     with pytest.raises(ValueError, match="num_lor_endpoints_per_side"):
         ppl.SinogramMashingOperator(fine, transaxial_factor=3, axial_factor=1)
     with pytest.raises(ValueError, match="num_rings"):
         ppl.SinogramMashingOperator(fine, transaxial_factor=1, axial_factor=3)
     with pytest.raises(ValueError, match="mode"):
         ppl.SinogramMashingOperator(fine, transaxial_factor=2, axial_factor=2, mode="bad")
+    with pytest.raises(ValueError, match="coarse_radial_trim"):
+        ppl.SinogramMashingOperator(
+            fine, transaxial_factor=2, axial_factor=2, coarse_radial_trim=-1
+        )
+    with pytest.raises(ValueError, match="num_tof_bins"):
+        ppl.SinogramMashingOperator(
+            fine, transaxial_factor=2, axial_factor=2, num_tof_bins=0
+        )
 
     span3 = ppl.RegularPolygonPETLORDescriptor(
         fine.scanner, ppl.Michelogram(fine.scanner.num_rings, 3, span=3), radial_trim=1
