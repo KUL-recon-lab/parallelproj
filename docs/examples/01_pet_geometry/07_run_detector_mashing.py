@@ -395,17 +395,63 @@ axge[1].set_title(
 figge.show()
 
 # %%
+# Physical detector-pair multiplicity (GE)
+# ----------------------------------------
+#
+# How many **physical detector pairs** contribute to each sinogram bin?  Unlike
+# a span-1 sinogram (where every fine bin is exactly one crystal-ring pair), a
+# GE sinogram already pools ring pairs axially: the segment-0 **cross** planes
+# combine the two ``+/-1`` ring differences, so those fine bins collect **two**
+# physical LORs (multiplicity ``2``) while the direct and oblique planes collect
+# one (multiplicity ``1``).  We build this fine multiplicity map from the
+# Michelogram's ``plane_multiplicity`` -- it is used below both to model the GE
+# sensitivity and to count physical pairs.
+
+_plane_mult = to_numpy_array(ge_desc.michelogram.plane_multiplicity).astype("float64")
+_bshape = [1, 1, 1]
+_bshape[ge_desc.plane_axis_num] = ge_desc.spatial_sinogram_shape[ge_desc.plane_axis_num]
+fine_phys_mult = xp.asarray(
+    np.broadcast_to(_plane_mult.reshape(_bshape), ge_desc.spatial_sinogram_shape).copy(),
+    dtype=xp.float64,
+    device=dev,
+)
+# pushing the fine multiplicity through the sum-mode operator counts the physical
+# pairs folded into each coarse bin (transaxial crystals x axial rings x GE plane
+# multiplicity)
+coarse_phys_mult = ge_mash(fine_phys_mult)
+
+print(
+    f"fine   GE physical multiplicity : min={float(xp.min(fine_phys_mult)):.0f}, "
+    f"max={float(xp.max(fine_phys_mult)):.0f}\n"
+    f"mashed GE physical multiplicity : min={float(xp.min(coarse_phys_mult)):.0f}, "
+    f"max={float(xp.max(coarse_phys_mult)):.0f}"
+)
+
+_keep.append(show_vol_cuts(
+    _canonical(fine_phys_mult, ge_desc), axis_labels=_labels,
+    fig_title="fine GE: physical detector pairs per bin (1 direct/oblique, 2 cross)",
+    cmap="viridis",
+))
+_keep.append(show_vol_cuts(
+    _canonical(coarse_phys_mult, ge_coarse_desc), axis_labels=_labels,
+    fig_title="mashed GE: physical detector pairs per bin", cmap="viridis",
+))
+
+# %%
 # Mash a (simulated) GE emission sinogram
 # ---------------------------------------
 #
 # Re-use the same phantom: forward-project it through a GE projector, then mash
-# the GE sinogram with ``mode="sum"``.  Scroll through radial / view / plane --
-# the mashed sinogram is smaller along all three axes.
+# the GE sinogram with ``mode="sum"``.  The GE projector traces a **single
+# representative LOR per plane**, so we multiply by ``fine_phys_mult`` to give
+# the segment-0 cross planes their true (double) sensitivity before mashing.
+# Scroll through radial / view / plane -- the mashed sinogram is smaller along
+# all three axes.
 
 proj_ge = parallelproj.projectors.RegularPolygonPETProjector(
     ge_desc, img_shape, voxel_size
 )
-ge_fine_sino = proj_ge(img)
+ge_fine_sino = proj_ge(img) * fine_phys_mult  # cross planes get 2x sensitivity
 ge_mashed_sino = ge_mash(ge_fine_sino)
 
 _keep.append(show_vol_cuts(
@@ -424,46 +470,31 @@ print(
 )
 
 # %%
-# Physical detector-pair multiplicity (GE)
-# ----------------------------------------
+# Upsample the coarse GE sinogram back to the fine grid
+# -----------------------------------------------------
 #
-# How many **physical detector pairs** contribute to each sinogram bin?  Unlike
-# a span-1 sinogram (where every fine bin is exactly one crystal-ring pair), a
-# GE sinogram already pools ring pairs axially: the segment-0 **cross** planes
-# combine the two ``+/-1`` ring differences, so those fine bins have multiplicity
-# ``2`` while the direct and oblique planes have multiplicity ``1``.  We build
-# the fine multiplicity from the Michelogram's ``plane_multiplicity`` and then
-# push it through ``ge_mash`` (``mode="sum"``) to count the physical pairs folded
-# into each coarse bin (transaxial crystal grouping x axial ring grouping x the
-# GE plane multiplicity).
+# As before, the mashing operator's ``adjoint`` upsamples a coarse GE sinogram
+# back onto the fine GE grid, and the mode decides the normalisation.  Since the
+# coarse sinogram was pooled by ``sum``, the count-preserving upsampling is the
+# **average**-mode adjoint (``mash_sum(mash_avg.adjoint(y)) = y``): it spreads
+# each coarse bin's counts over its fine bins (dividing by the physical
+# multiplicity) so the total is preserved and the result is comparable to the
+# original fine GE sinogram.
 
-_plane_mult = to_numpy_array(ge_desc.michelogram.plane_multiplicity).astype("float64")
-_bshape = [1, 1, 1]
-_bshape[ge_desc.plane_axis_num] = ge_desc.spatial_sinogram_shape[ge_desc.plane_axis_num]
-fine_phys_mult = xp.asarray(
-    np.broadcast_to(_plane_mult.reshape(_bshape), ge_desc.spatial_sinogram_shape).copy(),
-    dtype=xp.float64,
-    device=dev,
+ge_mash_avg = parallelproj.pet_lors.SinogramMashingOperator(
+    ge_desc, transaxial_factor=transaxial_factor, axial_factor=axial_factor,
+    mode="average",
 )
-coarse_phys_mult = ge_mash(fine_phys_mult)  # sum-mode: total physical pairs per coarse bin
+ge_upsampled = ge_mash_avg.adjoint(ge_mashed_sino)  # fine GE grid, counts preserved
 
 print(
-    f"fine   GE physical multiplicity : min={float(xp.min(fine_phys_mult)):.0f}, "
-    f"max={float(xp.max(fine_phys_mult)):.0f}\n"
-    f"mashed GE physical multiplicity : min={float(xp.min(coarse_phys_mult)):.0f}, "
-    f"max={float(xp.max(coarse_phys_mult)):.0f}\n"
-    f"total physical pairs            : fine={float(xp.sum(fine_phys_mult)):.0f}, "
-    f"coarse={float(xp.sum(coarse_phys_mult)):.0f}  (conserved)"
+    f"sum(upsampled GE) = {float(xp.sum(ge_upsampled)):.1f}  "
+    f"(matches sum(mashed GE) = {float(xp.sum(ge_mashed_sino)):.1f})"
 )
 
 _keep.append(show_vol_cuts(
-    _canonical(fine_phys_mult, ge_desc), axis_labels=_labels,
-    fig_title="fine GE: physical detector pairs per bin (1 direct/oblique, 2 cross)",
-    cmap="viridis",
-))
-_keep.append(show_vol_cuts(
-    _canonical(coarse_phys_mult, ge_coarse_desc), axis_labels=_labels,
-    fig_title="mashed GE: physical detector pairs per bin", cmap="viridis",
+    _canonical(ge_upsampled, ge_desc), axis_labels=_labels,
+    fig_title=f"upsampled GE sinogram (avg-adjoint, {tuple(ge_mash.in_shape)})",
 ))
 
 plt.show()
