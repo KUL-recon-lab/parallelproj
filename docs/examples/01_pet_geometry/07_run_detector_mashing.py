@@ -59,7 +59,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # A cylindrical scanner with 14 sides, 8 crystals per side (112 crystals per
 # ring) and 8 rings.
 
-num_rings = 8
+num_rings = 12
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
@@ -73,7 +73,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=3, span=1),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=5, span=1),
     radial_trim=11,
 )
 
@@ -422,5 +422,48 @@ print(
     f"sum(fine GE)   = {float(xp.sum(ge_fine_sino)):.1f}\n"
     f"sum(mashed GE) = {float(xp.sum(ge_mashed_sino)):.1f}  (counts preserved)"
 )
+
+# %%
+# Physical detector-pair multiplicity (GE)
+# ----------------------------------------
+#
+# How many **physical detector pairs** contribute to each sinogram bin?  Unlike
+# a span-1 sinogram (where every fine bin is exactly one crystal-ring pair), a
+# GE sinogram already pools ring pairs axially: the segment-0 **cross** planes
+# combine the two ``+/-1`` ring differences, so those fine bins have multiplicity
+# ``2`` while the direct and oblique planes have multiplicity ``1``.  We build
+# the fine multiplicity from the Michelogram's ``plane_multiplicity`` and then
+# push it through ``ge_mash`` (``mode="sum"``) to count the physical pairs folded
+# into each coarse bin (transaxial crystal grouping x axial ring grouping x the
+# GE plane multiplicity).
+
+_plane_mult = to_numpy_array(ge_desc.michelogram.plane_multiplicity).astype("float64")
+_bshape = [1, 1, 1]
+_bshape[ge_desc.plane_axis_num] = ge_desc.spatial_sinogram_shape[ge_desc.plane_axis_num]
+fine_phys_mult = xp.asarray(
+    np.broadcast_to(_plane_mult.reshape(_bshape), ge_desc.spatial_sinogram_shape).copy(),
+    dtype=xp.float64,
+    device=dev,
+)
+coarse_phys_mult = ge_mash(fine_phys_mult)  # sum-mode: total physical pairs per coarse bin
+
+print(
+    f"fine   GE physical multiplicity : min={float(xp.min(fine_phys_mult)):.0f}, "
+    f"max={float(xp.max(fine_phys_mult)):.0f}\n"
+    f"mashed GE physical multiplicity : min={float(xp.min(coarse_phys_mult)):.0f}, "
+    f"max={float(xp.max(coarse_phys_mult)):.0f}\n"
+    f"total physical pairs            : fine={float(xp.sum(fine_phys_mult)):.0f}, "
+    f"coarse={float(xp.sum(coarse_phys_mult)):.0f}  (conserved)"
+)
+
+_keep.append(show_vol_cuts(
+    _canonical(fine_phys_mult, ge_desc), axis_labels=_labels,
+    fig_title="fine GE: physical detector pairs per bin (1 direct/oblique, 2 cross)",
+    cmap="viridis",
+))
+_keep.append(show_vol_cuts(
+    _canonical(coarse_phys_mult, ge_coarse_desc), axis_labels=_labels,
+    fig_title="mashed GE: physical detector pairs per bin", cmap="viridis",
+))
 
 plt.show()
