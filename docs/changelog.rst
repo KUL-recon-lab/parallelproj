@@ -140,7 +140,11 @@ New Features
   the coarse radial trim is derived automatically from the fine->coarse mapping so
   that no fine LOR is lost to trimming and no empty peripheral coarse radial bins
   remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
-  ``coarse_radial_trim`` to override.  See the
+  ``coarse_radial_trim`` to override.  Supports both the ``span=1`` STANDARD
+  layout and the **GE layout**: for a GE descriptor the coarse grid is a GE
+  descriptor on ``num_rings // axial_factor`` rings with the segmentation
+  re-derived on the coarse ring grid (``axial_factor=1`` mashes transaxially only
+  and leaves the GE axial layout untouched).  See the
   ``01_pet_geometry/07_run_detector_mashing.py`` example.
 - **``TOFBinMashingOperator``** (``parallelproj.pet_lors``): mashes (groups) every
   ``mashing_factor`` neighbouring TOF bins along the trailing TOF axis into fewer,

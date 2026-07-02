@@ -343,4 +343,84 @@ _keep.append(show_vol_cuts(
     fig_title="upsampled: mash_avg.adjoint (spread, total counts preserved)",
 ))
 
+# %%
+# Mashing GE-layout sinograms
+# ---------------------------
+#
+# The same operator also mashes **GE-layout** sinograms (the "span-3 in the
+# centre" staircase axial segmentation: segment 0 pools ring differences
+# ``{-1, 0, +1}``, oblique segments pool ``{+/-2k, +/-(2k+1)}``).  Nothing special
+# is required -- just pass a GE descriptor.  The transaxial mashing is
+# layout-independent; for the axial part the rings are grouped by
+# ``axial_factor`` and the GE segmentation is **re-derived on the coarse ring
+# grid**, so the mashed sinogram is itself a GE descriptor on
+# ``num_rings // axial_factor`` rings.  Use ``axial_factor=1`` to mash
+# transaxially only and leave the GE axial layout untouched.
+
+ge_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+    scanner,
+    parallelproj.pet_lors.Michelogram(
+        scanner.num_rings,
+        max_ring_difference=3,
+        layout=parallelproj.pet_lors.MichelogramLayout.GE,
+    ),
+    radial_trim=11,
+)
+ge_mash = parallelproj.pet_lors.SinogramMashingOperator(
+    ge_desc, transaxial_factor=transaxial_factor, axial_factor=axial_factor, mode="sum"
+)
+ge_coarse_desc = ge_mash.coarse_lor_descriptor
+
+print(f"fine   GE sinogram : {ge_mash.in_shape}  (layout={ge_desc.michelogram.layout.name})")
+print(
+    f"mashed GE sinogram : {ge_mash.out_shape}  "
+    f"(coarse rings={ge_mash.coarse_scanner.num_rings}, "
+    f"layout={ge_coarse_desc.michelogram.layout.name})"
+)
+
+# %%
+# The GE Michelogram before and after axial ring grouping.  Note the coarse
+# segmentation is the GE staircase re-derived on the coarser ring grid.
+
+figge, axge = plt.subplots(1, 2, figsize=(11, 5), tight_layout=True)
+ge_desc.show_michelogram(axge[0])
+axge[0].set_title(
+    f"fine GE Michelogram\n{scanner.num_rings} rings, {ge_desc.num_planes} planes"
+)
+ge_coarse_desc.show_michelogram(axge[1])
+axge[1].set_title(
+    f"mashed GE Michelogram\n{ge_mash.coarse_scanner.num_rings} rings, "
+    f"{ge_coarse_desc.num_planes} planes"
+)
+figge.show()
+
+# %%
+# Mash a (simulated) GE emission sinogram
+# ---------------------------------------
+#
+# Re-use the same phantom: forward-project it through a GE projector, then mash
+# the GE sinogram with ``mode="sum"``.  Scroll through radial / view / plane --
+# the mashed sinogram is smaller along all three axes.
+
+proj_ge = parallelproj.projectors.RegularPolygonPETProjector(
+    ge_desc, img_shape, voxel_size
+)
+ge_fine_sino = proj_ge(img)
+ge_mashed_sino = ge_mash(ge_fine_sino)
+
+_keep.append(show_vol_cuts(
+    _canonical(ge_fine_sino, ge_desc), axis_labels=_labels,
+    fig_title=f"fine GE emission sinogram {tuple(ge_mash.in_shape)}",
+))
+_keep.append(show_vol_cuts(
+    _canonical(ge_mashed_sino, ge_coarse_desc), axis_labels=_labels,
+    fig_title=f"mashed GE emission sinogram {tuple(ge_mash.out_shape)}",
+))
+
+# count conservation carries over (axial mapping never drops a plane)
+print(
+    f"sum(fine GE)   = {float(xp.sum(ge_fine_sino)):.1f}\n"
+    f"sum(mashed GE) = {float(xp.sum(ge_mashed_sino)):.1f}  (counts preserved)"
+)
+
 plt.show()

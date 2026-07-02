@@ -1683,6 +1683,73 @@ def test_sinogram_mashing_validation(xp: ModuleType, dev: str) -> None:
         ppl.SinogramMashingOperator(span3, transaxial_factor=2, axial_factor=2)
 
 
+def _mash_ge_fine_descriptor(xp, dev, num_rings=4):
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=6, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, num_rings, device=dev),
+        symmetry_axis=2,
+    )
+    return ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, 3, layout=ppl.MichelogramLayout.GE),
+        radial_trim=1,
+    )
+
+
+def test_sinogram_mashing_ge(xp: ModuleType, dev: str) -> None:
+    """Mashing of GE-layout sinograms: transaxial-only preserves the GE axial
+    layout (identity plane map); with axial_factor>1 the coarse grid is a GE
+    descriptor on ``num_rings // M`` rings.  Adjointness, count conservation and
+    the closed-form norm all carry over."""
+    import math
+    import numpy as _np
+
+    fine = _mash_ge_fine_descriptor(xp, dev)
+    assert fine.michelogram.layout is ppl.MichelogramLayout.GE
+
+    # transaxial-only (M=1): GE axial layout untouched -> identity plane map
+    mash_t = ppl.SinogramMashingOperator(
+        fine, transaxial_factor=2, axial_factor=1, mode="sum"
+    )
+    assert mash_t.coarse_lor_descriptor.michelogram.layout is ppl.MichelogramLayout.GE
+    assert mash_t.coarse_scanner.num_rings == fine.scanner.num_rings
+    assert mash_t.coarse_lor_descriptor.num_planes == fine.num_planes
+    assert mash_t.adjointness_test(dtype=xp.float64)
+
+    # transaxial + axial (M=2): coarse GE descriptor on num_rings // 2 rings
+    mash = ppl.SinogramMashingOperator(
+        fine, transaxial_factor=2, axial_factor=2, mode="sum"
+    )
+    cdesc = mash.coarse_lor_descriptor
+    assert cdesc.michelogram.layout is ppl.MichelogramLayout.GE
+    assert mash.coarse_scanner.num_rings == fine.scanner.num_rings // 2
+    assert int(_np.prod(mash.out_shape)) < int(_np.prod(mash.in_shape))
+    assert mash.adjointness_test(dtype=xp.float64)
+
+    # count conservation (mode="sum"): axial mapping never drops a plane, and the
+    # transaxial trim keeps every LOR for this geometry
+    rng = _np.random.default_rng(0)
+    x = xp.asarray(
+        rng.uniform(0.0, 1.0, fine.spatial_sinogram_shape).astype(_np.float64),
+        device=dev,
+    )
+    assert math.isclose(float(xp.sum(mash(x))), float(xp.sum(x)), rel_tol=1e-6)
+    assert math.isclose(float(xp.sum(mash_t(x))), float(xp.sum(x)), rel_tol=1e-6)
+
+    # closed-form norm matches a short power iteration (both modes)
+    for mode in ("sum", "average"):
+        op = ppl.SinogramMashingOperator(
+            fine, transaxial_factor=2, axial_factor=2, mode=mode
+        )
+        v = xp.asarray(rng.standard_normal(op.in_shape), device=dev, dtype=xp.float64)
+        nrm = 1.0
+        for _ in range(40):
+            v = op.adjoint(op(v))
+            nrm = float(xp.sqrt(xp.sum(v * v)))
+            v = v / nrm
+        assert math.isclose(nrm**0.5, op.norm(), rel_tol=2e-2)
+
+
 def _tof_mash_fine_descriptor(xp, dev):
     scanner = pps.RegularPolygonPETScannerGeometry(
         xp, dev, radius=100.0, num_sides=8, num_lor_endpoints_per_side=4,

@@ -2321,13 +2321,22 @@ class SinogramMashingOperator(LinearOperator):
     :math:`\\|G_{\\rm avg}\\| = 1/\\sqrt{\\min_n m_n}` with :math:`m_n` the
     per-coarse-bin multiplicity; :meth:`norm` returns these directly.
 
-    Constraints (v1): the input descriptor must have ``span == 1``, ``N`` must
-    divide ``num_lor_endpoints_per_side`` and ``M`` must divide ``num_rings``.
+    Two axial layouts are supported: the ``span == 1`` STANDARD layout and the
+    GE layout (:class:`MichelogramLayout.GE`).  For a GE descriptor the coarse
+    grid is a GE descriptor on ``num_rings // M`` rings whose segmentation is
+    re-derived on the coarse ring grid (so the coarse "span-3 centre" spans
+    :math:`M\\times` wider axially); ``M = 1`` leaves the GE axial layout
+    untouched and mashes transaxially only.  Higher-span STANDARD sinograms are
+    not supported.
+
+    Constraints: the input descriptor must use the ``span == 1`` STANDARD layout
+    or the GE layout, ``N`` must divide ``num_lor_endpoints_per_side`` and ``M``
+    must divide ``num_rings``.
 
     Parameters
     ----------
     lor_descriptor : RegularPolygonPETLORDescriptor
-        the fine (un-mashed) span-1 descriptor.
+        the fine (un-mashed) descriptor (``span == 1`` STANDARD or GE layout).
     transaxial_factor : int, optional
         number of neighbouring within-side crystals to mash (``N``), default 1.
     axial_factor : int, optional
@@ -2366,8 +2375,12 @@ class SinogramMashingOperator(LinearOperator):
 
         if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
             raise TypeError("lor_descriptor must be a RegularPolygonPETLORDescriptor")
-        if lor_descriptor.span != 1:
-            raise ValueError("input lor_descriptor must have span=1")
+        _is_ge = lor_descriptor.michelogram.layout is MichelogramLayout.GE
+        if not _is_ge and lor_descriptor.span != 1:
+            raise ValueError(
+                "input lor_descriptor must have span=1 (STANDARD layout) or use "
+                "the GE layout; higher-span STANDARD sinograms are not supported"
+            )
         if not isinstance(transaxial_factor, int) or transaxial_factor < 1:
             raise ValueError("transaxial_factor must be a positive integer")
         if not isinstance(axial_factor, int) or axial_factor < 1:
@@ -2444,17 +2457,28 @@ class SinogramMashingOperator(LinearOperator):
         )
 
         # ---- coarse michelogram covering every mashed ring pair, then descriptor
+        # Work at the michelogram level (plane -> contributing ring pairs) so both
+        # span-1 (one pair per plane) and GE (segment-0 cross planes pool the two
+        # transpose pairs) are handled uniformly.
+        fine_mich = lor_descriptor.michelogram
         s_ring = np.asarray(
-            to_numpy_array(lor_descriptor.start_plane_index)
+            to_numpy_array(fine_mich.plane_start_rings)
         ).astype(np.int64)
         e_ring = np.asarray(
-            to_numpy_array(lor_descriptor.end_plane_index)
+            to_numpy_array(fine_mich.plane_end_rings)
         ).astype(np.int64)
+        pmask = np.asarray(to_numpy_array(fine_mich.plane_mask)) > 0
         cs_ring = s_ring // M
         ce_ring = e_ring // M
-        coarse_max_rd = int(np.max(np.abs(cs_ring - ce_ring))) if s_ring.size else 0
+        coarse_rd = np.abs(cs_ring - ce_ring)
+        coarse_max_rd = int(coarse_rd[pmask].max()) if pmask.any() else 0
         coarse_max_rd = min(coarse_max_rd, nrings_c - 1)
-        coarse_mich = Michelogram(nrings_c, coarse_max_rd, span=1)
+        if _is_ge:
+            coarse_mich = Michelogram(
+                nrings_c, coarse_max_rd, layout=MichelogramLayout.GE
+            )
+        else:
+            coarse_mich = Michelogram(nrings_c, coarse_max_rd, span=1)
 
         if auto_coarse_radial_trim:
             # Derive the coarse radial trim directly from the fine->coarse map:
@@ -2588,19 +2612,34 @@ class SinogramMashingOperator(LinearOperator):
         target_t = t_grid.T.reshape(-1).astype(np.int64)
         idx_t, mask_t, mult_t, maxm_t = _grouped_gather_index(target_t, self._n_t_c)
 
-        # ---- axial: fine plane -> coarse plane ----
-        cstart_p = np.asarray(to_numpy_array(cdesc.start_plane_index)).astype(np.int64)
-        cend_p = np.asarray(to_numpy_array(cdesc.end_plane_index)).astype(np.int64)
-        ringpair2plane = np.full((nrings_c, nrings_c), -1, dtype=np.int64)
-        plane_ids = np.arange(cstart_p.shape[0])
-        ringpair2plane[cstart_p, cend_p] = plane_ids
-        ringpair2plane[cend_p, cstart_p] = plane_ids
-        s_ring = np.asarray(to_numpy_array(ld.start_plane_index)).astype(np.int64)
-        e_ring = np.asarray(to_numpy_array(ld.end_plane_index)).astype(np.int64)
-        target_a = ringpair2plane[
-            np.clip(s_ring // M, 0, nrings_c - 1),
-            np.clip(e_ring // M, 0, nrings_c - 1),
-        ].astype(np.int64)
+        # ---- axial: fine plane -> coarse plane (michelogram level) ----
+        # Every fine plane maps to one coarse plane: its contributing ring pairs
+        # (via the fine michelogram) are grouped by M and looked up in the coarse
+        # michelogram.  For span=1 a plane has a single ring pair; for GE the two
+        # transpose pairs of a segment-0 cross plane map to the same (unordered)
+        # coarse pair, so the target is single-valued in both cases.
+        fine_mich = ld.michelogram
+        coarse_mich = cdesc.michelogram
+        cptab = np.asarray(
+            to_numpy_array(coarse_mich.plane_for_ring_pair_table)
+        ).astype(np.int64)
+        f_s = np.asarray(to_numpy_array(fine_mich.plane_start_rings)).astype(np.int64)
+        f_e = np.asarray(to_numpy_array(fine_mich.plane_end_rings)).astype(np.int64)
+        f_m = np.asarray(to_numpy_array(fine_mich.plane_mask)) > 0
+        cs_p = np.clip(f_s // M, 0, nrings_c - 1)
+        ce_p = np.clip(f_e // M, 0, nrings_c - 1)
+        coarse_plane_grid = np.where(f_m, cptab[cs_p, ce_p], -1)  # (P_f, max_mult)
+        # take the coarse plane from the first valid contributing ring pair
+        first_valid = np.argmax(f_m, axis=1)
+        target_a = coarse_plane_grid[np.arange(f_m.shape[0]), first_valid].astype(
+            np.int64
+        )
+        # defensive: all valid contributing pairs of a fine plane must agree
+        _cpg = np.where(f_m, coarse_plane_grid, target_a[:, None])
+        assert np.all(_cpg == target_a[:, None]), (
+            "inconsistent fine->coarse plane mapping (a fine plane's ring pairs "
+            "map to different coarse planes)"
+        )
         idx_a, mask_a, mult_a, maxm_a = _grouped_gather_index(target_a, self._P_c)
 
         # ---- store everything as xp arrays ----
