@@ -211,6 +211,8 @@ proj_fine = parallelproj.projectors.RegularPolygonPETProjector(
 img = xp.zeros(img_shape, dtype=xp.float32, device=dev)
 img[30:60, 40:55, :] = 1.0
 img[60:75, 60:75, :] = 2.0
+img[:,:,:num_rings//2] *= 1.5
+img[:,:,::2] *= 1.5
 
 fine_sino = proj_fine(img)
 mashed_sino = mash(fine_sino)
@@ -486,6 +488,42 @@ print(
 _keep.append(show_vol_cuts(
     _canonical(span1_upsampled, ge_span1), axis_labels=_labels,
     fig_title=f"upsampled span-1 sinogram (avg-adjoint, {tuple(ge_span1.spatial_sinogram_shape)})",
+))
+
+# %%
+# Round trip: back to the original fine GE sinogram
+# -------------------------------------------------
+#
+# Finally, return to the original GE layout.  Re-combining span-1 -> GE is the
+# **sum**-mode span-1 <-> GE operator's forward (each GE cross plane sums its two
+# span-1 planes, exactly undoing the earlier ``mode="average"`` distribution).
+# We fold the upsampling and re-combination into a single operator that maps the
+# coarse span-1 sinogram straight back to fine GE:
+#
+#     coarse span-1 --(avg-adjoint of the mash)--> fine span-1 --(sum span-1 -> GE)--> fine GE
+#
+# Counts are preserved; the result approximates the original fine GE sinogram up
+# to the axial/transaxial resolution lost in mashing.
+
+ge_recombine = parallelproj.pet_lors.SinogramAxialCompressionOperator(
+    ge_span1, target_layout=parallelproj.pet_lors.MichelogramLayout.GE, mode="sum"
+)
+coarse_span1_to_ge = CompositeLinearOperator([ge_recombine, mash_span1_avg.H])
+
+ge_reconstructed = coarse_span1_to_ge(span1_coarse_sino)  # fine GE (approx)
+
+rel_ge = float(
+    np.linalg.norm(to_numpy_array(ge_reconstructed) - to_numpy_array(ge_fine_sino))
+    / np.linalg.norm(to_numpy_array(ge_fine_sino))
+)
+print(
+    f"sum(reconstructed GE) = {float(xp.sum(ge_reconstructed)):.1f}  (counts preserved)\n"
+    f"rel. difference to original fine GE = {rel_ge:.2f}  (resolution lost in mashing)"
+)
+
+_keep.append(show_vol_cuts(
+    _canonical(ge_reconstructed, ge_desc), axis_labels=_labels,
+    fig_title=f"reconstructed fine GE sinogram {tuple(ge_desc.spatial_sinogram_shape)}",
 ))
 
 plt.show()
