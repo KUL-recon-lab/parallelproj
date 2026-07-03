@@ -163,6 +163,24 @@ New examples and documentation
 - **Example gallery substantially reorganised and expanded**, now grouped into PET
   scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
   transmission / joint estimation, and PyTorch integration. Highlights below.
+- **New example: Michelograms and axial sinogram compression** — how the
+  ``Michelogram`` maps ring pairs to sinogram planes/segments, and using
+  ``SinogramAxialCompressionOperator`` to compress a span-1 sinogram to a higher odd
+  span (and to/from the GE layout).
+- **New example: zig-zag LOR sampling in a sinogram view** — visualises the
+  ``SinogramZigZagOrder`` crystal/LOR endpoint pairing within a view.
+- **New example: sinogram symmetries** — partitioning ring pairs into symmetry
+  classes and the reduce -> compute -> expand workflow for geometric sensitivity
+  (``parallelproj.sinogram_symmetries``).
+- **New example: detector mashing** — ``SinogramMashingOperator`` groups within-side
+  crystals and rings into larger virtual detectors (exact vs fast coarse projector,
+  multiplicity, count-preserving up/downsampling), including mashing GE sinograms by
+  composition.
+- **New example: TOF-bin mashing** — ``TOFBinMashingOperator`` groups neighbouring TOF
+  bins, the matching ``coarse_tof_parameters``, and composition with detector mashing.
+- **New example: histogramming listmode data into sinograms** — using
+  ``parallelproj.unlist`` to bin per-event crystal/ring (and TOF) indices into a
+  sinogram.
 - **New example: transmission reconstruction (MLTR / SPS / L-BFGS-B)** — exact Poisson
   transmission model with strictly positive scatter background, presenting MLTR
   (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one
