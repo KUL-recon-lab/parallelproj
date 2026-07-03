@@ -413,7 +413,7 @@ figge.show()
 # GE detector sensitivity
 # -----------------------
 #
-# The GE projector traces a **single representative LOR per plane**, so the
+# The projector traces a **single representative LOR per plane**, so the
 # segment-0 **cross** planes (which physically collect two ring differences) are
 # under-weighted.  We multiply the projection by the plane multiplicity
 # (``2`` on cross planes, ``1`` elsewhere) to give the cross planes their true
@@ -438,9 +438,9 @@ _keep.append(show_vol_cuts(
 # Mash a (simulated) GE emission sinogram
 # ---------------------------------------
 #
-# Forward-project the same phantom through the GE projector (weighted for the
+# Forward-project the same phantom through the projector (weighted for the
 # cross-plane sensitivity), then apply the composite operator.  The pipeline
-# first distributes the GE data onto the fine span-1 grid (the "un-GE" step),
+# first distributes the GE-style sinogram data onto the fine span-1 grid (the "un-GE" step),
 # then mashes to a coarse span-1 sinogram.  Scroll through radial / view / plane.
 
 proj_ge = parallelproj.projectors.RegularPolygonPETProjector(
@@ -520,13 +520,13 @@ rel_ge = float(
     / np.linalg.norm(to_numpy_array(ge_fine_sino))
 )
 print(
-    f"sum(reconstructed GE) = {float(xp.sum(ge_reconstructed)):.1f}  (counts preserved)\n"
+    f"sum(upsampled sino) = {float(xp.sum(ge_reconstructed)):.1f}  (counts preserved)\n"
     f"rel. difference to original fine GE = {rel_ge:.2f}  (resolution lost in mashing)"
 )
 
 _keep.append(show_vol_cuts(
     _canonical(ge_reconstructed, ge_desc), axis_labels=_labels,
-    fig_title=f"reconstructed fine GE sinogram {tuple(ge_desc.spatial_sinogram_shape)}",
+    fig_title=f"upsampled sinogram (GE plane layout ) {tuple(ge_desc.spatial_sinogram_shape)}",
 ))
 
 plt.show()
