@@ -609,6 +609,9 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     with pytest.raises(ValueError, match="num_tof_bins"):
         ppl.SinogramAxialCompressionOperator(lor_s1, 3, num_tof_bins=0)
 
+    with pytest.raises(TypeError, match="target_layout"):
+        ppl.SinogramAxialCompressionOperator(lor_s1, 3, target_layout="GE")  # type: ignore[arg-type]
+
     lor_s3_input = ppl.RegularPolygonPETLORDescriptor(
         scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
@@ -1218,6 +1221,13 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
     # from a span-1 source is allowed, tested elsewhere)
     with pytest.raises(ValueError, match="GE-layout source"):
         m.compression_index_maps_to(ppl.Michelogram(27, 26, span=3))
+
+    # a GE *target* is only defined from a span-1 source (a span>1 source could
+    # split a plane's ring pairs across GE planes)
+    with pytest.raises(ValueError, match="span-1 source"):
+        ppl.Michelogram(27, 26, span=3).compression_index_maps_to(
+            ppl.Michelogram(27, 26, layout=ppl.MichelogramLayout.GE)
+        )
 
     # a descriptor built on a GE michelogram works; span is None and the
     # per-plane single-ring-pair indices are undefined (planes can hold 2 pairs)
