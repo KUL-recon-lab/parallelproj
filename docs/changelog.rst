@@ -128,7 +128,10 @@ New Features
   ``RegularPolygonPETLORDescriptor`` for the GE scanner of interest.
 - **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
   that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
-  ``mode="average"``).
+  ``mode="average"``).  A ``target_layout=MichelogramLayout.GE`` option compresses a
+  span-1 sinogram to the **GE layout**; its ``mode="average"`` adjoint distributes a
+  GE sinogram back onto the span-1 grid while preserving counts (e.g. to convert GE
+  data to span-1 before detector mashing).
 - **``SinogramMashingOperator``** (``parallelproj.pet_lors``): detector mashing for a
   span-1 regular-polygon sinogram.  Groups ``transaxial_factor`` within-side crystals
   and ``axial_factor`` rings into larger virtual detectors at the averaged endpoint
@@ -140,12 +143,11 @@ New Features
   the coarse radial trim is derived automatically from the fine->coarse mapping so
   that no fine LOR is lost to trimming and no empty peripheral coarse radial bins
   remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
-  ``coarse_radial_trim`` to override.  Supports both the ``span=1`` STANDARD
-  layout and the **GE layout**: for a GE descriptor the coarse grid is a GE
-  descriptor on ``num_rings // axial_factor`` rings with the segmentation
-  re-derived on the coarse ring grid (``axial_factor=1`` mashes transaxially only
-  and leaves the GE axial layout untouched).  See the
-  ``01_pet_geometry/07_run_detector_mashing.py`` example.
+  ``coarse_radial_trim`` to override.  The operator is span-1 only; **GE-layout**
+  sinograms are mashed by composition -- convert GE -> span-1 with the
+  ``mode="average"`` adjoint of a span-1 <-> GE ``SinogramAxialCompressionOperator``,
+  then mash, giving a pure span-1 coarse sinogram (see the
+  ``01_pet_geometry/07_run_detector_mashing.py`` example).
 - **``TOFBinMashingOperator``** (``parallelproj.pet_lors``): mashes (groups) every
   ``mashing_factor`` neighbouring TOF bins along the trailing TOF axis into fewer,
   wider bins (``mode="sum"`` for counts, ``mode="average"`` for multiplicative

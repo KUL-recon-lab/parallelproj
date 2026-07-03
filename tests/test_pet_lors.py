@@ -1214,8 +1214,9 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
     assert m.ring_diff_to_segment(-2) == -1 and m.ring_diff_to_segment(-3) == -1
     assert m.ring_diff_to_segment(4) == 2 and m.ring_diff_to_segment(26) == 13
 
-    # axial compression is not supported for the GE layout
-    with pytest.raises(ValueError, match="GE layout"):
+    # axial compression is not supported *from* a GE-layout source (a GE target
+    # from a span-1 source is allowed, tested elsewhere)
+    with pytest.raises(ValueError, match="GE-layout source"):
         m.compression_index_maps_to(ppl.Michelogram(27, 26, span=3))
 
     # a descriptor built on a GE michelogram works; span is None and the
@@ -1683,71 +1684,124 @@ def test_sinogram_mashing_validation(xp: ModuleType, dev: str) -> None:
         ppl.SinogramMashingOperator(span3, transaxial_factor=2, axial_factor=2)
 
 
-def _mash_ge_fine_descriptor(xp, dev, num_rings=4):
+def test_sinogram_axial_compression_to_ge(xp: ModuleType, dev: str) -> None:
+    """``SinogramAxialCompressionOperator`` with ``target_layout=GE`` compresses
+    a span-1 sinogram to the GE layout; its average-mode adjoint distributes a GE
+    sinogram back to span-1 while preserving counts."""
+    import math
+    import numpy as _np
+
     scanner = pps.RegularPolygonPETScannerGeometry(
         xp, dev, radius=100.0, num_sides=6, num_lor_endpoints_per_side=4,
-        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, num_rings, device=dev),
+        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, 8, device=dev),
         symmetry_axis=2,
     )
-    return ppl.RegularPolygonPETLORDescriptor(
+    lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, ppl.Michelogram(scanner.num_rings, 3, span=1), radial_trim=1
+    )
+
+    a_sum = ppl.SinogramAxialCompressionOperator(
+        lor_s1, target_layout=ppl.MichelogramLayout.GE, mode="sum"
+    )
+    a_avg = ppl.SinogramAxialCompressionOperator(
+        lor_s1, target_layout=ppl.MichelogramLayout.GE, mode="average"
+    )
+
+    assert a_sum.target_layout is ppl.MichelogramLayout.GE
+    assert a_sum.target_span is None
+    assert a_sum.out_lor_descriptor.michelogram.layout is ppl.MichelogramLayout.GE
+    assert a_sum.in_shape == tuple(lor_s1.spatial_sinogram_shape)
+    assert a_sum.adjointness_test(dtype=xp.float64)
+    assert a_avg.adjointness_test(dtype=xp.float64)
+
+    rng = _np.random.default_rng(0)
+    x = xp.asarray(
+        rng.uniform(0.0, 1.0, lor_s1.spatial_sinogram_shape).astype(_np.float64),
+        device=dev,
+    )
+    # sum-mode forward preserves counts (each span-1 plane lands in one GE plane)
+    assert math.isclose(float(xp.sum(a_sum(x))), float(xp.sum(x)), rel_tol=1e-6)
+
+    # the average-mode adjoint is a right-inverse of the sum-mode forward:
+    #   A_sum( A_avg^T( g ) ) == g   (distribute, then re-combine)
+    g = a_sum(x)  # a GE sinogram
+    round_trip = a_sum(a_avg.adjoint(g))
+    assert float(xp.max(xp.abs(round_trip - g))) < 1e-9
+    # and distributing preserves the total counts of the GE sinogram
+    assert math.isclose(
+        float(xp.sum(a_avg.adjoint(g))), float(xp.sum(g)), rel_tol=1e-6
+    )
+
+    # a span-1 input is required for a GE target
+    lor_s3 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, ppl.Michelogram(scanner.num_rings, 3, span=3), radial_trim=1
+    )
+    with pytest.raises(ValueError, match="span=1"):
+        ppl.SinogramAxialCompressionOperator(
+            lor_s3, target_layout=ppl.MichelogramLayout.GE
+        )
+
+
+def test_ge_mashing_by_composition(xp: ModuleType, dev: str) -> None:
+    """GE sinograms are mashed by composition: GE -> span-1 (average-mode adjoint
+    of the span-1 <-> GE compression) followed by span-1 detector mashing, giving
+    a pure span-1 coarse sinogram with counts preserved."""
+    import math
+    import numpy as _np
+    from parallelproj.operators import CompositeLinearOperator
+
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=6, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, 8, device=dev),
+        symmetry_axis=2,
+    )
+    lor_s1 = ppl.RegularPolygonPETLORDescriptor(
+        scanner, ppl.Michelogram(scanner.num_rings, 3, span=1), radial_trim=1
+    )
+
+    ge_avg = ppl.SinogramAxialCompressionOperator(
+        lor_s1, target_layout=ppl.MichelogramLayout.GE, mode="average"
+    )
+    ge_desc = ge_avg.out_lor_descriptor  # the GE descriptor / data layout
+    mash = ppl.SinogramMashingOperator(
+        lor_s1, transaxial_factor=2, axial_factor=2, mode="sum"
+    )
+    # GE data -> span-1 (distribute) -> coarse span-1 (mash)
+    ge_mash = CompositeLinearOperator([mash, ge_avg.H])
+
+    assert ge_mash.in_shape == tuple(ge_desc.spatial_sinogram_shape)
+    assert ge_mash.out_shape == mash.out_shape
+    # coarse output is a plain span-1 sinogram
+    assert mash.coarse_lor_descriptor.michelogram.layout is ppl.MichelogramLayout.STANDARD
+    assert mash.coarse_lor_descriptor.span == 1
+    assert ge_mash.adjointness_test(xp, dev, dtype=xp.float64)
+
+    # counts are preserved through the whole pipeline
+    rng = _np.random.default_rng(1)
+    ge_data = xp.asarray(
+        rng.uniform(0.0, 1.0, ge_desc.spatial_sinogram_shape).astype(_np.float64),
+        device=dev,
+    )
+    assert math.isclose(
+        float(xp.sum(ge_mash(ge_data))), float(xp.sum(ge_data)), rel_tol=1e-6
+    )
+
+
+def test_sinogram_mashing_rejects_ge(xp: ModuleType, dev: str) -> None:
+    """``SinogramMashingOperator`` is span-1 only; a GE descriptor is rejected
+    (GE mashing is done by composition instead)."""
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=6, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.linspace(-6.0, 6.0, 4, device=dev),
+        symmetry_axis=2,
+    )
+    ge_desc = ppl.RegularPolygonPETLORDescriptor(
         scanner,
         ppl.Michelogram(scanner.num_rings, 3, layout=ppl.MichelogramLayout.GE),
         radial_trim=1,
     )
-
-
-def test_sinogram_mashing_ge(xp: ModuleType, dev: str) -> None:
-    """Mashing of GE-layout sinograms: transaxial-only preserves the GE axial
-    layout (identity plane map); with axial_factor>1 the coarse grid is a GE
-    descriptor on ``num_rings // M`` rings.  Adjointness, count conservation and
-    the closed-form norm all carry over."""
-    import math
-    import numpy as _np
-
-    fine = _mash_ge_fine_descriptor(xp, dev)
-    assert fine.michelogram.layout is ppl.MichelogramLayout.GE
-
-    # transaxial-only (M=1): GE axial layout untouched -> identity plane map
-    mash_t = ppl.SinogramMashingOperator(
-        fine, transaxial_factor=2, axial_factor=1, mode="sum"
-    )
-    assert mash_t.coarse_lor_descriptor.michelogram.layout is ppl.MichelogramLayout.GE
-    assert mash_t.coarse_scanner.num_rings == fine.scanner.num_rings
-    assert mash_t.coarse_lor_descriptor.num_planes == fine.num_planes
-    assert mash_t.adjointness_test(dtype=xp.float64)
-
-    # transaxial + axial (M=2): coarse GE descriptor on num_rings // 2 rings
-    mash = ppl.SinogramMashingOperator(
-        fine, transaxial_factor=2, axial_factor=2, mode="sum"
-    )
-    cdesc = mash.coarse_lor_descriptor
-    assert cdesc.michelogram.layout is ppl.MichelogramLayout.GE
-    assert mash.coarse_scanner.num_rings == fine.scanner.num_rings // 2
-    assert int(_np.prod(mash.out_shape)) < int(_np.prod(mash.in_shape))
-    assert mash.adjointness_test(dtype=xp.float64)
-
-    # count conservation (mode="sum"): axial mapping never drops a plane, and the
-    # transaxial trim keeps every LOR for this geometry
-    rng = _np.random.default_rng(0)
-    x = xp.asarray(
-        rng.uniform(0.0, 1.0, fine.spatial_sinogram_shape).astype(_np.float64),
-        device=dev,
-    )
-    assert math.isclose(float(xp.sum(mash(x))), float(xp.sum(x)), rel_tol=1e-6)
-    assert math.isclose(float(xp.sum(mash_t(x))), float(xp.sum(x)), rel_tol=1e-6)
-
-    # closed-form norm matches a short power iteration (both modes)
-    for mode in ("sum", "average"):
-        op = ppl.SinogramMashingOperator(
-            fine, transaxial_factor=2, axial_factor=2, mode=mode
-        )
-        v = xp.asarray(rng.standard_normal(op.in_shape), device=dev, dtype=xp.float64)
-        nrm = 1.0
-        for _ in range(40):
-            v = op.adjoint(op(v))
-            nrm = float(xp.sqrt(xp.sum(v * v)))
-            v = v / nrm
-        assert math.isclose(nrm**0.5, op.norm(), rel_tol=2e-2)
+    with pytest.raises(ValueError, match="span=1"):
+        ppl.SinogramMashingOperator(ge_desc, transaxial_factor=2, axial_factor=2)
 
 
 def _tof_mash_fine_descriptor(xp, dev):

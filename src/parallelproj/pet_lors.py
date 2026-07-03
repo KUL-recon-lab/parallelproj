@@ -493,24 +493,33 @@ class Michelogram:
         """
         if not isinstance(target, Michelogram):
             raise TypeError("target must be a Michelogram instance")
-        if self._span is None or target.span is None:
+        if self._span is None:
             raise ValueError(
-                "axial compression mapping is not supported for the GE layout"
+                "axial compression mapping is not supported from a GE-layout source"
             )
         if target.num_rings != self._num_rings:
             raise ValueError(
                 f"target.num_rings ({target.num_rings}) must match "
                 f"self.num_rings ({self._num_rings})"
             )
-        if target.span < self._span:
-            raise ValueError(
-                f"target.span ({target.span}) must be >= self.span ({self._span})"
-            )
-        if target.span % self._span != 0:
-            raise ValueError(
-                f"target.span ({target.span}) must be an integer multiple "
-                f"of self.span ({self._span})"
-            )
+        if target.span is None:
+            # GE target: every input plane's ring pairs must land in one target
+            # (GE) plane.  This holds when the input is span-1 (one ring pair per
+            # plane); higher-span sources could split across GE planes.
+            if self._span != 1:
+                raise ValueError(
+                    "compression to the GE layout requires a span-1 source"
+                )
+        else:
+            if target.span < self._span:
+                raise ValueError(
+                    f"target.span ({target.span}) must be >= self.span ({self._span})"
+                )
+            if target.span % self._span != 0:
+                raise ValueError(
+                    f"target.span ({target.span}) must be an integer multiple "
+                    f"of self.span ({self._span})"
+                )
         if target.max_ring_difference < self._max_ring_difference:
             raise ValueError(
                 f"target.max_ring_difference ({target.max_ring_difference}) "
@@ -1798,7 +1807,16 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
 
 class SinogramAxialCompressionOperator(LinearOperator):
-    """Linear operator that axially compresses a span-1 PET sinogram into a higher odd span.
+    """Linear operator that axially compresses a span-1 PET sinogram to a higher odd span (or GE).
+
+    The output layout is chosen with ``target_layout``: a STANDARD higher odd
+    ``span`` (default) or the GE layout (``target_layout=MichelogramLayout.GE``,
+    which ignores ``target_span``).  In both cases every span-1 ring pair is
+    assigned to an output plane by the target :class:`Michelogram`.  A useful
+    consequence: the ``mode="average"`` **adjoint** distributes a compressed
+    sinogram back onto the span-1 grid while preserving counts -- e.g. to
+    un-combine a GE sinogram into span-1 (and then, say, mash it with
+    :class:`SinogramMashingOperator`).
 
     For an input :class:`RegularPolygonPETLORDescriptor` with ``span=1`` and a
     target odd span :math:`S`, every span-1 ring pair
@@ -1871,20 +1889,28 @@ class SinogramAxialCompressionOperator(LinearOperator):
     ----------
     lor_descriptor : RegularPolygonPETLORDescriptor
         A ``span=1`` LOR descriptor whose sinogram is to be compressed.
-    target_span : int
-        Odd integer ``>= 1`` giving the target axial compression.  ``1`` is
-        accepted and yields an identity-like operator (each input plane maps to
-        a single output plane in the same span-1 order).
+    target_span : int or None
+        Odd integer ``>= 1`` giving the target axial compression (STANDARD
+        layout).  ``1`` is accepted and yields an identity-like operator (each
+        input plane maps to a single output plane in the same span-1 order).
+        Ignored (and may be ``None``) when ``target_layout`` is
+        :attr:`MichelogramLayout.GE`.
     mode : {"sum", "average"}, optional
         Reduction mode.  ``"sum"`` (default) is appropriate for counts-like
         sinograms; ``"average"`` is appropriate for multiplicative-factor
-        sinograms such as attenuation or sensitivity factors.
+        sinograms such as attenuation or sensitivity factors.  ``"average"`` is
+        also the mode whose **adjoint** distributes a compressed sinogram back to
+        span-1 while preserving counts (e.g. to un-combine a GE sinogram).
     num_tof_bins : int or None, optional
         If ``None`` (default), the operator acts on the 3D spatial sinogram
         with shape :attr:`RegularPolygonPETLORDescriptor.spatial_sinogram_shape`.
         If a positive integer, the operator acts on a 4D TOF sinogram whose
         trailing axis (size ``num_tof_bins``) is the TOF axis and is passed
         through unchanged.
+    target_layout : MichelogramLayout, optional
+        Axial layout of the output sinogram.  ``STANDARD`` (default) uses
+        ``target_span``; ``GE`` compresses the span-1 input to the GE layout
+        (``target_span`` is ignored).  The GE target requires a span-1 input.
 
     Examples
     --------
@@ -1909,16 +1935,17 @@ class SinogramAxialCompressionOperator(LinearOperator):
     def __init__(
         self,
         lor_descriptor: RegularPolygonPETLORDescriptor,
-        target_span: int,
+        target_span: int | None = None,
         mode: str = "sum",
         num_tof_bins: int | None = None,
+        target_layout: MichelogramLayout = MichelogramLayout.STANDARD,
     ) -> None:
         if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
             raise TypeError("lor_descriptor must be a RegularPolygonPETLORDescriptor")
         if lor_descriptor.span != 1:
             raise ValueError("input lor_descriptor must have span=1")
-        if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
-            raise ValueError("target_span must be an odd positive integer")
+        if not isinstance(target_layout, MichelogramLayout):
+            raise TypeError("target_layout must be a MichelogramLayout")
         if mode not in ("sum", "average"):
             raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
         if num_tof_bins is not None and (
@@ -1929,7 +1956,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         super().__init__()
 
         self._lor_descriptor = lor_descriptor
-        self._target_span = int(target_span)
+        self._target_layout = target_layout
         self._mode = mode
         self._num_tof_bins = num_tof_bins
 
@@ -1939,11 +1966,27 @@ class SinogramAxialCompressionOperator(LinearOperator):
 
         # Build the target Michelogram exactly once and reuse it for both
         # the companion descriptor and the compression index maps below.
-        target_michelogram = Michelogram(
-            num_rings=lor_descriptor.scanner.num_rings,
-            max_ring_difference=lor_descriptor.max_ring_difference,
-            span=self._target_span,
-        )
+        if target_layout is MichelogramLayout.GE:
+            # GE target: span is meaningless; keep the input's max ring difference
+            self._target_span = None
+            target_michelogram = Michelogram(
+                num_rings=lor_descriptor.scanner.num_rings,
+                max_ring_difference=lor_descriptor.max_ring_difference,
+                layout=MichelogramLayout.GE,
+            )
+        else:
+            if (
+                not isinstance(target_span, int)
+                or target_span < 1
+                or target_span % 2 == 0
+            ):
+                raise ValueError("target_span must be an odd positive integer")
+            self._target_span = int(target_span)
+            target_michelogram = Michelogram(
+                num_rings=lor_descriptor.scanner.num_rings,
+                max_ring_difference=lor_descriptor.max_ring_difference,
+                span=self._target_span,
+            )
 
         self._out_lor_descriptor = RegularPolygonPETLORDescriptor(
             scanner=lor_descriptor.scanner,
@@ -2147,9 +2190,14 @@ class SinogramAxialCompressionOperator(LinearOperator):
         return self._out_lor_descriptor
 
     @property
-    def target_span(self) -> int:
-        """Target span (odd, >= 1)."""
+    def target_span(self) -> int | None:
+        """Target span (odd, >= 1), or ``None`` for a GE-layout target."""
         return self._target_span
+
+    @property
+    def target_layout(self) -> MichelogramLayout:
+        """Axial layout of the output sinogram (``STANDARD`` or ``GE``)."""
+        return self._target_layout
 
     @property
     def mode(self) -> str:
@@ -2321,22 +2369,18 @@ class SinogramMashingOperator(LinearOperator):
     :math:`\\|G_{\\rm avg}\\| = 1/\\sqrt{\\min_n m_n}` with :math:`m_n` the
     per-coarse-bin multiplicity; :meth:`norm` returns these directly.
 
-    Two axial layouts are supported: the ``span == 1`` STANDARD layout and the
-    GE layout (:class:`MichelogramLayout.GE`).  For a GE descriptor the coarse
-    grid is a GE descriptor on ``num_rings // M`` rings whose segmentation is
-    re-derived on the coarse ring grid (so the coarse "span-3 centre" spans
-    :math:`M\\times` wider axially); ``M = 1`` leaves the GE axial layout
-    untouched and mashes transaxially only.  Higher-span STANDARD sinograms are
-    not supported.
-
-    Constraints: the input descriptor must use the ``span == 1`` STANDARD layout
-    or the GE layout, ``N`` must divide ``num_lor_endpoints_per_side`` and ``M``
-    must divide ``num_rings``.
+    Constraints: the input descriptor must have ``span == 1``, ``N`` must divide
+    ``num_lor_endpoints_per_side`` and ``M`` must divide ``num_rings``.
+    GE-layout sinograms are mashed by *composition*: convert GE -> span-1 with
+    the average-mode adjoint of a span-1 <-> GE
+    :class:`SinogramAxialCompressionOperator`, mash the span-1 sinogram with this
+    operator, giving a pure span-1 coarse sinogram (see the detector-mashing
+    example).
 
     Parameters
     ----------
     lor_descriptor : RegularPolygonPETLORDescriptor
-        the fine (un-mashed) descriptor (``span == 1`` STANDARD or GE layout).
+        the fine (un-mashed) span-1 descriptor.
     transaxial_factor : int, optional
         number of neighbouring within-side crystals to mash (``N``), default 1.
     axial_factor : int, optional
@@ -2375,11 +2419,11 @@ class SinogramMashingOperator(LinearOperator):
 
         if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
             raise TypeError("lor_descriptor must be a RegularPolygonPETLORDescriptor")
-        _is_ge = lor_descriptor.michelogram.layout is MichelogramLayout.GE
-        if not _is_ge and lor_descriptor.span != 1:
+        if lor_descriptor.span != 1:
             raise ValueError(
-                "input lor_descriptor must have span=1 (STANDARD layout) or use "
-                "the GE layout; higher-span STANDARD sinograms are not supported"
+                "input lor_descriptor must have span=1; GE-layout sinograms are "
+                "mashed by composing a span-1 <-> GE SinogramAxialCompressionOperator "
+                "with this operator (see the detector-mashing example)"
             )
         if not isinstance(transaxial_factor, int) or transaxial_factor < 1:
             raise ValueError("transaxial_factor must be a positive integer")
@@ -2457,28 +2501,17 @@ class SinogramMashingOperator(LinearOperator):
         )
 
         # ---- coarse michelogram covering every mashed ring pair, then descriptor
-        # Work at the michelogram level (plane -> contributing ring pairs) so both
-        # span-1 (one pair per plane) and GE (segment-0 cross planes pool the two
-        # transpose pairs) are handled uniformly.
-        fine_mich = lor_descriptor.michelogram
         s_ring = np.asarray(
-            to_numpy_array(fine_mich.plane_start_rings)
+            to_numpy_array(lor_descriptor.start_plane_index)
         ).astype(np.int64)
         e_ring = np.asarray(
-            to_numpy_array(fine_mich.plane_end_rings)
+            to_numpy_array(lor_descriptor.end_plane_index)
         ).astype(np.int64)
-        pmask = np.asarray(to_numpy_array(fine_mich.plane_mask)) > 0
         cs_ring = s_ring // M
         ce_ring = e_ring // M
-        coarse_rd = np.abs(cs_ring - ce_ring)
-        coarse_max_rd = int(coarse_rd[pmask].max()) if pmask.any() else 0
+        coarse_max_rd = int(np.max(np.abs(cs_ring - ce_ring))) if s_ring.size else 0
         coarse_max_rd = min(coarse_max_rd, nrings_c - 1)
-        if _is_ge:
-            coarse_mich = Michelogram(
-                nrings_c, coarse_max_rd, layout=MichelogramLayout.GE
-            )
-        else:
-            coarse_mich = Michelogram(nrings_c, coarse_max_rd, span=1)
+        coarse_mich = Michelogram(nrings_c, coarse_max_rd, span=1)
 
         if auto_coarse_radial_trim:
             # Derive the coarse radial trim directly from the fine->coarse map:
@@ -2612,34 +2645,19 @@ class SinogramMashingOperator(LinearOperator):
         target_t = t_grid.T.reshape(-1).astype(np.int64)
         idx_t, mask_t, mult_t, maxm_t = _grouped_gather_index(target_t, self._n_t_c)
 
-        # ---- axial: fine plane -> coarse plane (michelogram level) ----
-        # Every fine plane maps to one coarse plane: its contributing ring pairs
-        # (via the fine michelogram) are grouped by M and looked up in the coarse
-        # michelogram.  For span=1 a plane has a single ring pair; for GE the two
-        # transpose pairs of a segment-0 cross plane map to the same (unordered)
-        # coarse pair, so the target is single-valued in both cases.
-        fine_mich = ld.michelogram
-        coarse_mich = cdesc.michelogram
-        cptab = np.asarray(
-            to_numpy_array(coarse_mich.plane_for_ring_pair_table)
-        ).astype(np.int64)
-        f_s = np.asarray(to_numpy_array(fine_mich.plane_start_rings)).astype(np.int64)
-        f_e = np.asarray(to_numpy_array(fine_mich.plane_end_rings)).astype(np.int64)
-        f_m = np.asarray(to_numpy_array(fine_mich.plane_mask)) > 0
-        cs_p = np.clip(f_s // M, 0, nrings_c - 1)
-        ce_p = np.clip(f_e // M, 0, nrings_c - 1)
-        coarse_plane_grid = np.where(f_m, cptab[cs_p, ce_p], -1)  # (P_f, max_mult)
-        # take the coarse plane from the first valid contributing ring pair
-        first_valid = np.argmax(f_m, axis=1)
-        target_a = coarse_plane_grid[np.arange(f_m.shape[0]), first_valid].astype(
-            np.int64
-        )
-        # defensive: all valid contributing pairs of a fine plane must agree
-        _cpg = np.where(f_m, coarse_plane_grid, target_a[:, None])
-        assert np.all(_cpg == target_a[:, None]), (
-            "inconsistent fine->coarse plane mapping (a fine plane's ring pairs "
-            "map to different coarse planes)"
-        )
+        # ---- axial: fine plane -> coarse plane ----
+        cstart_p = np.asarray(to_numpy_array(cdesc.start_plane_index)).astype(np.int64)
+        cend_p = np.asarray(to_numpy_array(cdesc.end_plane_index)).astype(np.int64)
+        ringpair2plane = np.full((nrings_c, nrings_c), -1, dtype=np.int64)
+        plane_ids = np.arange(cstart_p.shape[0])
+        ringpair2plane[cstart_p, cend_p] = plane_ids
+        ringpair2plane[cend_p, cstart_p] = plane_ids
+        s_ring = np.asarray(to_numpy_array(ld.start_plane_index)).astype(np.int64)
+        e_ring = np.asarray(to_numpy_array(ld.end_plane_index)).astype(np.int64)
+        target_a = ringpair2plane[
+            np.clip(s_ring // M, 0, nrings_c - 1),
+            np.clip(e_ring // M, 0, nrings_c - 1),
+        ].astype(np.int64)
         idx_a, mask_a, mult_a, maxm_a = _grouped_gather_index(target_a, self._P_c)
 
         # ---- store everything as xp arrays ----

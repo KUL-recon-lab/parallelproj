@@ -43,6 +43,7 @@ import matplotlib.pyplot as plt
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
 import parallelproj.projectors
+from parallelproj.operators import CompositeLinearOperator
 from parallelproj import to_numpy_array
 
 # %%
@@ -151,8 +152,8 @@ fig1.show()
 # LOR thinning explicit: the mashed descriptor has far fewer (and longer,
 # averaged) LORs for the same projection angle.
 
-central_fine = xp.asarray([lor_desc.num_planes // 2], device=dev)
-central_coarse = xp.asarray([coarse_desc.num_planes // 2], device=dev)
+central_fine = xp.asarray([num_rings // 2], device=dev)
+central_coarse = xp.asarray([num_rings // (2*axial_factor)], device=dev)
 view_fine = xp.asarray([lor_desc.num_views // 4], device=dev)
 view_coarse = xp.asarray([coarse_desc.num_views // 4], device=dev)
 
@@ -344,68 +345,74 @@ _keep.append(show_vol_cuts(
 ))
 
 # %%
-# Mashing GE-layout sinograms
-# ---------------------------
+# Mashing GE-layout sinograms (by composition)
+# --------------------------------------------
 #
-# The same operator also mashes **GE-layout** sinograms (the "span-3 in the
-# centre" staircase axial segmentation: segment 0 pools ring differences
-# ``{-1, 0, +1}``, oblique segments pool ``{+/-2k, +/-(2k+1)}``).  Nothing special
-# is required -- just pass a GE descriptor.  The transaxial mashing is
-# layout-independent; for the axial part the rings are grouped by
-# ``axial_factor`` and the GE segmentation is **re-derived on the coarse ring
-# grid**, so the mashed sinogram is itself a GE descriptor on
-# ``num_rings // axial_factor`` rings.  Use ``axial_factor=1`` to mash
-# transaxially only and leave the GE axial layout untouched.
+# GE sinograms use the "span-3 in the centre" staircase segmentation (segment 0
+# pools ring differences ``{-1, 0, +1}`` into direct/cross planes, oblique
+# segments pool ``{+/-2k, +/-(2k+1)}``).  ``SinogramMashingOperator`` itself is
+# span-1 only, but GE mashing follows cleanly by **composition**, and the result
+# is a plain span-1 coarse sinogram (no GE cross planes to carry around):
+#
+# 1. a span-1 <-> GE :class:`.SinogramAxialCompressionOperator`; its
+#    ``mode="average"`` **adjoint** distributes a GE sinogram back onto the
+#    span-1 grid while preserving counts (each cross-plane count is split evenly
+#    between its two ring differences);
+# 2. the span-1 :class:`.SinogramMashingOperator` then mashes that span-1
+#    sinogram to a coarse span-1 sinogram.
 
-ge_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+ge_span1 = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
-    parallelproj.pet_lors.Michelogram(
-        scanner.num_rings,
-        max_ring_difference=3,
-        layout=parallelproj.pet_lors.MichelogramLayout.GE,
-    ),
+    parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=3, span=1),
     radial_trim=11,
 )
-ge_mash = parallelproj.pet_lors.SinogramMashingOperator(
-    ge_desc, transaxial_factor=transaxial_factor, axial_factor=axial_factor, mode="sum"
-)
-ge_coarse_desc = ge_mash.coarse_lor_descriptor
 
-print(f"fine   GE sinogram : {ge_mash.in_shape}  (layout={ge_desc.michelogram.layout.name})")
+# span-1 <-> GE (average mode; its adjoint distributes GE -> span-1)
+ge_to_span1 = parallelproj.pet_lors.SinogramAxialCompressionOperator(
+    ge_span1, target_layout=parallelproj.pet_lors.MichelogramLayout.GE, mode="average"
+)
+ge_desc = ge_to_span1.out_lor_descriptor  # the GE data layout
+
+# span-1 detector mashing (same factors as above)
+mash_span1 = parallelproj.pet_lors.SinogramMashingOperator(
+    ge_span1, transaxial_factor=transaxial_factor, axial_factor=axial_factor, mode="sum"
+)
+span1_coarse_desc = mash_span1.coarse_lor_descriptor
+
+# GE data --(distribute)--> fine span-1 --(mash)--> coarse span-1
+ge_mash = CompositeLinearOperator([mash_span1, ge_to_span1.H])
+
+print(f"fine   GE sinogram   : {ge_mash.in_shape}  (layout={ge_desc.michelogram.layout.name})")
 print(
-    f"mashed GE sinogram : {ge_mash.out_shape}  "
-    f"(coarse rings={ge_mash.coarse_scanner.num_rings}, "
-    f"layout={ge_coarse_desc.michelogram.layout.name})"
+    f"mashed span-1 sinogram : {ge_mash.out_shape}  "
+    f"(coarse rings={mash_span1.coarse_scanner.num_rings}, "
+    f"layout={span1_coarse_desc.michelogram.layout.name}, span={span1_coarse_desc.span})"
 )
 
 # %%
-# The GE Michelogram before and after axial ring grouping.  Note the coarse
-# segmentation is the GE staircase re-derived on the coarser ring grid.
+# The GE input Michelogram vs the coarse span-1 output Michelogram.
 
 figge, axge = plt.subplots(1, 2, figsize=(11, 5), tight_layout=True)
 ge_desc.show_michelogram(axge[0])
 axge[0].set_title(
     f"fine GE Michelogram\n{scanner.num_rings} rings, {ge_desc.num_planes} planes"
 )
-ge_coarse_desc.show_michelogram(axge[1])
+span1_coarse_desc.show_michelogram(axge[1])
 axge[1].set_title(
-    f"mashed GE Michelogram\n{ge_mash.coarse_scanner.num_rings} rings, "
-    f"{ge_coarse_desc.num_planes} planes"
+    f"mashed span-1 Michelogram\n{mash_span1.coarse_scanner.num_rings} rings, "
+    f"{span1_coarse_desc.num_planes} planes"
 )
 figge.show()
 
 # %%
-# Physical detector-pair multiplicity (GE)
-# ----------------------------------------
+# GE detector sensitivity
+# -----------------------
 #
-# How many **physical detector pairs** contribute to each sinogram bin?  Unlike
-# a span-1 sinogram (where every fine bin is exactly one crystal-ring pair), a
-# GE sinogram already pools ring pairs axially: the segment-0 **cross** planes
-# combine the two ``+/-1`` ring differences, so those fine bins collect **two**
-# physical LORs (multiplicity ``2``) while the direct and oblique planes collect
-# one (multiplicity ``1``).  We build this fine multiplicity map from the
-# Michelogram's ``plane_multiplicity`` -- it is used below both to model the GE
-# sensitivity and to count physical pairs.
+# The GE projector traces a **single representative LOR per plane**, so the
+# segment-0 **cross** planes (which physically collect two ring differences) are
+# under-weighted.  We multiply the projection by the plane multiplicity
+# (``2`` on cross planes, ``1`` elsewhere) to give the cross planes their true
+# double sensitivity before mashing.
 
 _plane_mult = to_numpy_array(ge_desc.michelogram.plane_multiplicity).astype("float64")
 _bshape = [1, 1, 1]
@@ -415,86 +422,70 @@ fine_phys_mult = xp.asarray(
     dtype=xp.float64,
     device=dev,
 )
-# pushing the fine multiplicity through the sum-mode operator counts the physical
-# pairs folded into each coarse bin (transaxial crystals x axial rings x GE plane
-# multiplicity)
-coarse_phys_mult = ge_mash(fine_phys_mult)
-
-print(
-    f"fine   GE physical multiplicity : min={float(xp.min(fine_phys_mult)):.0f}, "
-    f"max={float(xp.max(fine_phys_mult)):.0f}\n"
-    f"mashed GE physical multiplicity : min={float(xp.min(coarse_phys_mult)):.0f}, "
-    f"max={float(xp.max(coarse_phys_mult)):.0f}"
-)
 
 _keep.append(show_vol_cuts(
     _canonical(fine_phys_mult, ge_desc), axis_labels=_labels,
-    fig_title="fine GE: physical detector pairs per bin (1 direct/oblique, 2 cross)",
+    fig_title="GE physical detector pairs per bin (1 direct/oblique, 2 cross)",
     cmap="viridis",
-))
-_keep.append(show_vol_cuts(
-    _canonical(coarse_phys_mult, ge_coarse_desc), axis_labels=_labels,
-    fig_title="mashed GE: physical detector pairs per bin", cmap="viridis",
 ))
 
 # %%
 # Mash a (simulated) GE emission sinogram
 # ---------------------------------------
 #
-# Re-use the same phantom: forward-project it through a GE projector, then mash
-# the GE sinogram with ``mode="sum"``.  The GE projector traces a **single
-# representative LOR per plane**, so we multiply by ``fine_phys_mult`` to give
-# the segment-0 cross planes their true (double) sensitivity before mashing.
-# Scroll through radial / view / plane -- the mashed sinogram is smaller along
-# all three axes.
+# Forward-project the same phantom through the GE projector (weighted for the
+# cross-plane sensitivity), then apply the composite operator.  The pipeline
+# first distributes the GE data onto the fine span-1 grid (the "un-GE" step),
+# then mashes to a coarse span-1 sinogram.  Scroll through radial / view / plane.
 
 proj_ge = parallelproj.projectors.RegularPolygonPETProjector(
     ge_desc, img_shape, voxel_size
 )
-ge_fine_sino = proj_ge(img) * fine_phys_mult  # cross planes get 2x sensitivity
-ge_mashed_sino = ge_mash(ge_fine_sino)
+ge_fine_sino = proj_ge(img) * fine_phys_mult  # GE data with cross planes at 2x
+span1_fine_sino = ge_to_span1.H(ge_fine_sino)  # distribute GE -> fine span-1
+span1_coarse_sino = ge_mash(ge_fine_sino)  # = mash_span1(span1_fine_sino)
 
 _keep.append(show_vol_cuts(
     _canonical(ge_fine_sino, ge_desc), axis_labels=_labels,
     fig_title=f"fine GE emission sinogram {tuple(ge_mash.in_shape)}",
 ))
 _keep.append(show_vol_cuts(
-    _canonical(ge_mashed_sino, ge_coarse_desc), axis_labels=_labels,
-    fig_title=f"mashed GE emission sinogram {tuple(ge_mash.out_shape)}",
+    _canonical(span1_fine_sino, ge_span1), axis_labels=_labels,
+    fig_title=f"distributed to fine span-1 {tuple(ge_span1.spatial_sinogram_shape)}",
+))
+_keep.append(show_vol_cuts(
+    _canonical(span1_coarse_sino, span1_coarse_desc), axis_labels=_labels,
+    fig_title=f"mashed coarse span-1 sinogram {tuple(ge_mash.out_shape)}",
 ))
 
-# count conservation carries over (axial mapping never drops a plane)
+# counts are preserved end to end (distribute preserves, sum-mash preserves)
 print(
-    f"sum(fine GE)   = {float(xp.sum(ge_fine_sino)):.1f}\n"
-    f"sum(mashed GE) = {float(xp.sum(ge_mashed_sino)):.1f}  (counts preserved)"
+    f"sum(fine GE)          = {float(xp.sum(ge_fine_sino)):.1f}\n"
+    f"sum(mashed span-1)    = {float(xp.sum(span1_coarse_sino)):.1f}  (counts preserved)"
 )
 
 # %%
-# Upsample the coarse GE sinogram back to the fine grid
-# -----------------------------------------------------
+# Upsample the coarse span-1 sinogram back to the fine span-1 grid
+# ---------------------------------------------------------------
 #
-# As before, the mashing operator's ``adjoint`` upsamples a coarse GE sinogram
-# back onto the fine GE grid, and the mode decides the normalisation.  Since the
-# coarse sinogram was pooled by ``sum``, the count-preserving upsampling is the
-# **average**-mode adjoint (``mash_sum(mash_avg.adjoint(y)) = y``): it spreads
-# each coarse bin's counts over its fine bins (dividing by the physical
-# multiplicity) so the total is preserved and the result is comparable to the
-# original fine GE sinogram.
+# As before, the span-1 mashing operator's ``adjoint`` upsamples the coarse
+# sinogram.  Since it was pooled by ``sum``, the count-preserving upsampling is
+# the **average**-mode adjoint, which spreads each coarse bin over its fine bins.
 
-ge_mash_avg = parallelproj.pet_lors.SinogramMashingOperator(
-    ge_desc, transaxial_factor=transaxial_factor, axial_factor=axial_factor,
+mash_span1_avg = parallelproj.pet_lors.SinogramMashingOperator(
+    ge_span1, transaxial_factor=transaxial_factor, axial_factor=axial_factor,
     mode="average",
 )
-ge_upsampled = ge_mash_avg.adjoint(ge_mashed_sino)  # fine GE grid, counts preserved
+span1_upsampled = mash_span1_avg.adjoint(span1_coarse_sino)  # fine span-1, counts preserved
 
 print(
-    f"sum(upsampled GE) = {float(xp.sum(ge_upsampled)):.1f}  "
-    f"(matches sum(mashed GE) = {float(xp.sum(ge_mashed_sino)):.1f})"
+    f"sum(upsampled span-1) = {float(xp.sum(span1_upsampled)):.1f}  "
+    f"(matches sum(mashed span-1) = {float(xp.sum(span1_coarse_sino)):.1f})"
 )
 
 _keep.append(show_vol_cuts(
-    _canonical(ge_upsampled, ge_desc), axis_labels=_labels,
-    fig_title=f"upsampled GE sinogram (avg-adjoint, {tuple(ge_mash.in_shape)})",
+    _canonical(span1_upsampled, ge_span1), axis_labels=_labels,
+    fig_title=f"upsampled span-1 sinogram (avg-adjoint, {tuple(ge_span1.spatial_sinogram_shape)})",
 ))
 
 plt.show()
