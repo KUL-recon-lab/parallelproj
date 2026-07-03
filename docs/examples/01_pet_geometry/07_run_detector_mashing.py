@@ -203,19 +203,22 @@ figmg.show()
 # largest radial offsets.)
 
 img_shape = (100, 100, num_rings)
-voxel_size = (4.0, 4.0, 3.5)
+voxel_size = (3.5, 3.5, 3.5)
 proj_fine = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape, voxel_size
 )
 
 img = xp.zeros(img_shape, dtype=xp.float32, device=dev)
-img[30:60, 40:55, :] = 1.0
-img[60:75, 60:75, :] = 2.0
+img[25:55, 40:55, 2:] = 1.0
+img[45:55, 45:75, :-2] = 2.0
 img[:,:,:num_rings//2] *= 1.5
 img[:,:,::2] *= 1.5
 
 fine_sino = proj_fine(img)
 mashed_sino = mash(fine_sino)
+
+# show the image used to simulated the sinograms
+_,_,_ = show_vol_cuts(img, fig_title="simulated image")
 
 # The sinograms are 3D arrays.  ``show_vol_cuts`` shows orthogonal cuts with a
 # slider per axis, so you can scroll through radial, view and plane.
