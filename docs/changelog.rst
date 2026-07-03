@@ -7,82 +7,11 @@ Changelog
 2.0.0 (TBD)
 ^^^^^^^^^^^
 
-Breaking Changes
-~~~~~~~~~~~~~~~~
-
-- **Python ≥ 3.12 required** (dropped support for 3.9, 3.10, 3.11)
-- **New required dependency:** ``parallelproj-core >= 2.0.5`` — the compiled C/CUDA
-  projection kernels have been extracted into a separate conda-forge package
-  (``parallelproj-core``). The old shared-library loading via ctypes is gone.
-- **Low-level projection functions moved to** ``parallelproj_core``: ``joseph3d_fwd``,
-  ``joseph3d_back``, and all TOF variants (e.g. ``joseph3d_fwd_tof_sino``) are no longer
-  in the ``parallelproj`` namespace. Import them from ``parallelproj_core`` instead. Note
-  that the TOF function names were also reordered
-  (e.g. ``joseph3d_fwd_tof_sino`` → ``joseph3d_tof_sino_fwd``).
-- **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``, and
-  ``to_numpy_array`` (plus the ``__version__``, ``__citation__`` and ``__bibtex__``
-  dunders) are exported from ``parallelproj`` directly. Everything else
-  must be imported from the relevant submodule:
-
-  .. code-block:: python
-
-     from parallelproj.pet_scanners import RegularPolygonPETScannerGeometry
-     from parallelproj.pet_lors import RegularPolygonPETLORDescriptor
-     from parallelproj.projectors import RegularPolygonPETProjector
-
-- **``count_event_multiplicity`` moved** to the new ``parallelproj.data`` submodule
-  and is **no longer exported at the top level**. Replace
-  ``parallelproj.count_event_multiplicity`` / ``from parallelproj import
-  count_event_multiplicity`` with ``from parallelproj.data import
-  count_event_multiplicity``.
-
-- **Runtime-detection variables removed** from the ``parallelproj`` namespace:
-  ``cuda_present``, ``cupy_enabled``, ``torch_enabled``, ``num_visible_cuda_devices``,
-  ``lib_parallelproj_c_fname``, ``lib_parallelproj_cuda_fname``, ``cuda_kernel_file``,
-  ``is_cuda_array``. Use ``parallelproj_core.cuda_enabled`` for CUDA detection.
-- **``RegularPolygonPETScannerGeometry`` signature changed**: ``ring_positions``
-  and ``symmetry_axis`` are now **required** (and no longer accept ``None``); all
-  remaining arguments after them (``num_lor_endpoints_per_side``, ``lor_spacing``,
-  ``phis``, ``ring_endpoint_ordering``, ``phi0``, ``lor_endpoint_positions``) are
-  **keyword-only**. Omitting a required argument now raises a clear ``TypeError``
-  instead of failing later. Calls that already pass these by keyword
-  (the documented style) are unaffected; calls that passed them positionally
-  must switch to keywords.
-- **``RegularPolygonPETLORDescriptor`` signature changed**: ``max_ring_difference``
-  parameter replaced by a ``michelogram`` parameter that accepts a ``Michelogram``
-  object. See new ``Michelogram`` class below. It now also raises a ``ValueError``
-  if ``radial_trim`` is so large that no radial bins remain (``num_rad < 1``).
-- **``TOFNonTOFElementwiseMultiplicationOperator`` removed**.
-- **``ParallelViewProjector3D`` signature changed**: the ``span`` and
-  ``max_ring_diff`` keyword arguments have been replaced by a single
-  ``michelogram`` parameter (a :class:`~parallelproj.pet_lors.Michelogram`
-  object).  This enables support for any odd span and makes the axial plane
-  layout explicit.  Replace::
-
-     ParallelViewProjector3D(..., span=1, max_ring_diff=d)
-
-  with::
-
-     from parallelproj.pet_lors import Michelogram
-     ParallelViewProjector3D(..., michelogram=Michelogram(num_rings, d, span=1))
-
-- **``TOFParameters`` defaults removed**: ``num_tofbins``, ``tofbin_width``,
-  and ``sigma_tof`` are now required arguments (no defaults).  ``num_sigmas``
-  defaults to ``3.0`` and ``tofcenter_offset`` defaults to ``0``.
-- **``MatrixOperator.iscomplex`` and ``ElementwiseMultiplicationOperator.iscomplex``
-  changed from method to property**: replace ``op.iscomplex()`` calls with
-  ``op.iscomplex``.
-- **``GradientFieldProjectionOperator`` numeric change**: the ``eta`` normalisation
-  formula was corrected (``sqrt(sum(g²) + η²)`` instead of ``sqrt(sum(g² + η²))``).
-  Results will differ from v1.x.
-- **License changed** from MIT to Apache-2.0.
-- ``scipy >= 1.15`` now required (was ``~=1.0``).
-- ``array-api-compat >= 1.7`` now required.
-- Import-time banner and ``PARALLELPROJ_SILENT_IMPORT`` environment variable removed;
-  ``import parallelproj`` is now silent.
-
 New Features
 ~~~~~~~~~~~~
+
+Major new capabilities
+""""""""""""""""""""""
 
 - **``parallelproj.functions`` submodule**: new module providing abstract base classes
   (``C1Function``, ``C2Function``, ``FunctionWithProx``, ``FunctionWithConjProx``) and
@@ -158,14 +87,6 @@ New Features
   ``CompositeLinearOperator``.  For ``mode="sum"`` the mashed forward projection equals
   a direct coarse-TOF projection (erf additivity over adjacent bins).  See the
   ``01_pet_geometry/08_run_tof_bin_mashing.py`` example.
-- **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
-  adjoint of any operator via ``A.H``.
-- **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
-  into chunks to reduce peak GPU memory usage.
-- **``RegularPolygonPETProjector.convert_sinogram_to_listmode``** gained a ``shuffle``
-  parameter to randomly permute the returned event list.
-- **``VstackOperator``** now raises ``ValueError`` on inconsistent ``in_shape`` across
-  stacked operators (previously silent).
 - **``parallelproj.sinogram_symmetries`` submodule**: new module for exploiting
   the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
   sensitivity calculations. Provides:
@@ -183,13 +104,8 @@ New Features
   access to sinogram data, enabling out-of-core OSEM on datasets larger than RAM.
   Provides ``SubsetArrayMmap`` (a lazily-loaded per-subset view of an on-disk array)
   and ``to_subset_mmap`` (write a sinogram to disk as subset-ordered memory maps).
-  ``count_event_multiplicity`` now also lives here (see the breaking change above —
+  ``count_event_multiplicity`` now also lives here (see the breaking change below —
   it is no longer exported at the top level).
-- **New sinogram / scanner ordering options**: ``SinogramZigZagOrder`` (a
-  ``zig_zag_order`` argument on ``RegularPolygonPETLORDescriptor``) and
-  ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``
-  and ``lor_endpoint_positions`` arguments on ``RegularPolygonPETScannerGeometry``)
-  make the crystal / LOR endpoint ordering explicit and configurable.
 - **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
   data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
   Provides:
@@ -200,15 +116,50 @@ New Features
     (nanoseconds) to projector-convention unsigned TOF bin indices ready for
     histogramming
 
+Smaller additions and improvements
+""""""""""""""""""""""""""""""""""
+
+- **New sinogram / scanner ordering options**: ``SinogramZigZagOrder`` (a
+  ``zig_zag_order`` argument on ``RegularPolygonPETLORDescriptor``) and
+  ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``
+  and ``lor_endpoint_positions`` arguments on ``RegularPolygonPETScannerGeometry``)
+  make the crystal / LOR endpoint ordering explicit and configurable.
 - **``ParallelViewProjector3D`` now supports any odd span**: the projector
   accepts a :class:`~parallelproj.pet_lors.Michelogram` and uses the
   averaged-LOR z-position per plane (exact for span=1, standard approximation
   for span>1), with no loop over ring-pair multiplicities.
+- **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
+  adjoint of any operator via ``A.H``.
+- **``LinearOperator.adjointness_test`` and ``LinearOperator.norm`` infer ``xp`` /
+  ``dev``**: when omitted, the array namespace and device are taken from the operator
+  (``self.xp`` / ``self.dev``) so both can be called without arguments; backend-agnostic
+  operators (e.g. ``FiniteForwardDifference``, ``CompositeLinearOperator``) still require
+  ``xp`` explicitly.
+- **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
+  into chunks to reduce peak GPU memory usage.
+- **``RegularPolygonPETProjector.convert_sinogram_to_listmode``** gained a ``shuffle``
+  parameter to randomly permute the returned event list.
+- **``VstackOperator``** now raises ``ValueError`` on inconsistent ``in_shape`` across
+  stacked operators (previously silent).
+- **``TOFParameters`` validates its arguments**: ``num_tofbins`` must be a positive
+  integer and ``tofbin_width`` / ``sigma_tof`` / ``num_sigmas`` strictly positive and
+  finite (and ``tofcenter_offset`` finite), raising a clear ``ValueError`` otherwise (a
+  common cause is passing timing quantities in seconds/ps instead of the expected
+  spatial mm).
+- **Clearer fail-fast errors**: ``SumC1Function`` / ``SumC2Function`` raise ``ValueError``
+  on an empty function sequence, and the ``start_plane_index`` / ``end_plane_index``
+  accessors raise ``ValueError`` (instead of ``AttributeError``) for descriptors with
+  more than one ring pair per plane (span>1 or GE), where a single ring pair per plane
+  is undefined.
 - **``parallelproj.__version__``** is now exposed at the top level.
 - **Citation metadata**: ``import parallelproj`` is silent, but the reference to cite
   is available on demand as ``parallelproj.__citation__`` (plain text) and
   ``parallelproj.__bibtex__`` (BibTeX); a ``CITATION.cff`` file is also provided
   (GitHub "Cite this repository").
+
+New examples and documentation
+""""""""""""""""""""""""""""""
+
 - **Example gallery substantially reorganised and expanded**, now grouped into PET
   scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
   transmission / joint estimation, and PyTorch integration. Highlights below.
@@ -227,6 +178,80 @@ New Features
   interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
   forward projection as the transmission blank scan), NAC warm-start, support-constrained
   attenuation update, and a known-water region to fix the TOF scale ambiguity.
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- **Python ≥ 3.12 required** (dropped support for 3.9, 3.10, 3.11)
+- **New required dependency:** ``parallelproj-core >= 2.0.5`` — the compiled C/CUDA
+  projection kernels have been extracted into a separate conda-forge package
+  (``parallelproj-core``). The old shared-library loading via ctypes is gone.
+- **Low-level projection functions moved to** ``parallelproj_core``: ``joseph3d_fwd``,
+  ``joseph3d_back``, and all TOF variants (e.g. ``joseph3d_fwd_tof_sino``) are no longer
+  in the ``parallelproj`` namespace. Import them from ``parallelproj_core`` instead. Note
+  that the TOF function names were also reordered
+  (e.g. ``joseph3d_fwd_tof_sino`` → ``joseph3d_tof_sino_fwd``).
+- **Top-level namespace reduced**: only ``Array``, ``empty_cuda_cache``, and
+  ``to_numpy_array`` (plus the ``__version__``, ``__citation__`` and ``__bibtex__``
+  dunders) are exported from ``parallelproj`` directly. Everything else
+  must be imported from the relevant submodule:
+
+  .. code-block:: python
+
+     from parallelproj.pet_scanners import RegularPolygonPETScannerGeometry
+     from parallelproj.pet_lors import RegularPolygonPETLORDescriptor
+     from parallelproj.projectors import RegularPolygonPETProjector
+
+- **``count_event_multiplicity`` moved** to the new ``parallelproj.data`` submodule
+  and is **no longer exported at the top level**. Replace
+  ``parallelproj.count_event_multiplicity`` / ``from parallelproj import
+  count_event_multiplicity`` with ``from parallelproj.data import
+  count_event_multiplicity``.
+
+- **Runtime-detection variables removed** from the ``parallelproj`` namespace:
+  ``cuda_present``, ``cupy_enabled``, ``torch_enabled``, ``num_visible_cuda_devices``,
+  ``lib_parallelproj_c_fname``, ``lib_parallelproj_cuda_fname``, ``cuda_kernel_file``,
+  ``is_cuda_array``. Use ``parallelproj_core.cuda_enabled`` for CUDA detection.
+- **``RegularPolygonPETScannerGeometry`` signature changed**: ``ring_positions``
+  and ``symmetry_axis`` are now **required** (and no longer accept ``None``); all
+  remaining arguments after them (``num_lor_endpoints_per_side``, ``lor_spacing``,
+  ``phis``, ``ring_endpoint_ordering``, ``phi0``, ``lor_endpoint_positions``) are
+  **keyword-only**. Omitting a required argument now raises a clear ``TypeError``
+  instead of failing later. Calls that already pass these by keyword
+  (the documented style) are unaffected; calls that passed them positionally
+  must switch to keywords.
+- **``RegularPolygonPETLORDescriptor`` signature changed**: ``max_ring_difference``
+  parameter replaced by a ``michelogram`` parameter that accepts a ``Michelogram``
+  object. See new ``Michelogram`` class below. It now also raises a ``ValueError``
+  if ``radial_trim`` is so large that no radial bins remain (``num_rad < 1``).
+- **``TOFNonTOFElementwiseMultiplicationOperator`` removed**.
+- **``ParallelViewProjector3D`` signature changed**: the ``span`` and
+  ``max_ring_diff`` keyword arguments have been replaced by a single
+  ``michelogram`` parameter (a :class:`~parallelproj.pet_lors.Michelogram`
+  object).  This enables support for any odd span and makes the axial plane
+  layout explicit.  Replace::
+
+     ParallelViewProjector3D(..., span=1, max_ring_diff=d)
+
+  with::
+
+     from parallelproj.pet_lors import Michelogram
+     ParallelViewProjector3D(..., michelogram=Michelogram(num_rings, d, span=1))
+
+- **``TOFParameters`` defaults removed**: ``num_tofbins``, ``tofbin_width``,
+  and ``sigma_tof`` are now required arguments (no defaults).  ``num_sigmas``
+  defaults to ``3.0`` and ``tofcenter_offset`` defaults to ``0``.
+- **``MatrixOperator.iscomplex`` and ``ElementwiseMultiplicationOperator.iscomplex``
+  changed from method to property**: replace ``op.iscomplex()`` calls with
+  ``op.iscomplex``.
+- **``GradientFieldProjectionOperator`` numeric change**: the ``eta`` normalisation
+  formula was corrected (``sqrt(sum(g²) + η²)`` instead of ``sqrt(sum(g² + η²))``).
+  Results will differ from v1.x.
+- **License changed** from MIT to Apache-2.0.
+- ``scipy >= 1.15`` now required (was ``~=1.0``).
+- ``array-api-compat >= 1.7`` now required.
+- Import-time banner and ``PARALLELPROJ_SILENT_IMPORT`` environment variable removed;
+  ``import parallelproj`` is now silent.
 
 1.x
 ---

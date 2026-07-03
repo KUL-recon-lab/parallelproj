@@ -471,7 +471,7 @@ print(
 
 # %%
 # Upsample the coarse span-1 sinogram back to the fine span-1 grid
-# ---------------------------------------------------------------
+# ----------------------------------------------------------------
 #
 # As before, the span-1 mashing operator's ``adjoint`` upsamples the coarse
 # sinogram.  Since it was pooled by ``sum``, the count-preserving upsampling is
