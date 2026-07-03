@@ -7,6 +7,196 @@ Changelog
 2.0.0 (TBD)
 ^^^^^^^^^^^
 
+New Features
+~~~~~~~~~~~~
+
+Major new capabilities
+""""""""""""""""""""""
+
+- **``parallelproj.functions`` submodule**: new module providing abstract base classes
+  (``C1Function``, ``C2Function``, ``FunctionWithProx``, ``FunctionWithConjProx``) and
+  concrete loss/regularisation implementations for optimisation:
+
+  - ``NegPoissonLogL`` — Poisson log-likelihood with two evaluation modes.  The
+    default ("safe epsilon") mode evaluates a shifted-Poisson surrogate with
+    ``eps = rel_eps * mean(y)`` added to data and expectation: finite for any
+    non-negative expectation, per-bin minimiser unchanged, gradient bias
+    proportional to the residual; the dual prox is shifted consistently.
+    ``exact=True`` evaluates the unmodified log-likelihood (bins with ``y == 0``,
+    e.g. virtual bins, are handled exactly) and requires a positive expectation in
+    all bins with counts.  An optional absolute ``eps`` allows sharing one epsilon
+    across subset objectives, and ``enable_extra_checks=True`` warns on inputs
+    producing ``nan`` / ``inf``
+  - ``NegPoissonLogLListmode`` — listmode Poisson log-likelihood with built-in forward
+    model; optional ``eps`` kwarg (default ``0.0``) smooths the per-event log /
+    division terms (expectation-only shift — the symmetric shifted-Poisson surrogate
+    of ``NegPoissonLogL`` would require full-sinogram projections and is not
+    listmode-compatible)
+  - ``LogCosh`` — edge-preserving log-cosh prior (smooth, with bounded curvature);
+    used by the penalised reconstruction examples (MAPTR, MLAA)
+  - ``HalfSquaredL2Deviation`` — weighted least-squares deviation
+  - ``SumC1Function`` / ``SumC2Function`` — also created via ``f1 + f2`` operator
+    overloading
+  - ``C1AffineObjective`` / ``C2AffineObjective`` — compose a loss with an affine
+    forward model
+  - ``NonNegativeIndicator`` — non-negativity constraint with proximal operator
+  - ``MixedL21Norm`` — mixed L2,1 norm for group sparsity / TV-type regularisation
+
+- **``Michelogram`` class** (``parallelproj.pet_lors``): encapsulates the full axial
+  plane layout for cylindrical PET scanners under odd-span compression, including
+  ring-pair-to-plane tables and visualisation methods.
+- **GE-style axial sinogram plane layout** for ``Michelogram``: new
+  ``MichelogramLayout`` enum and ``layout=`` argument, plus a
+  ``Michelogram.ge(num_rings, max_ring_difference)`` convenience constructor.
+  The GE-style layout uses segment 0 = ring differences {−1, 0, +1} (cross
+  planes merged into virtual direct planes) and oblique segments = ring-
+  difference pairs {±2k, ±(2k+1)}, ordered 0, +1, −1, +2, −2, … (the segment /
+  ring-difference plane ordering used by GE-style sinograms; also known as
+  "span 2" in STIR).  ``span`` is ignored for this layout and
+  :attr:`Michelogram.span` returns ``None``.  Combine it with a matching
+  ``RegularPolygonPETLORDescriptor`` for the GE scanner of interest.
+- **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
+  that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
+  ``mode="average"``).  A ``target_layout=MichelogramLayout.GE`` option compresses a
+  span-1 sinogram to the **GE layout**; its ``mode="average"`` adjoint distributes a
+  GE sinogram back onto the span-1 grid while preserving counts (e.g. to convert GE
+  data to span-1 before detector mashing).
+- **``SinogramMashingOperator``** (``parallelproj.pet_lors``): detector mashing for a
+  span-1 regular-polygon sinogram.  Groups ``transaxial_factor`` within-side crystals
+  and ``axial_factor`` rings into larger virtual detectors at the averaged endpoint
+  position, mapping the fine sinogram to a much smaller mashed one (``mode="sum"`` for
+  counts, ``mode="average"`` for multiplicative factors) with a genuine transpose and
+  closed-form norm.  The mashed geometry is exposed as ``coarse_scanner`` /
+  ``coarse_lor_descriptor`` (a regular-polygon descriptor), so a standard
+  ``RegularPolygonPETProjector`` projects directly along the mashed LORs.  By default
+  the coarse radial trim is derived automatically from the fine->coarse mapping so
+  that no fine LOR is lost to trimming and no empty peripheral coarse radial bins
+  remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
+  ``coarse_radial_trim`` to override.  The operator is span-1 only; **GE-layout**
+  sinograms are mashed by composition -- convert GE -> span-1 with the
+  ``mode="average"`` adjoint of a span-1 <-> GE ``SinogramAxialCompressionOperator``,
+  then mash, giving a pure span-1 coarse sinogram (see the
+  ``01_pet_geometry/07_run_detector_mashing.py`` example).
+- **``TOFBinMashingOperator``** (``parallelproj.pet_lors``): mashes (groups) every
+  ``mashing_factor`` neighbouring TOF bins along the trailing TOF axis into fewer,
+  wider bins (``mode="sum"`` for counts, ``mode="average"`` for multiplicative
+  factors), with a genuine transpose and closed-form norm (``sqrt(G)`` / ``1/sqrt(G)``).
+  Geometry-agnostic (takes ``tof_parameters`` and the leading ``non_tof_data_shape``),
+  it exposes the matching ``coarse_tof_parameters`` so a projector can target the
+  mashed TOF grid, and composes with ``SinogramMashingOperator`` via
+  ``CompositeLinearOperator``.  For ``mode="sum"`` the mashed forward projection equals
+  a direct coarse-TOF projection (erf additivity over adjacent bins).  See the
+  ``01_pet_geometry/08_run_tof_bin_mashing.py`` example.
+- **``parallelproj.sinogram_symmetries`` submodule**: new module for exploiting
+  the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
+  sensitivity calculations. Provides:
+
+  - ``compute_sinogram_plane_symmetries`` ^^ partition all axial ring pairs into
+    equivalence classes under axial block-shift, midplane reflection, and endpoint-swap
+    symmetries (with optional edge-ring correction)
+  - ``build_plane_class_indices``, ``build_view_class_indices``,
+    ``build_radial_class_indices`` ^^ per-class index arrays for the three sinogram axes
+  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` ^^
+    array-API-compatible reduce/expand operations for the typical
+    reduce -> compute -> expand sensitivity workflow
+
+- **``parallelproj.data`` submodule**: new module for memory-mapped, ordered-subset
+  access to sinogram data, enabling out-of-core OSEM on datasets larger than RAM.
+  Provides ``SubsetArrayMmap`` (a lazily-loaded per-subset view of an on-disk array)
+  and ``to_subset_mmap`` (write a sinogram to disk as subset-ordered memory maps).
+  ``count_event_multiplicity`` now also lives here (see the breaking change below —
+  it is no longer exported at the top level).
+- **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
+  data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
+  Provides:
+
+  - ``regular_polygon_events_to_sinogram`` ^^ histogram per-event crystal and ring
+    indices into a non-TOF or TOF sinogram array; supports numpy, cupy, and torch
+  - ``detection_times_to_tof_bin`` ^^ convert raw detection-time differences
+    (nanoseconds) to projector-convention unsigned TOF bin indices ready for
+    histogramming
+
+Smaller additions and improvements
+""""""""""""""""""""""""""""""""""
+
+- **New sinogram / scanner ordering options**: ``SinogramZigZagOrder`` (a
+  ``zig_zag_order`` argument on ``RegularPolygonPETLORDescriptor``) and
+  ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``
+  and ``lor_endpoint_positions`` arguments on ``RegularPolygonPETScannerGeometry``)
+  make the crystal / LOR endpoint ordering explicit and configurable.
+- **``ParallelViewProjector3D`` now supports any odd span**: the projector
+  accepts a :class:`~parallelproj.pet_lors.Michelogram` and uses the
+  averaged-LOR z-position per plane (exact for span=1, standard approximation
+  for span>1), with no loop over ring-pair multiplicities.
+- **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
+  adjoint of any operator via ``A.H``.
+- **``LinearOperator.adjointness_test`` and ``LinearOperator.norm`` infer ``xp`` /
+  ``dev``**: when omitted, the array namespace and device are taken from the operator
+  (``self.xp`` / ``self.dev``) so both can be called without arguments; backend-agnostic
+  operators (e.g. ``FiniteForwardDifference``, ``CompositeLinearOperator``) still require
+  ``xp`` explicitly.
+- **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
+  into chunks to reduce peak GPU memory usage.
+- **``RegularPolygonPETProjector.convert_sinogram_to_listmode``** gained a ``shuffle``
+  parameter to randomly permute the returned event list.
+- **``VstackOperator``** now raises ``ValueError`` on inconsistent ``in_shape`` across
+  stacked operators (previously silent).
+- **``TOFParameters`` validates its arguments**: ``num_tofbins`` must be a positive
+  integer and ``tofbin_width`` / ``sigma_tof`` / ``num_sigmas`` strictly positive and
+  finite (and ``tofcenter_offset`` finite), raising a clear ``ValueError`` otherwise (a
+  common cause is passing timing quantities in seconds/ps instead of the expected
+  spatial mm).
+- **Clearer fail-fast errors**: ``SumC1Function`` / ``SumC2Function`` raise ``ValueError``
+  on an empty function sequence, and the ``start_plane_index`` / ``end_plane_index``
+  accessors raise ``ValueError`` (instead of ``AttributeError``) for descriptors with
+  more than one ring pair per plane (span>1 or GE), where a single ring pair per plane
+  is undefined.
+- **``parallelproj.__version__``** is now exposed at the top level.
+- **Citation metadata**: ``import parallelproj`` is silent, but the reference to cite
+  is available on demand as ``parallelproj.__citation__`` (plain text) and
+  ``parallelproj.__bibtex__`` (BibTeX); a ``CITATION.cff`` file is also provided
+  (GitHub "Cite this repository").
+
+New examples and documentation
+""""""""""""""""""""""""""""""
+
+- **Example gallery substantially reorganised and expanded**, now grouped into PET
+  scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
+  transmission / joint estimation, and PyTorch integration. Highlights below.
+- **New example: Michelograms and axial sinogram compression** — how the
+  ``Michelogram`` maps ring pairs to sinogram planes/segments, and using
+  ``SinogramAxialCompressionOperator`` to compress a span-1 sinogram to a higher odd
+  span (and to/from the GE layout).
+- **New example: zig-zag LOR sampling in a sinogram view** — visualises the
+  ``SinogramZigZagOrder`` crystal/LOR endpoint pairing within a view.
+- **New example: sinogram symmetries** — partitioning ring pairs into symmetry
+  classes and the reduce -> compute -> expand workflow for geometric sensitivity
+  (``parallelproj.sinogram_symmetries``).
+- **New example: detector mashing** — ``SinogramMashingOperator`` groups within-side
+  crystals and rings into larger virtual detectors (exact vs fast coarse projector,
+  multiplicity, count-preserving up/downsampling), including mashing GE sinograms by
+  composition.
+- **New example: TOF-bin mashing** — ``TOFBinMashingOperator`` groups neighbouring TOF
+  bins, the matching ``coarse_tof_parameters``, and composition with detector mashing.
+- **New example: histogramming listmode data into sinograms** — using
+  ``parallelproj.unlist`` to bin per-event crystal/ring (and TOF) indices into a
+  sinogram.
+- **New example: transmission reconstruction (MLTR / SPS / L-BFGS-B)** — exact Poisson
+  transmission model with strictly positive scatter background, presenting MLTR
+  (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one
+  preconditioned gradient ascent differing only in the diagonal preconditioner, and
+  L-BFGS-B on the same smooth objective with a non-negativity box constraint.
+- **New example: accelerating MLTR with ordered subsets and SVRG** — OS-MLTR and a
+  preconditioned SVRG variant compared against full MLTR and a converged L-BFGS-B
+  reference, showing the per-epoch speed-up of subset-based transmission reconstruction.
+- **New example: penalised transmission reconstruction (MAPTR)** — MLTR / OS-MLTR / SVRG
+  on the penalised objective with an edge-preserving log-cosh prior, using the
+  transmission "harmonic-mean" preconditioner (inverse of data plus prior curvature).
+- **New example: joint activity/attenuation reconstruction (MLAA) for TOF PET** —
+  interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
+  forward projection as the transmission blank scan), NAC warm-start, support-constrained
+  attenuation update, and a known-water region to fix the TOF scale ambiguity.
+
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
@@ -80,147 +270,6 @@ Breaking Changes
 - ``array-api-compat >= 1.7`` now required.
 - Import-time banner and ``PARALLELPROJ_SILENT_IMPORT`` environment variable removed;
   ``import parallelproj`` is now silent.
-
-New Features
-~~~~~~~~~~~~
-
-- **``parallelproj.functions`` submodule**: new module providing abstract base classes
-  (``C1Function``, ``C2Function``, ``FunctionWithProx``, ``FunctionWithConjProx``) and
-  concrete loss/regularisation implementations for optimisation:
-
-  - ``NegPoissonLogL`` — Poisson log-likelihood with two evaluation modes.  The
-    default ("safe epsilon") mode evaluates a shifted-Poisson surrogate with
-    ``eps = rel_eps * mean(y)`` added to data and expectation: finite for any
-    non-negative expectation, per-bin minimiser unchanged, gradient bias
-    proportional to the residual; the dual prox is shifted consistently.
-    ``exact=True`` evaluates the unmodified log-likelihood (bins with ``y == 0``,
-    e.g. virtual bins, are handled exactly) and requires a positive expectation in
-    all bins with counts.  An optional absolute ``eps`` allows sharing one epsilon
-    across subset objectives, and ``enable_extra_checks=True`` warns on inputs
-    producing ``nan`` / ``inf``
-  - ``NegPoissonLogLListmode`` — listmode Poisson log-likelihood with built-in forward
-    model; optional ``eps`` kwarg (default ``0.0``) smooths the per-event log /
-    division terms (expectation-only shift — the symmetric shifted-Poisson surrogate
-    of ``NegPoissonLogL`` would require full-sinogram projections and is not
-    listmode-compatible)
-  - ``LogCosh`` — edge-preserving log-cosh prior (smooth, with bounded curvature);
-    used by the penalised reconstruction examples (MAPTR, MLAA)
-  - ``HalfSquaredL2Deviation`` — weighted least-squares deviation
-  - ``SumC1Function`` / ``SumC2Function`` — also created via ``f1 + f2`` operator
-    overloading
-  - ``C1AffineObjective`` / ``C2AffineObjective`` — compose a loss with an affine
-    forward model
-  - ``NonNegativeIndicator`` — non-negativity constraint with proximal operator
-  - ``MixedL21Norm`` — mixed L2,1 norm for group sparsity / TV-type regularisation
-
-- **``Michelogram`` class** (``parallelproj.pet_lors``): encapsulates the full axial
-  plane layout for cylindrical PET scanners under odd-span compression, including
-  ring-pair-to-plane tables and visualisation methods.
-- **GE-style axial sinogram plane layout** for ``Michelogram``: new
-  ``MichelogramLayout`` enum and ``layout=`` argument, plus a
-  ``Michelogram.ge(num_rings, max_ring_difference)`` convenience constructor.
-  The GE-style layout uses segment 0 = ring differences {−1, 0, +1} (cross
-  planes merged into virtual direct planes) and oblique segments = ring-
-  difference pairs {±2k, ±(2k+1)}, ordered 0, +1, −1, +2, −2, … (the segment /
-  ring-difference plane ordering used by GE-style sinograms; also known as
-  "span 2" in STIR).  ``span`` is ignored for this layout and
-  :attr:`Michelogram.span` returns ``None``.  Combine it with a matching
-  ``RegularPolygonPETLORDescriptor`` for the GE scanner of interest.
-- **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
-  that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
-  ``mode="average"``).
-- **``SinogramMashingOperator``** (``parallelproj.pet_lors``): detector mashing for a
-  span-1 regular-polygon sinogram.  Groups ``transaxial_factor`` within-side crystals
-  and ``axial_factor`` rings into larger virtual detectors at the averaged endpoint
-  position, mapping the fine sinogram to a much smaller mashed one (``mode="sum"`` for
-  counts, ``mode="average"`` for multiplicative factors) with a genuine transpose and
-  closed-form norm.  The mashed geometry is exposed as ``coarse_scanner`` /
-  ``coarse_lor_descriptor`` (a regular-polygon descriptor), so a standard
-  ``RegularPolygonPETProjector`` projects directly along the mashed LORs.  By default
-  the coarse radial trim is derived automatically from the fine->coarse mapping so
-  that no fine LOR is lost to trimming and no empty peripheral coarse radial bins
-  remain (only the geometrically unavoidable degenerate self-pairs are dropped); pass
-  ``coarse_radial_trim`` to override.  See the
-  ``01_pet_geometry/07_run_detector_mashing.py`` example.
-- **``TOFBinMashingOperator``** (``parallelproj.pet_lors``): mashes (groups) every
-  ``mashing_factor`` neighbouring TOF bins along the trailing TOF axis into fewer,
-  wider bins (``mode="sum"`` for counts, ``mode="average"`` for multiplicative
-  factors), with a genuine transpose and closed-form norm (``sqrt(G)`` / ``1/sqrt(G)``).
-  Geometry-agnostic (takes ``tof_parameters`` and the leading ``non_tof_data_shape``),
-  it exposes the matching ``coarse_tof_parameters`` so a projector can target the
-  mashed TOF grid, and composes with ``SinogramMashingOperator`` via
-  ``CompositeLinearOperator``.  For ``mode="sum"`` the mashed forward projection equals
-  a direct coarse-TOF projection (erf additivity over adjacent bins).  See the
-  ``01_pet_geometry/08_run_tof_bin_mashing.py`` example.
-- **``LinearOperator.H`` property** and **``AdjointLinearOperator``** class: obtain the
-  adjoint of any operator via ``A.H``.
-- **``EqualBlockPETProjector`` ``num_chunks`` parameter**: split block-pair projections
-  into chunks to reduce peak GPU memory usage.
-- **``RegularPolygonPETProjector.convert_sinogram_to_listmode``** gained a ``shuffle``
-  parameter to randomly permute the returned event list.
-- **``VstackOperator``** now raises ``ValueError`` on inconsistent ``in_shape`` across
-  stacked operators (previously silent).
-- **``parallelproj.sinogram_symmetries`` submodule**: new module for exploiting
-  the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
-  sensitivity calculations. Provides:
-
-  - ``compute_sinogram_plane_symmetries`` ^^ partition all axial ring pairs into
-    equivalence classes under axial block-shift, midplane reflection, and endpoint-swap
-    symmetries (with optional edge-ring correction)
-  - ``build_plane_class_indices``, ``build_view_class_indices``,
-    ``build_radial_class_indices`` ^^ per-class index arrays for the three sinogram axes
-  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` ^^
-    array-API-compatible reduce/expand operations for the typical
-    reduce -> compute -> expand sensitivity workflow
-
-- **``parallelproj.data`` submodule**: new module for memory-mapped, ordered-subset
-  access to sinogram data, enabling out-of-core OSEM on datasets larger than RAM.
-  Provides ``SubsetArrayMmap`` (a lazily-loaded per-subset view of an on-disk array)
-  and ``to_subset_mmap`` (write a sinogram to disk as subset-ordered memory maps).
-  ``count_event_multiplicity`` now also lives here (see the breaking change above —
-  it is no longer exported at the top level).
-- **New sinogram / scanner ordering options**: ``SinogramZigZagOrder`` (a
-  ``zig_zag_order`` argument on ``RegularPolygonPETLORDescriptor``) and
-  ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``
-  and ``lor_endpoint_positions`` arguments on ``RegularPolygonPETScannerGeometry``)
-  make the crystal / LOR endpoint ordering explicit and configurable.
-- **``parallelproj.unlist`` submodule**: new module for histogramming listmode PET
-  data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
-  Provides:
-
-  - ``regular_polygon_events_to_sinogram`` ^^ histogram per-event crystal and ring
-    indices into a non-TOF or TOF sinogram array; supports numpy, cupy, and torch
-  - ``detection_times_to_tof_bin`` ^^ convert raw detection-time differences
-    (nanoseconds) to projector-convention unsigned TOF bin indices ready for
-    histogramming
-
-- **``ParallelViewProjector3D`` now supports any odd span**: the projector
-  accepts a :class:`~parallelproj.pet_lors.Michelogram` and uses the
-  averaged-LOR z-position per plane (exact for span=1, standard approximation
-  for span>1), with no loop over ring-pair multiplicities.
-- **``parallelproj.__version__``** is now exposed at the top level.
-- **Citation metadata**: ``import parallelproj`` is silent, but the reference to cite
-  is available on demand as ``parallelproj.__citation__`` (plain text) and
-  ``parallelproj.__bibtex__`` (BibTeX); a ``CITATION.cff`` file is also provided
-  (GitHub "Cite this repository").
-- **Example gallery substantially reorganised and expanded**, now grouped into PET
-  scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
-  transmission / joint estimation, and PyTorch integration. Highlights below.
-- **New example: transmission reconstruction (MLTR / SPS / L-BFGS-B)** — exact Poisson
-  transmission model with strictly positive scatter background, presenting MLTR
-  (Nuyts et al.) and monotone SPS with optimal curvature (Erdoğan & Fessler) as one
-  preconditioned gradient ascent differing only in the diagonal preconditioner, and
-  L-BFGS-B on the same smooth objective with a non-negativity box constraint.
-- **New example: accelerating MLTR with ordered subsets and SVRG** — OS-MLTR and a
-  preconditioned SVRG variant compared against full MLTR and a converged L-BFGS-B
-  reference, showing the per-epoch speed-up of subset-based transmission reconstruction.
-- **New example: penalised transmission reconstruction (MAPTR)** — MLTR / OS-MLTR / SVRG
-  on the penalised objective with an edge-preserving log-cosh prior, using the
-  transmission "harmonic-mean" preconditioner (inverse of data plus prior curvature).
-- **New example: joint activity/attenuation reconstruction (MLAA) for TOF PET** —
-  interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
-  forward projection as the transmission blank scan), NAC warm-start, support-constrained
-  attenuation update, and a known-water region to fix the TOF scale ambiguity.
 
 1.x
 ---
