@@ -283,105 +283,45 @@ def test_minimal_reg_polygon_projector(xp, dev) -> None:
             assert proj.xstart is not None
             assert proj.xend is not None
 
-            # check "corner to corner" projection which should be vox size *
-            # vox value * sqrt(3)
-            assert np.isclose(
-                float(
-                    x_fwd[_get_slice(2, 0, lor_desc.num_planes - 1, lor_desc)][0, 0, 0]
-                ),
-                vox_value * vox_size * np.sqrt(3),
-            )
-            assert np.isclose(
-                float(
-                    x_fwd[_get_slice(2, 2, lor_desc.num_planes - 1, lor_desc)][0, 0, 0]
-                ),
-                vox_value * vox_size * np.sqrt(3),
-            )
-            assert np.isclose(
-                float(
-                    x_fwd[_get_slice(2, 0, lor_desc.num_planes - 2, lor_desc)][0, 0, 0]
-                ),
-                vox_value * vox_size * np.sqrt(3),
-            )
-            assert np.isclose(
-                float(
-                    x_fwd[_get_slice(2, 2, lor_desc.num_planes - 2, lor_desc)][0, 0, 0]
-                ),
-                vox_value * vox_size * np.sqrt(3),
-            )
+            # With the (0, N/2)-anchored view convention a source at the image
+            # centre projects onto the *central* radial bin; the chord length is
+            # selected by the view (0/2 axis-aligned, 1/3 at 45 deg) and the
+            # plane (ring difference).
+            cen = lor_desc.num_rad // 2
+            last, last2 = lor_desc.num_planes - 1, lor_desc.num_planes - 2
 
-            # check "central" (straight through) projection which should be vox
-            # size * vox value
-            assert np.isclose(
-                float(x_fwd[_get_slice(2, 1, 1, lor_desc)][0, 0, 0]),
-                vox_value * vox_size,
-            )
-            assert np.isclose(
-                float(x_fwd[_get_slice(2, 3, 1, lor_desc)][0, 0, 0]),
-                vox_value * vox_size,
-            )
+            def _val(fwd, v, p):
+                # _get_slice signature is (radial, view, plane, descriptor)
+                return float(fwd[_get_slice(cen, v, p, lor_desc)][0, 0, 0])
 
-            # check "corner to corner" projection which should be vox size *
-            # vox value * sqrt(2)
-            assert np.isclose(
-                float(x_fwd[_get_slice(2, 0, 1, lor_desc)][0, 0, 0]),
-                vox_value * vox_size * np.sqrt(2),
-            )
-            assert np.isclose(
-                float(x_fwd[_get_slice(2, 2, 1, lor_desc)][0, 0, 0]),
-                vox_value * vox_size * np.sqrt(2),
-            )
+            # corner-to-corner (45 deg in-plane + max oblique) -> size*sqrt(3)
+            for _v in (1, 3):
+                for _p in (last, last2):
+                    assert np.isclose(_val(x_fwd, _v, _p), vox_value * vox_size * np.sqrt(3))
+            # straight through (axis-aligned, central plane) -> size
+            for _v in (0, 2):
+                assert np.isclose(_val(x_fwd, _v, 1), vox_value * vox_size)
+            # in-plane 45 deg diagonal (central plane) -> size*sqrt(2)
+            for _v in (1, 3):
+                assert np.isclose(_val(x_fwd, _v, 1), vox_value * vox_size * np.sqrt(2))
 
             x_fwd2 = proj(x2)
 
-            # check "corner to corner" projection which should be vox size *
-            # vox value * sqrt(3)
-            assert np.isclose(
-                float(
-                    x_fwd2[_get_slice(2, 0, lor_desc.num_planes - 1, lor_desc)][0, 0, 0]
-                ),
-                img_size * vox_value * vox_size * np.sqrt(3),
-            )
-            assert np.isclose(
-                float(
-                    x_fwd2[_get_slice(2, 2, lor_desc.num_planes - 1, lor_desc)][0, 0, 0]
-                ),
-                img_size * vox_value * vox_size * np.sqrt(3),
-            )
-            assert np.isclose(
-                float(
-                    x_fwd2[_get_slice(2, 0, lor_desc.num_planes - 2, lor_desc)][0, 0, 0]
-                ),
-                img_size * vox_value * vox_size * np.sqrt(3),
-            )
-            assert np.isclose(
-                float(
-                    x_fwd2[_get_slice(2, 2, lor_desc.num_planes - 2, lor_desc)][0, 0, 0]
-                ),
-                img_size * vox_value * vox_size * np.sqrt(3),
-            )
-
-            # check "central" (straight through) projection which should be vox
-            # size * vox value
-            assert np.isclose(
-                float(x_fwd2[_get_slice(2, 1, 1, lor_desc)][0, 0, 0]),
-                img_size * vox_value * vox_size,
-            )
-            assert np.isclose(
-                float(x_fwd2[_get_slice(2, 3, 1, lor_desc)][0, 0, 0]),
-                img_size * vox_value * vox_size,
-            )
-
-            # check "corner to corner" projection which should be vox size *
-            # vox value * sqrt(2)
-            assert np.isclose(
-                float(x_fwd2[_get_slice(2, 0, 1, lor_desc)][0, 0, 0]),
-                img_size * vox_value * vox_size * np.sqrt(2),
-            )
-            assert np.isclose(
-                float(x_fwd2[_get_slice(2, 2, 1, lor_desc)][0, 0, 0]),
-                img_size * vox_value * vox_size * np.sqrt(2),
-            )
+            # uniform image: same LORs, now summed over the img_size voxels on
+            # the ray.  corner-to-corner -> img_size*size*sqrt(3)
+            for _v in (1, 3):
+                for _p in (last, last2):
+                    assert np.isclose(
+                        _val(x_fwd2, _v, _p), img_size * vox_value * vox_size * np.sqrt(3)
+                    )
+            # straight through (central plane) -> img_size*size
+            for _v in (0, 2):
+                assert np.isclose(_val(x_fwd2, _v, 1), img_size * vox_value * vox_size)
+            # in-plane 45 deg diagonal (central plane) -> img_size*size*sqrt(2)
+            for _v in (1, 3):
+                assert np.isclose(
+                    _val(x_fwd2, _v, 1), img_size * vox_value * vox_size * np.sqrt(2)
+                )
 
             # setup the same projector without caching of the LOR endpoints
             projb = ppp.RegularPolygonPETProjector(
