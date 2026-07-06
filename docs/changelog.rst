@@ -242,6 +242,19 @@ Breaking Changes
   parameter replaced by a ``michelogram`` parameter that accepts a ``Michelogram``
   object. See new ``Michelogram`` class below. It now also raises a ``ValueError``
   if ``radial_trim`` is so large that no radial bins remain (``num_rad < 1``).
+- **Sinogram transaxial convention changed (breaking)**: view 0's *central* radial
+  bin now connects detector 0 and detector ``N/2`` (diametrically opposing),
+  matching STIR and the PET vendors.  Previously view 0 was anchored a
+  quarter-ring away, so **the bin <-> detector-pair mapping of existing
+  regular-polygon sinograms differs** from v1.x / earlier v2.0 pre-releases.  Two
+  new descriptor kwargs make the convention fully configurable:
+  ``view_direction`` (:class:`~parallelproj.pet_lors.ViewDirection`) and
+  ``radial_direction`` (:class:`~parallelproj.pet_lors.RadialDirection`), which
+  flip the view / radial index directions.  Together with the scanner's
+  ``ring_endpoint_ordering`` (crystal numbering), ``phi0`` (module-0 azimuth,
+  default +y for ``symmetry_axis=2``) and ``zig_zag_order`` they reproduce any
+  vendor's ``(view, radial) <-> detector-pair`` convention.  See the
+  ``01_pet_geometry/02_run_regular_polygon_pet_sino.py`` example.
 - **``TOFNonTOFElementwiseMultiplicationOperator`` removed**.
 - **``ParallelViewProjector3D`` signature changed**: the ``span`` and
   ``max_ring_diff`` keyword arguments have been replaced by a single
