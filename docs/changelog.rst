@@ -91,12 +91,12 @@ Major new capabilities
   the cylindrical symmetry of regular-polygon PET scanners to speed up geometric
   sensitivity calculations. Provides:
 
-  - ``compute_sinogram_plane_symmetries`` ^^ partition all axial ring pairs into
+  - ``compute_sinogram_plane_symmetries`` — partition all axial ring pairs into
     equivalence classes under axial block-shift, midplane reflection, and endpoint-swap
     symmetries (with optional edge-ring correction)
   - ``build_plane_class_indices``, ``build_view_class_indices``,
-    ``build_radial_class_indices`` ^^ per-class index arrays for the three sinogram axes
-  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` ^^
+    ``build_radial_class_indices`` — per-class index arrays for the three sinogram axes
+  - ``reduce_sinogram_by_symmetry_class`` / ``expand_sinogram_by_symmetry_class`` —
     array-API-compatible reduce/expand operations for the typical
     reduce -> compute -> expand sensitivity workflow
 
@@ -110,9 +110,9 @@ Major new capabilities
   data into sinograms for ``RegularPolygonPETScannerGeometry``-based scanners.
   Provides:
 
-  - ``regular_polygon_events_to_sinogram`` ^^ histogram per-event crystal and ring
+  - ``regular_polygon_events_to_sinogram`` — histogram per-event crystal and ring
     indices into a non-TOF or TOF sinogram array; supports numpy, cupy, and torch
-  - ``detection_times_to_tof_bin`` ^^ convert raw detection-time differences
+  - ``detection_times_to_tof_bin`` — convert raw detection-time differences
     (nanoseconds) to projector-convention unsigned TOF bin indices ready for
     histogramming
 
