@@ -238,6 +238,31 @@ fig_k.suptitle("view 0 = black, view 1 = red  (each with matching radial-bin lab
 fig_k.show()
 
 # %%
+# Typical vendor settings
+# -----------------------
+#
+# The default is vendor-agnostic and matches the STIR interchange convention:
+# view 0's central bin connects detectors ``(0, N/2)`` and module 0 sits on +y.
+# To line a descriptor up with a specific vendor's sinograms you set a few knobs
+# -- there is **no single "vendor" setting**, because GE and Siemens use
+# opposite handedness:
+#
+# * ``phi0`` (scanner) -- rotate module 0 to the vendor's physical crystal-0
+#   azimuth.  Real scanners carry a small intrinsic tilt (STIR uses ~ -5 deg for
+#   the GE Signa / Discovery), so this is a per-model value.
+# * ``ring_endpoint_ordering`` -- match the vendor's crystal numbering direction.
+# * ``view_direction`` / ``radial_direction`` -- match the vendor's sinogram bin
+#   ordering (GE and Siemens differ here).
+# * ``zig_zag_order`` -- match the interleaving of adjacent LOR angles.
+#
+# Rather than trusting a preset, **verify** the combination on your data:
+# forward-project a single off-axis point, back-project it, and check it returns
+# to the *same* image quadrant (a mirror image means the handedness is wrong);
+# or compare the ``(view, radial)`` of a couple of known crystal pairs against
+# the vendor's.  (GE additionally uses the mixed "span-2" axial layout,
+# ``MichelogramLayout.GE``.)
+
+# %%
 # Obtaining world coordinates of LOR start and endpoints
 # ------------------------------------------------------
 #
