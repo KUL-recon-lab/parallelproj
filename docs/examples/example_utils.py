@@ -307,6 +307,24 @@ def show_vol_cuts(
     if fig_title is not None:
         fig.suptitle(fig_title)
 
+    # Some matplotlib versions ship a ``TextBox`` ``resize_event`` handler that
+    # assumes a mouse event and reads ``event.inaxes`` -- which a ``ResizeEvent``
+    # does not have.  This raises a harmless ``AttributeError`` (printed once per
+    # TextBox) on every figure resize.  Filter just that error so it does not
+    # spam the console; everything else propagates normally.
+    _cb = fig.canvas.callbacks
+    _orig_exc_handler = getattr(_cb, "exception_handler", None)
+
+    def _filter_resize_bug(exc, _orig=_orig_exc_handler):
+        if isinstance(exc, AttributeError) and "inaxes" in str(exc):
+            return
+        if _orig is not None:
+            return _orig(exc)
+        raise exc
+
+    if hasattr(_cb, "exception_handler"):
+        _cb.exception_handler = _filter_resize_bug
+
     if is_4d:
         gs = fig.add_gridspec(
             5, 3, height_ratios=[8, 1, 1, 1, 0.5], hspace=0.6, wspace=0.35
