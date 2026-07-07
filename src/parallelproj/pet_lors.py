@@ -941,7 +941,9 @@ class Michelogram:
         ax.set_xlabel("start ring")
         ax.set_ylabel("end ring")
         _layout_label = (
-            "layout=GE" if self._layout is MichelogramLayout.GE else f"span={self._span}"
+            "layout=GE"
+            if self._layout is MichelogramLayout.GE
+            else f"span={self._span}"
         )
         ax.set_title(f"Michelogram\n({_layout_label}, max Dring={D})", fontsize="small")
         ax.set_aspect("equal")
@@ -2480,7 +2482,9 @@ class SinogramMashingOperator(LinearOperator):
         if not auto_coarse_radial_trim and (
             not isinstance(coarse_radial_trim, int) or coarse_radial_trim < 0
         ):
-            raise ValueError("coarse_radial_trim must be a non-negative integer or None")
+            raise ValueError(
+                "coarse_radial_trim must be a non-negative integer or None"
+            )
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
         ):
@@ -2538,20 +2542,18 @@ class SinogramMashingOperator(LinearOperator):
             num_sides=scanner.num_sides,
             ring_positions=xp.asarray(coarse_rings, dtype=xp.float32, device=dev),
             symmetry_axis=scanner.symmetry_axis,
-            lor_endpoint_positions=xp.asarray(
-                coarse_pos, dtype=xp.float32, device=dev
-            ),
+            lor_endpoint_positions=xp.asarray(coarse_pos, dtype=xp.float32, device=dev),
             phis=xp.asarray(fine_phis, dtype=xp.float32, device=dev),
             ring_endpoint_ordering=scanner.ring_endpoint_ordering,
         )
 
         # ---- coarse michelogram covering every mashed ring pair, then descriptor
-        s_ring = np.asarray(
-            to_numpy_array(lor_descriptor.start_plane_index)
-        ).astype(np.int64)
-        e_ring = np.asarray(
-            to_numpy_array(lor_descriptor.end_plane_index)
-        ).astype(np.int64)
+        s_ring = np.asarray(to_numpy_array(lor_descriptor.start_plane_index)).astype(
+            np.int64
+        )
+        e_ring = np.asarray(to_numpy_array(lor_descriptor.end_plane_index)).astype(
+            np.int64
+        )
         cs_ring = s_ring // M
         ce_ring = e_ring // M
         coarse_max_rd = int(np.max(np.abs(cs_ring - ce_ring))) if s_ring.size else 0
@@ -2606,7 +2608,9 @@ class SinogramMashingOperator(LinearOperator):
             self._out_shape = spatial_out + (int(num_tof_bins),)
 
     @staticmethod
-    def _auto_coarse_radial_trim(ld, coarse_scanner, coarse_mich, N, per_side, per_side_c):
+    def _auto_coarse_radial_trim(
+        ld, coarse_scanner, coarse_mich, N, per_side, per_side_c
+    ):
         """Largest symmetric coarse radial trim that keeps every coarse radial bin
         which receives at least one non-degenerate fine LOR.
 
