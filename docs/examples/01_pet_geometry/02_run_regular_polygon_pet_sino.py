@@ -427,15 +427,21 @@ def _print_table(d: pl.RegularPolygonPETLORDescriptor, title: str) -> None:
 d0 = pl.RegularPolygonPETLORDescriptor(mini, radial_trim=0)
 _print_table(d0, "default")
 _print_table(
-    pl.RegularPolygonPETLORDescriptor(mini, radial_trim=0, view_direction=pl.ViewDirection.MINUS),
+    pl.RegularPolygonPETLORDescriptor(
+        mini, radial_trim=0, view_direction=pl.ViewDirection.MINUS
+    ),
     "view_direction=MINUS",
 )
 _print_table(
-    pl.RegularPolygonPETLORDescriptor(mini, radial_trim=0, radial_direction=pl.RadialDirection.MINUS),
+    pl.RegularPolygonPETLORDescriptor(
+        mini, radial_trim=0, radial_direction=pl.RadialDirection.MINUS
+    ),
     "radial_direction=MINUS",
 )
 _print_table(
-    pl.RegularPolygonPETLORDescriptor(mini, radial_trim=0, zig_zag_order=pl.SinogramZigZagOrder.START_FIRST),
+    pl.RegularPolygonPETLORDescriptor(
+        mini, radial_trim=0, zig_zag_order=pl.SinogramZigZagOrder.START_FIRST
+    ),
     "zig_zag_order=START_FIRST",
 )
 
@@ -443,14 +449,26 @@ _print_table(
 # crystal numbering (mirrors detector positions) but not the (view, radial)
 # index formula, so the table above is unchanged while detector 1 moves.
 mini_ccw = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
-    xp, dev, radius=30.0, num_sides=4, num_lor_endpoints_per_side=2, lor_spacing=12.0,
-    ring_positions=xp.asarray([0.0], device=dev), symmetry_axis=2,
+    xp,
+    dev,
+    radius=30.0,
+    num_sides=4,
+    num_lor_endpoints_per_side=2,
+    lor_spacing=12.0,
+    ring_positions=xp.asarray([0.0], device=dev),
+    symmetry_axis=2,
     ring_endpoint_ordering=parallelproj.pet_scanners.RingEndpointOrdering.COUNTERCLOCKWISE,
 )
 _ep_cw = np.asarray(parallelproj.to_numpy_array(mini.all_lor_endpoints)).reshape(-1, 3)
-_ep_ccw = np.asarray(parallelproj.to_numpy_array(mini_ccw.all_lor_endpoints)).reshape(-1, 3)
-print("\ndetector 1 position (x, y):  CW =", np.round(_ep_cw[1, :2], 1),
-      "  CCW =", np.round(_ep_ccw[1, :2], 1))
+_ep_ccw = np.asarray(parallelproj.to_numpy_array(mini_ccw.all_lor_endpoints)).reshape(
+    -1, 3
+)
+print(
+    "\ndetector 1 position (x, y):  CW =",
+    np.round(_ep_cw[1, :2], 1),
+    "  CCW =",
+    np.round(_ep_ccw[1, :2], 1),
+)
 
 # %%
 # Visualise the four ``(ViewDirection, RadialDirection)`` combinations
@@ -466,7 +484,10 @@ print("\ndetector 1 position (x, y):  CW =", np.round(_ep_cw[1, :2], 1),
 def _draw_panel(ax, view_direction, radial_direction):
     mini.show_lor_endpoints(ax, annotation_fontsize=9, show_linear_index=True)
     d = pl.RegularPolygonPETLORDescriptor(
-        mini, radial_trim=0, view_direction=view_direction, radial_direction=radial_direction
+        mini,
+        radial_trim=0,
+        view_direction=view_direction,
+        radial_direction=radial_direction,
     )
     xs, xe = d.get_lor_coordinates(views=xp.asarray([0, 1], device=dev))
     xs = np.asarray(parallelproj.to_numpy_array(xs))
@@ -482,7 +503,9 @@ def _draw_panel(ax, view_direction, radial_direction):
             # nudge the two views' labels apart so the central bins don't overlap
             m = 0.5 * (a + b) + (2.0 if vi == 1 else -2.0)
             ax.text(m[0], m[1], m[2], f"r{r}", color=lab_col, fontsize=8)
-    ax.set_title(f"view_direction={view_direction.name}, radial_direction={radial_direction.name}")
+    ax.set_title(
+        f"view_direction={view_direction.name}, radial_direction={radial_direction.name}"
+    )
     ax.view_init(elev=90, azim=-90)  # look down the ring (z) axis
 
 
@@ -502,23 +525,18 @@ fig_k.show()
 # Typical vendor settings
 # -----------------------
 #
-# The default is vendor-agnostic and matches the STIR interchange convention:
-# view 0's central bin connects detectors ``(0, N/2)`` and module 0 sits on +y.
+# The default is that view 0's central bin connects detectors ``(0, N/2)`` and
+# module 0 sits on +y.
 # To line a descriptor up with a specific vendor's sinograms you set a few knobs
-# -- there is **no single "vendor" setting**, because GE and Siemens use
+# -- there is **no single "vendor" setting**, because e.g. different vendors use
 # opposite handedness:
 #
 # * ``phi0`` (scanner) -- rotate module 0 to the vendor's physical crystal-0
-#   azimuth.  Real scanners carry a small intrinsic tilt (STIR uses ~ -5 deg for
-#   the GE Signa / Discovery), so this is a per-model value.
+#   azimuth.
 # * ``ring_endpoint_ordering`` -- match the vendor's crystal numbering direction.
 # * ``view_direction`` / ``radial_direction`` -- match the vendor's sinogram bin
-#   ordering (GE and Siemens differ here).
+#   ordering (vendors differ here).
 # * ``zig_zag_order`` -- match the interleaving of adjacent LOR angles.
 #
-# Rather than trusting a preset, **verify** the combination on your data:
-# forward-project a single off-axis point, back-project it, and check it returns
-# to the *same* image quadrant (a mirror image means the handedness is wrong);
-# or compare the ``(view, radial)`` of a couple of known crystal pairs against
-# the vendor's.  (GE additionally uses the mixed "span-2" axial layout,
-# ``MichelogramLayout.GE``.)
+# Rather than trusting a preset, **verify** the combination on your data.
+# e.g. by backprojecting a sparse sinogram.
