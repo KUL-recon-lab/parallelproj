@@ -77,6 +77,33 @@ class SinogramZigZagOrder(enum.Enum):
     """Start crystal steps first."""
 
 
+class ViewDirection(enum.Enum):
+    """Direction in which the sinogram *view* index increases.
+
+    View 0 is always the central LOR through detectors ``(0, N/2)``; this enum
+    only controls whether increasing the view index advances the detector pair
+    in the ``+`` or ``-`` direction around the ring.
+    """
+
+    PLUS = enum.auto()
+    """View index increases with increasing detector index (default)."""
+    MINUS = enum.auto()
+    """View index increases with decreasing detector index."""
+
+
+class RadialDirection(enum.Enum):
+    """Direction in which the sinogram *radial* (tangential) index increases.
+
+    The central radial bin always connects detectors ``(0, N/2)``; this enum
+    controls which side of the centre positive radial offsets fall on.
+    """
+
+    PLUS = enum.auto()
+    """Radial index increases with increasing detector-index difference (default)."""
+    MINUS = enum.auto()
+    """Radial index increases with decreasing detector-index difference."""
+
+
 class MichelogramLayout(enum.Enum):
     """Axial plane layout / segmentation convention for a :class:`Michelogram`."""
 
@@ -914,7 +941,9 @@ class Michelogram:
         ax.set_xlabel("start ring")
         ax.set_ylabel("end ring")
         _layout_label = (
-            "layout=GE" if self._layout is MichelogramLayout.GE else f"span={self._span}"
+            "layout=GE"
+            if self._layout is MichelogramLayout.GE
+            else f"span={self._span}"
         )
         ax.set_title(f"Michelogram\n({_layout_label}, max Dring={D})", fontsize="small")
         ax.set_aspect("equal")
@@ -1156,6 +1185,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         radial_trim: int = 3,
         sinogram_order: SinogramSpatialAxisOrder = SinogramSpatialAxisOrder.RVP,
         zig_zag_order: SinogramZigZagOrder = SinogramZigZagOrder.END_FIRST,
+        view_direction: ViewDirection = ViewDirection.PLUS,
+        radial_direction: RadialDirection = RadialDirection.PLUS,
     ) -> None:
         """
 
@@ -1179,6 +1210,14 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         zig_zag_order : SinogramZigZagOrder, optional
             the zig-zag ordering convention for in-ring detector pairs.
             Defaults to ``SinogramZigZagOrder.END_FIRST``.
+        view_direction : ViewDirection, optional
+            direction in which the view index increases (``PLUS`` default).
+            View 0's central bin always connects detectors ``(0, N/2)``.
+        radial_direction : RadialDirection, optional
+            direction in which the radial index increases (``PLUS`` default).
+            Together with ``ring_endpoint_ordering`` (crystal numbering) and
+            ``view_direction`` these knobs reproduce any vendor's
+            ``(view, radial) <-> detector-pair`` convention.
         """
 
         super().__init__(scanner)
@@ -1215,6 +1254,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         self._sinogram_order = sinogram_order
         self._zig_zag_order = zig_zag_order
+        self._view_direction = view_direction
+        self._radial_direction = radial_direction
 
         # declare all attributes set by the setup methods so they are
         # visible in __init__
@@ -1343,6 +1384,16 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self._zig_zag_order
 
     @property
+    def view_direction(self) -> ViewDirection:
+        """direction in which the view index increases"""
+        return self._view_direction
+
+    @property
+    def radial_direction(self) -> RadialDirection:
+        """direction in which the radial index increases"""
+        return self._radial_direction
+
+    @property
     def plane_axis_num(self) -> int:
         """the axis number of the plane axis"""
         return self.sinogram_order.name.find("P")
@@ -1421,56 +1472,50 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             self._end_plane_index = None
 
     def _setup_view_indices(self) -> None:
-        """setup the start / end view indices"""
+        """Build the (view, radial) -> (start, end) in-ring crystal index maps.
+
+        Convention (STIR-compatible anchor): view 0's *central* radial bin
+        connects detectors ``(0, N/2)``.  For signed tangential coordinate
+        ``t`` (``t = 0`` at the centre) and view ``v``,
+
+            start = ( s_v * v + a(t) )            mod N
+            end   = ( s_v * v - b(t) + N/2 )       mod N
+
+        where ``a, b`` are the interleaving half-steps ``floor(t/2)`` and
+        ``ceil(t/2)`` (swapped by ``zig_zag_order``), ``s_v = +/-1`` from
+        ``view_direction`` and the radial coordinate is flipped by
+        ``radial_direction`` (``s_r = +/-1``).  ``ring_endpoint_ordering`` on
+        the scanner independently controls the physical crystal numbering.
+        """
         n = self._scanner.num_lor_endpoints_per_ring
-
-        m = 2 * (n // 2)
-
-        self._start_in_ring_index = self.xp.zeros(
-            (self._num_views, self._num_rad), dtype=self.xp.int32, device=self.dev
-        )
-        self._end_in_ring_index = self.xp.zeros(
-            (self._num_views, self._num_rad), dtype=self.xp.int32, device=self.dev
-        )
-
-        # slice for radial trimming; -0 == 0 in Python so guard explicitly
+        nv = self._num_views  # = n // 2
         trim = self._radial_trim
-        rad_slc = slice(trim, -trim if trim > 0 else None)
 
-        for view in np.arange(self._num_views):
-            if self._zig_zag_order is SinogramZigZagOrder.END_FIRST:
-                # end crystal steps first: (0,n-1),(0,n-2),(1,n-2),(1,n-3),...
-                start_seq = self.xp.arange(m - 1) // 2
-                end_seq = self.xp.concat(
-                    (self.xp.asarray([-1]), -((self.xp.arange(m - 2) + 4) // 2))
-                )
-            else:
-                # start crystal steps first: (0,n-1),(1,n-1),(1,n-2),(2,n-2),...
-                start_seq = (self.xp.arange(m - 1) + 1) // 2
-                end_seq = self.xp.concat(
-                    (self.xp.asarray([-1]), -((self.xp.arange(m - 2) + 3) // 2))
-                )
+        # full (untrimmed) signed tangential coordinate, centred at 0
+        # (n-1 bins; t == 0 is the central opposing-pair LOR).
+        center = (n - 2) // 2
+        t_full = np.arange(n - 1, dtype=np.int64) - center
 
-            self._start_in_ring_index[view, :] = self.xp.astype(
-                (start_seq - int(view))[rad_slc],
-                self.xp.int32,
-            )
-            self._end_in_ring_index[view, :] = self.xp.astype(
-                (end_seq - int(view))[rad_slc],
-                self.xp.int32,
-            )
+        s_v = 1 if self._view_direction is ViewDirection.PLUS else -1
+        s_r = 1 if self._radial_direction is RadialDirection.PLUS else -1
+        t = s_r * t_full
 
-        # shift the negative indices
-        self._start_in_ring_index = self.xp.where(
-            self._start_in_ring_index >= 0,
-            self._start_in_ring_index,
-            self._start_in_ring_index + n,
-        )
-        self._end_in_ring_index = self.xp.where(
-            self._end_in_ring_index >= 0,
-            self._end_in_ring_index,
-            self._end_in_ring_index + n,
-        )
+        a = np.floor_divide(t, 2)  # floor(t/2)
+        b = np.floor_divide(t + 1, 2)  # ceil(t/2)
+        if self._zig_zag_order is SinogramZigZagOrder.START_FIRST:
+            a, b = b, a
+
+        v = s_v * np.arange(nv, dtype=np.int64)[:, None]  # (nv, 1)
+        start = (v + a[None, :]) % n  # (nv, n-1)
+        end = (v - b[None, :] + n // 2) % n
+
+        # keep the central `num_rad` radial bins (symmetric trim)
+        rad_slc = slice(trim, (n - 1) - trim)
+        start = start[:, rad_slc].astype(np.int32)
+        end = end[:, rad_slc].astype(np.int32)
+
+        self._start_in_ring_index = self.xp.asarray(start, device=self.dev)
+        self._end_in_ring_index = self.xp.asarray(end, device=self.dev)
 
     def get_lor_coordinates(
         self,
@@ -1994,6 +2039,8 @@ class SinogramAxialCompressionOperator(LinearOperator):
             radial_trim=lor_descriptor.radial_trim,
             sinogram_order=lor_descriptor.sinogram_order,
             zig_zag_order=lor_descriptor.zig_zag_order,
+            view_direction=lor_descriptor.view_direction,
+            radial_direction=lor_descriptor.radial_direction,
         )
 
         self._build_index_maps(target_michelogram)
@@ -2435,7 +2482,9 @@ class SinogramMashingOperator(LinearOperator):
         if not auto_coarse_radial_trim and (
             not isinstance(coarse_radial_trim, int) or coarse_radial_trim < 0
         ):
-            raise ValueError("coarse_radial_trim must be a non-negative integer or None")
+            raise ValueError(
+                "coarse_radial_trim must be a non-negative integer or None"
+            )
         if num_tof_bins is not None and (
             not isinstance(num_tof_bins, int) or num_tof_bins < 1
         ):
@@ -2493,20 +2542,18 @@ class SinogramMashingOperator(LinearOperator):
             num_sides=scanner.num_sides,
             ring_positions=xp.asarray(coarse_rings, dtype=xp.float32, device=dev),
             symmetry_axis=scanner.symmetry_axis,
-            lor_endpoint_positions=xp.asarray(
-                coarse_pos, dtype=xp.float32, device=dev
-            ),
+            lor_endpoint_positions=xp.asarray(coarse_pos, dtype=xp.float32, device=dev),
             phis=xp.asarray(fine_phis, dtype=xp.float32, device=dev),
             ring_endpoint_ordering=scanner.ring_endpoint_ordering,
         )
 
         # ---- coarse michelogram covering every mashed ring pair, then descriptor
-        s_ring = np.asarray(
-            to_numpy_array(lor_descriptor.start_plane_index)
-        ).astype(np.int64)
-        e_ring = np.asarray(
-            to_numpy_array(lor_descriptor.end_plane_index)
-        ).astype(np.int64)
+        s_ring = np.asarray(to_numpy_array(lor_descriptor.start_plane_index)).astype(
+            np.int64
+        )
+        e_ring = np.asarray(to_numpy_array(lor_descriptor.end_plane_index)).astype(
+            np.int64
+        )
         cs_ring = s_ring // M
         ce_ring = e_ring // M
         coarse_max_rd = int(np.max(np.abs(cs_ring - ce_ring))) if s_ring.size else 0
@@ -2536,6 +2583,8 @@ class SinogramMashingOperator(LinearOperator):
             radial_trim=coarse_radial_trim,
             sinogram_order=lor_descriptor.sinogram_order,
             zig_zag_order=lor_descriptor.zig_zag_order,
+            view_direction=lor_descriptor.view_direction,
+            radial_direction=lor_descriptor.radial_direction,
         )
         cdesc = self._coarse_lor_descriptor
 
@@ -2559,7 +2608,9 @@ class SinogramMashingOperator(LinearOperator):
             self._out_shape = spatial_out + (int(num_tof_bins),)
 
     @staticmethod
-    def _auto_coarse_radial_trim(ld, coarse_scanner, coarse_mich, N, per_side, per_side_c):
+    def _auto_coarse_radial_trim(
+        ld, coarse_scanner, coarse_mich, N, per_side, per_side_c
+    ):
         """Largest symmetric coarse radial trim that keeps every coarse radial bin
         which receives at least one non-degenerate fine LOR.
 
@@ -2575,6 +2626,8 @@ class SinogramMashingOperator(LinearOperator):
             radial_trim=0,
             sinogram_order=ld.sinogram_order,
             zig_zag_order=ld.zig_zag_order,
+            view_direction=ld.view_direction,
+            radial_direction=ld.radial_direction,
         )
         K_c = coarse_scanner.num_lor_endpoints_per_ring
         V_c0 = cdesc0.num_views

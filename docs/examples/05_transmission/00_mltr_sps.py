@@ -136,7 +136,7 @@ scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 #
 # Transmission data have no TOF information, so we use a plain non-TOF
 # projector.  The ground-truth :math:`\mu` image is the elliptic cylinder
-# phantom rescaled such that the cylinder background equals the linear attenuation coefficient 
+# phantom rescaled such that the cylinder background equals the linear attenuation coefficient
 # of water at 511 keV (:math:`0.0096 \, \text{mm}^{-1}`); the hot / cold inserts
 # become dense / air-like regions.
 

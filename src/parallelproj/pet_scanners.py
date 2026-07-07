@@ -408,9 +408,11 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             direction in which endpoint indices increase around the ring, by
             default ``RingEndpointOrdering.CLOCKWISE``.
         phi0 : float, optional
-            azimuthal offset of side 0 in radians, by default 0.
-            Only applied when ``phis`` is ``None``; ignored when ``phis`` is
-            provided explicitly.
+            azimuthal offset of side 0 in radians, by default 0.  With the
+            default (and ``symmetry_axis=2``) side 0 is centred on the +y axis
+            ("top"), matching the vertical-axis reference used by most PET
+            frameworks.  Only applied when ``phis`` is ``None``; ignored when
+            ``phis`` is provided explicitly.
         lor_endpoint_positions : Array or None, optional
             1-D array of crystal positions (in mm) along each polygon side,
             with 0 at the centre of the side.  When given, overrides
@@ -887,9 +889,11 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             direction in which endpoint indices increase around the ring, by
             default ``RingEndpointOrdering.CLOCKWISE``.
         phi0 : float, optional
-            azimuthal offset of side 0 in radians, by default 0.
-            Only applied when ``phis`` is ``None``; ignored when ``phis`` is
-            provided explicitly.
+            azimuthal offset of side 0 in radians, by default 0.  With the
+            default (and ``symmetry_axis=2``) side 0 is centred on the +y axis
+            ("top"), matching the vertical-axis reference used by most PET
+            frameworks.  Only applied when ``phis`` is ``None``; ignored when
+            ``phis`` is provided explicitly.
         lor_endpoint_positions : Array or None, optional
             Custom 1-D array of crystal positions along each polygon side in mm.
             When given, overrides ``num_lor_endpoints_per_side`` and

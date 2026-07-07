@@ -291,7 +291,9 @@ assert tof_mash_avg.adjointness_test(xp, dev, dtype=xp.float64)
 rel_up = float(
     np.linalg.norm(to_numpy_array(upsampled) - fine_np) / np.linalg.norm(fine_np)
 )
-print(f"upsampled shape         : {tuple(upsampled.shape)}  (back on the fine TOF grid)")
+print(
+    f"upsampled shape         : {tuple(upsampled.shape)}  (back on the fine TOF grid)"
+)
 print(f"upsampled (avg-adjoint) vs fine, rel. difference = {rel_up:.2f}")
 
 # The upsampled sinogram lives on the fine 27-bin TOF grid and matches the

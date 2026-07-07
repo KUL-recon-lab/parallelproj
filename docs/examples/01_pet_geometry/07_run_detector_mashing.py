@@ -126,10 +126,21 @@ tax = [a for a in range(3) if a != scanner.symmetry_axis]
 
 fig1 = plt.figure(figsize=(16, 5), tight_layout=True)
 ax1a = fig1.add_subplot(1, 3, 1)
-ax1a.scatter(fine_pts[:, tax[0]], fine_pts[:, tax[1]], s=12, color="tab:blue",
-             label=f"fine crystals ({fine_pts.shape[0]}/ring)")
-ax1a.scatter(coarse_pts[:, tax[0]], coarse_pts[:, tax[1]], s=90, marker="x",
-             color="tab:red", label=f"mashed virtual ({coarse_pts.shape[0]}/ring)")
+ax1a.scatter(
+    fine_pts[:, tax[0]],
+    fine_pts[:, tax[1]],
+    s=12,
+    color="tab:blue",
+    label=f"fine crystals ({fine_pts.shape[0]}/ring)",
+)
+ax1a.scatter(
+    coarse_pts[:, tax[0]],
+    coarse_pts[:, tax[1]],
+    s=90,
+    marker="x",
+    color="tab:red",
+    label=f"mashed virtual ({coarse_pts.shape[0]}/ring)",
+)
 ax1a.set_aspect("equal")
 ax1a.set_title(f"one ring, transaxial (N={transaxial_factor})")
 ax1a.legend(loc="upper right", fontsize="small")
@@ -153,7 +164,7 @@ fig1.show()
 # averaged) LORs for the same projection angle.
 
 central_fine = xp.asarray([num_rings // 2], device=dev)
-central_coarse = xp.asarray([num_rings // (2*axial_factor)], device=dev)
+central_coarse = xp.asarray([num_rings // (2 * axial_factor)], device=dev)
 view_fine = xp.asarray([lor_desc.num_views // 4], device=dev)
 view_coarse = xp.asarray([coarse_desc.num_views // 4], device=dev)
 
@@ -211,14 +222,14 @@ proj_fine = parallelproj.projectors.RegularPolygonPETProjector(
 img = xp.zeros(img_shape, dtype=xp.float32, device=dev)
 img[25:55, 40:55, 2:] = 1.0
 img[45:55, 45:75, :-2] = 2.0
-img[:,:,:num_rings//2] *= 1.5
-img[:,:,::2] *= 1.5
+img[:, :, : num_rings // 2] *= 1.5
+img[:, :, ::2] *= 1.5
 
 fine_sino = proj_fine(img)
 mashed_sino = mash(fine_sino)
 
 # show the image used to simulated the sinograms
-_,_,_ = show_vol_cuts(img, fig_title="simulated image")
+_, _, _ = show_vol_cuts(to_numpy_array(img), fig_title="simulated image")
 
 # The sinograms are 3D arrays.  ``show_vol_cuts`` shows orthogonal cuts with a
 # slider per axis, so you can scroll through radial, view and plane.
@@ -235,10 +246,22 @@ def _canonical(sino, desc):
 _labels = ("radial", "view", "plane")
 _keep = []  # keep references so the interactive slider callbacks are not GC'd
 
-_keep.append(show_vol_cuts(_canonical(fine_sino, lor_desc), axis_labels=_labels,
-                           fig_title=f"fine sinogram {mash.in_shape}", cmap="Greys"))
-_keep.append(show_vol_cuts(_canonical(mashed_sino, coarse_desc), axis_labels=_labels,
-                           fig_title=f"mashed sinogram {mash.out_shape}", cmap="Greys"))
+_keep.append(
+    show_vol_cuts(
+        _canonical(fine_sino, lor_desc),
+        axis_labels=_labels,
+        fig_title=f"fine sinogram {mash.in_shape}",
+        cmap="Greys",
+    )
+)
+_keep.append(
+    show_vol_cuts(
+        _canonical(mashed_sino, coarse_desc),
+        axis_labels=_labels,
+        fig_title=f"mashed sinogram {mash.out_shape}",
+        cmap="Greys",
+    )
+)
 
 # %%
 # How many fine LORs does each mashed LOR combine?
@@ -252,10 +275,14 @@ _keep.append(show_vol_cuts(_canonical(mashed_sino, coarse_desc), axis_labels=_la
 ones_fine = xp.ones(lor_desc.spatial_sinogram_shape, dtype=xp.float32, device=dev)
 multiplicity_sino = mash(ones_fine)  # sum mode -> per-mashed-bin count
 
-_keep.append(show_vol_cuts(
-    _canonical(multiplicity_sino, coarse_desc), axis_labels=_labels,
-    fig_title="multiplicity: # fine LORs per mashed LOR", cmap="viridis",
-))
+_keep.append(
+    show_vol_cuts(
+        _canonical(multiplicity_sino, coarse_desc),
+        axis_labels=_labels,
+        fig_title="multiplicity: # fine LORs per mashed LOR",
+        cmap="viridis",
+    )
+)
 
 # %%
 # Fast coarse projector vs. the exact mashed model
@@ -279,24 +306,48 @@ proj_coarse = parallelproj.projectors.RegularPolygonPETProjector(
     mash_avg.coarse_lor_descriptor, img_shape, voxel_size
 )
 
-exact = mash_avg(proj_fine(img))   # mash the fine forward projection
-fast = proj_coarse(img)            # project directly along the averaged LORs
+exact = mash_avg(proj_fine(img))  # mash the fine forward projection
+fast = proj_coarse(img)  # project directly along the averaged LORs
 
 rel = float(
     np.linalg.norm(to_numpy_array(exact) - to_numpy_array(fast))
     / np.linalg.norm(to_numpy_array(fast))
 )
-print(f"relative difference  ||mash_avg(P_fine x) - P_coarse x|| / ||P_coarse x|| = {rel:.3f}")
+print(
+    f"relative difference  ||mash_avg(P_fine x) - P_coarse x|| / ||P_coarse x|| = {rel:.3f}"
+)
 
 exact_c = _canonical(exact, mash_avg.coarse_lor_descriptor)
 fast_c = _canonical(fast, mash_avg.coarse_lor_descriptor)
 _vmax = float(max(exact_c.max(), fast_c.max()))
-_keep.append(show_vol_cuts(exact_c, axis_labels=_labels, vmin=0, vmax=_vmax,
-                           fig_title="exact:  mash_avg(P_fine x)", cmap="Greys"))
-_keep.append(show_vol_cuts(fast_c, axis_labels=_labels, vmin=0, vmax=_vmax,
-                           fig_title="fast:   P_coarse x", cmap="Greys"))
-_keep.append(show_vol_cuts(exact_c - fast_c, axis_labels=_labels,
-                           fig_title="difference (exact - fast)", cmap="RdBu"))
+_keep.append(
+    show_vol_cuts(
+        exact_c,
+        axis_labels=_labels,
+        vmin=0,
+        vmax=_vmax,
+        fig_title="exact:  mash_avg(P_fine x)",
+        cmap="Greys",
+    )
+)
+_keep.append(
+    show_vol_cuts(
+        fast_c,
+        axis_labels=_labels,
+        vmin=0,
+        vmax=_vmax,
+        fig_title="fast:   P_coarse x",
+        cmap="Greys",
+    )
+)
+_keep.append(
+    show_vol_cuts(
+        exact_c - fast_c,
+        axis_labels=_labels,
+        fig_title="difference (exact - fast)",
+        cmap="RdBu",
+    )
+)
 
 # %%
 # Upsampling a coarse sinogram back to the fine grid
@@ -333,21 +384,35 @@ _keep.append(show_vol_cuts(exact_c - fast_c, axis_labels=_labels,
 # array-API compliant and need nothing extra.)
 
 coarse = mash(fine_sino)  # a coarse (counts) sinogram to upsample
-up_replicate = mash.adjoint(coarse)       # sum-mode adjoint: copy (rate-preserving)
-up_spread = mash_avg.adjoint(coarse)      # average-mode adjoint: /multiplicity (count-preserving)
+up_replicate = mash.adjoint(coarse)  # sum-mode adjoint: copy (rate-preserving)
+up_spread = mash_avg.adjoint(
+    coarse
+)  # average-mode adjoint: /multiplicity (count-preserving)
 
 print(f"sum(coarse)                  = {float(xp.sum(coarse)):.1f}")
-print(f"sum(replicate, sum-adjoint)  = {float(xp.sum(up_replicate)):.1f}  (total NOT preserved)")
-print(f"sum(spread, average-adjoint) = {float(xp.sum(up_spread)):.1f}  (total preserved)")
+print(
+    f"sum(replicate, sum-adjoint)  = {float(xp.sum(up_replicate)):.1f}  (total NOT preserved)"
+)
+print(
+    f"sum(spread, average-adjoint) = {float(xp.sum(up_spread)):.1f}  (total preserved)"
+)
 
-_keep.append(show_vol_cuts(
-    _canonical(up_replicate, lor_desc), axis_labels=_labels, cmap="Greys",
-    fig_title="upsampled: mash.adjoint (replicate, per-bin value preserved)",
-))
-_keep.append(show_vol_cuts(
-    _canonical(up_spread, lor_desc), axis_labels=_labels, cmap="Greys",
-    fig_title="upsampled: mash_avg.adjoint (spread, total counts preserved)",
-))
+_keep.append(
+    show_vol_cuts(
+        _canonical(up_replicate, lor_desc),
+        axis_labels=_labels,
+        cmap="Greys",
+        fig_title="upsampled: mash.adjoint (replicate, per-bin value preserved)",
+    )
+)
+_keep.append(
+    show_vol_cuts(
+        _canonical(up_spread, lor_desc),
+        axis_labels=_labels,
+        cmap="Greys",
+        fig_title="upsampled: mash_avg.adjoint (spread, total counts preserved)",
+    )
+)
 
 # %%
 # Mashing GE-layout sinograms (by composition)
@@ -387,7 +452,9 @@ span1_coarse_desc = mash_span1.coarse_lor_descriptor
 # GE data --(distribute)--> fine span-1 --(mash)--> coarse span-1
 ge_mash = CompositeLinearOperator([mash_span1, ge_to_span1.H])
 
-print(f"fine   GE sinogram   : {ge_mash.in_shape}  (layout={ge_desc.michelogram.layout.name})")
+print(
+    f"fine   GE sinogram   : {ge_mash.in_shape}  (layout={ge_desc.michelogram.layout.name})"
+)
 print(
     f"mashed span-1 sinogram : {ge_mash.out_shape}  "
     f"(coarse rings={mash_span1.coarse_scanner.num_rings}, "
@@ -423,16 +490,21 @@ _plane_mult = to_numpy_array(ge_desc.michelogram.plane_multiplicity).astype("flo
 _bshape = [1, 1, 1]
 _bshape[ge_desc.plane_axis_num] = ge_desc.spatial_sinogram_shape[ge_desc.plane_axis_num]
 fine_phys_mult = xp.asarray(
-    np.broadcast_to(_plane_mult.reshape(_bshape), ge_desc.spatial_sinogram_shape).copy(),
+    np.broadcast_to(
+        _plane_mult.reshape(_bshape), ge_desc.spatial_sinogram_shape
+    ).copy(),
     dtype=xp.float64,
     device=dev,
 )
 
-_keep.append(show_vol_cuts(
-    _canonical(fine_phys_mult, ge_desc), axis_labels=_labels,
-    fig_title="GE physical detector pairs per bin (1 direct/oblique, 2 cross)",
-    cmap="viridis",
-))
+_keep.append(
+    show_vol_cuts(
+        _canonical(fine_phys_mult, ge_desc),
+        axis_labels=_labels,
+        fig_title="GE physical detector pairs per bin (1 direct/oblique, 2 cross)",
+        cmap="viridis",
+    )
+)
 
 # %%
 # Mash a (simulated) GE emission sinogram
@@ -450,18 +522,27 @@ ge_fine_sino = proj_ge(img) * fine_phys_mult  # GE data with cross planes at 2x
 span1_fine_sino = ge_to_span1.H(ge_fine_sino)  # distribute GE -> fine span-1
 span1_coarse_sino = ge_mash(ge_fine_sino)  # = mash_span1(span1_fine_sino)
 
-_keep.append(show_vol_cuts(
-    _canonical(ge_fine_sino, ge_desc), axis_labels=_labels,
-    fig_title=f"fine GE emission sinogram {tuple(ge_mash.in_shape)}",
-))
-_keep.append(show_vol_cuts(
-    _canonical(span1_fine_sino, ge_span1), axis_labels=_labels,
-    fig_title=f"distributed to fine span-1 {tuple(ge_span1.spatial_sinogram_shape)}",
-))
-_keep.append(show_vol_cuts(
-    _canonical(span1_coarse_sino, span1_coarse_desc), axis_labels=_labels,
-    fig_title=f"mashed coarse span-1 sinogram {tuple(ge_mash.out_shape)}",
-))
+_keep.append(
+    show_vol_cuts(
+        _canonical(ge_fine_sino, ge_desc),
+        axis_labels=_labels,
+        fig_title=f"fine GE emission sinogram {tuple(ge_mash.in_shape)}",
+    )
+)
+_keep.append(
+    show_vol_cuts(
+        _canonical(span1_fine_sino, ge_span1),
+        axis_labels=_labels,
+        fig_title=f"distributed to fine span-1 {tuple(ge_span1.spatial_sinogram_shape)}",
+    )
+)
+_keep.append(
+    show_vol_cuts(
+        _canonical(span1_coarse_sino, span1_coarse_desc),
+        axis_labels=_labels,
+        fig_title=f"mashed coarse span-1 sinogram {tuple(ge_mash.out_shape)}",
+    )
+)
 
 # counts are preserved end to end (distribute preserves, sum-mash preserves)
 print(
@@ -478,20 +559,27 @@ print(
 # the **average**-mode adjoint, which spreads each coarse bin over its fine bins.
 
 mash_span1_avg = parallelproj.pet_lors.SinogramMashingOperator(
-    ge_span1, transaxial_factor=transaxial_factor, axial_factor=axial_factor,
+    ge_span1,
+    transaxial_factor=transaxial_factor,
+    axial_factor=axial_factor,
     mode="average",
 )
-span1_upsampled = mash_span1_avg.adjoint(span1_coarse_sino)  # fine span-1, counts preserved
+span1_upsampled = mash_span1_avg.adjoint(
+    span1_coarse_sino
+)  # fine span-1, counts preserved
 
 print(
     f"sum(upsampled span-1) = {float(xp.sum(span1_upsampled)):.1f}  "
     f"(matches sum(mashed span-1) = {float(xp.sum(span1_coarse_sino)):.1f})"
 )
 
-_keep.append(show_vol_cuts(
-    _canonical(span1_upsampled, ge_span1), axis_labels=_labels,
-    fig_title=f"upsampled span-1 sinogram (avg-adjoint, {tuple(ge_span1.spatial_sinogram_shape)})",
-))
+_keep.append(
+    show_vol_cuts(
+        _canonical(span1_upsampled, ge_span1),
+        axis_labels=_labels,
+        fig_title=f"upsampled span-1 sinogram (avg-adjoint, {tuple(ge_span1.spatial_sinogram_shape)})",
+    )
+)
 
 # %%
 # Round trip: back to the original fine GE sinogram
@@ -524,9 +612,12 @@ print(
     f"rel. difference to original fine GE = {rel_ge:.2f}  (resolution lost in mashing)"
 )
 
-_keep.append(show_vol_cuts(
-    _canonical(ge_reconstructed, ge_desc), axis_labels=_labels,
-    fig_title=f"upsampled sinogram (GE plane layout ) {tuple(ge_desc.spatial_sinogram_shape)}",
-))
+_keep.append(
+    show_vol_cuts(
+        _canonical(ge_reconstructed, ge_desc),
+        axis_labels=_labels,
+        fig_title=f"upsampled sinogram (GE plane layout ) {tuple(ge_desc.spatial_sinogram_shape)}",
+    )
+)
 
 plt.show()

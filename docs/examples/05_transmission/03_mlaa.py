@@ -571,7 +571,9 @@ for it in range(num_outer):
         a_k = xp.exp(-proj_nt_k[ka](mu))[..., None]
         ybar = a_k * A_k[ka](lam) + s_k[ka]
         grad = A_k[ka].adjoint(a_k * (y_k[ka] / ybar - 1.0))
-        sens = A_k[ka].adjoint(a_k * xp.ones_like(ybar))  # B^T P_tof^T (a * 1), attenuated
+        sens = A_k[ka].adjoint(
+            a_k * xp.ones_like(ybar)
+        )  # B^T P_tof^T (a * 1), attenuated
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
         D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)

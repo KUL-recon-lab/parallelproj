@@ -699,9 +699,7 @@ full_grad_lm: Array
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(
-                x_svrg_lm, x_svrg_lm
-            )
+            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_lm, x_svrg_lm)
             if fov_mask is None:
                 svrg_precond_lm = x_svrg_lm / _denom
             else:

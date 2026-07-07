@@ -382,27 +382,78 @@ def test_zig_zag_order(xp: ModuleType, dev: str) -> None:
     # both share the same sinogram shape
     assert lor_ef.spatial_sinogram_shape == lor_sf.spatial_sinogram_shape
 
-    # view 0: END_FIRST has end step first, START_FIRST has start step first
-    # n=8: END_FIRST pairs: (0,7),(0,6),(1,6),...  START_FIRST: (0,7),(1,7),(1,6),...
+    # view 0's *central* radial bin connects detectors (0, N/2) for both
+    # conventions; the two variants differ in which endpoint takes the
+    # interleaving half-step as the radial index moves outward from the centre.
     ef_start = to_numpy_array(lor_ef.start_in_ring_index[0, :])
     ef_end = to_numpy_array(lor_ef.end_in_ring_index[0, :])
     sf_start = to_numpy_array(lor_sf.start_in_ring_index[0, :])
     sf_end = to_numpy_array(lor_sf.end_in_ring_index[0, :])
 
-    # first radial bin is the same for both (central LOR)
-    assert int(ef_start[0]) == int(sf_start[0])
-    assert int(ef_end[0]) == int(sf_end[0])
+    n = scanner.num_lor_endpoints_per_ring  # = 8
+    cen = lor_ef.num_rad // 2
 
-    # second radial bin differs: END_FIRST keeps start, advances end;
-    # START_FIRST advances start, keeps end
-    assert int(ef_start[1]) == int(ef_start[0])  # start unchanged
-    assert int(sf_end[1]) == int(sf_end[0])       # end unchanged
-    assert int(ef_end[1]) != int(ef_end[0])        # end stepped
-    assert int(sf_start[1]) != int(sf_start[0])   # start stepped
+    # anchor: central bin connects detector 0 and N/2 (both conventions)
+    assert (int(ef_start[cen]), int(ef_end[cen])) == (0, n // 2)
+    assert (int(sf_start[cen]), int(sf_end[cen])) == (0, n // 2)
+
+    # one bin out from centre: END_FIRST keeps start & steps end;
+    # START_FIRST keeps end & steps start
+    assert int(ef_start[cen + 1]) == int(ef_start[cen])  # start unchanged
+    assert int(ef_end[cen + 1]) != int(ef_end[cen])  # end stepped
+    assert int(sf_end[cen + 1]) == int(sf_end[cen])  # end unchanged
+    assert int(sf_start[cen + 1]) != int(sf_start[cen])  # start stepped
 
     # the two conventions produce different index arrays
     assert not np.array_equal(ef_start, sf_start)
     assert not np.array_equal(ef_end, sf_end)
+
+
+def test_view_radial_direction_and_anchor(xp: ModuleType, dev: str) -> None:
+    """View 0's central bin connects detectors (0, N/2); ``view_direction`` and
+    ``radial_direction`` each flip exactly their own axis while preserving that
+    anchor; the default scanner places module 0 on +y."""
+    import numpy as np
+
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=8, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.asarray([0.0], device=dev), symmetry_axis=2,
+    )
+    N = scanner.num_lor_endpoints_per_ring
+
+    # default: module 0 centred on +y (top) for symmetry_axis=2
+    ep = to_numpy_array(scanner.all_lor_endpoints).reshape(-1, 3)
+    c0 = ep[:4].mean(0)  # module-0 (first per_side endpoints) centre
+    assert abs(float(c0[0])) < 1e-3 and float(c0[1]) > 0.0
+
+    def desc(**kw):
+        return ppl.RegularPolygonPETLORDescriptor(
+            scanner, ppl.Michelogram(1, 0, span=1), radial_trim=1, **kw
+        )
+
+    d = desc()
+    s = to_numpy_array(d.start_in_ring_index)
+    e = to_numpy_array(d.end_in_ring_index)
+    cen = d.num_rad // 2
+    assert d.view_direction is ppl.ViewDirection.PLUS
+    assert d.radial_direction is ppl.RadialDirection.PLUS
+    # anchor: view 0 central bin connects detector 0 and N/2
+    assert (int(s[0, cen]), int(e[0, cen])) == (0, N // 2)
+
+    # view_direction flips only the view axis; the view-0 row is unchanged
+    dm = desc(view_direction=ppl.ViewDirection.MINUS)
+    sm = to_numpy_array(dm.start_in_ring_index)
+    em = to_numpy_array(dm.end_in_ring_index)
+    assert (int(sm[0, cen]), int(em[0, cen])) == (0, N // 2)
+    assert np.array_equal(sm[0], s[0]) and np.array_equal(em[0], e[0])
+    assert (int(sm[1, cen]), int(em[1, cen])) != (int(s[1, cen]), int(e[1, cen]))
+
+    # radial_direction reverses the radial axis (per view), anchor preserved
+    dr = desc(radial_direction=ppl.RadialDirection.MINUS)
+    sr = to_numpy_array(dr.start_in_ring_index)
+    er = to_numpy_array(dr.end_in_ring_index)
+    assert (int(sr[0, cen]), int(er[0, cen])) == (0, N // 2)
+    assert np.array_equal(sr[0], s[0, ::-1]) and np.array_equal(er[0], e[0, ::-1])
 
 
 def test_show_michelogram(xp: ModuleType, dev: str) -> None:
