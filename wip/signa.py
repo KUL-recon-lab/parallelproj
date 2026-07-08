@@ -7,7 +7,6 @@ import parallelproj.pet_scanners as scanners
 import parallelproj.projectors as projectors
 
 from parallelproj import Array, to_numpy_array
-from example_utils import show_vol_cuts
 
 # %%
 import array_api_compat.torch as xp
@@ -76,9 +75,11 @@ sino_back_idl *= sino_back.sum() / sino_back_idl.sum()
 
 sino_back_idl = np.flip(sino_back_idl, (0, 1))
 
+print(np.sum((sino_back - sino_back_idl) ** 2))
+
 # %%
 vmax = max(float(sino_back.max()), float(sino_back_idl.max()))
-ims = dict(vmin=0, vmax=vmax, origin="lower", cmap="Greys")
+ims = dict(vmin=0, origin="lower", cmap="Greys")
 ims2 = dict(vmin=-0.02 * vmax, vmax=0.02 * vmax, origin="lower", cmap="seismic")
 
 ncols = len(plane_bins)
@@ -93,11 +94,30 @@ fig, ax = plt.subplots(
 )
 
 for i, pl in enumerate(plane_bins):
-    ax[0, i].imshow(sino_back[:, :, pl].T, **ims)
-    ax[1, i].imshow(sino_back_idl[:, :, pl].T, **ims)
+    ax[0, i].imshow(sino_back[:, :, pl].T, vmax=vmax, **ims)
+    ax[1, i].imshow(sino_back_idl[:, :, pl].T, vmax=vmax, **ims)
     ax[2, i].imshow((sino_back[:, :, pl] - sino_back_idl[:, :, pl]).T, **ims2)
     ax[0, i].set_title(f"parallelproj backproj image plane {pl}", fontsize="medium")
     ax[1, i].set_title(f"KUL IDL backproj image plane {pl}", fontsize="medium")
     ax[2, i].set_title(f"parallelproj - KUL image plane {pl}", fontsize="medium")
 
 fig.show()
+
+fig2, ax2 = plt.subplots(
+    3,
+    3,
+    figsize=(4 * 4.2, 1 * 4.2),
+    layout="constrained",
+    sharex=True,
+    sharey=True,
+)
+
+for i, x1 in enumerate([50, 250, 400]):
+    ax2[0, i].imshow(sino_back[:, x1, :].T, **ims)
+    ax2[1, i].imshow(sino_back_idl[:, x1, :].T, **ims)
+    ax2[2, i].imshow((sino_back[:, x1, :] - sino_back_idl[:, x1, :]).T, **ims2)
+    ax2[0, i].set_title(f"parallelproj backproj cor plane {x1}", fontsize="medium")
+    ax2[1, i].set_title(f"KUL IDL backproj cor plane {x1}", fontsize="medium")
+    ax2[2, i].set_title(f"parallelproj - KUL cor plane {x1}", fontsize="medium")
+
+fig2.show()
