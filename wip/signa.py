@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.io import readsav
 
 import parallelproj.pet_lors as lors
@@ -53,83 +54,50 @@ proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
 
 # %%
 # setup a sinogram that has a 1 in a single bin
-sino1: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
-sino2: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
+sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
-rad_bin = 170  # lor_desc.num_rad // 2 - 8
-view_bin = 0
-plane_bin = 44
+rad_bin = 170
+view_bins = [0, 56, 63]
+plane_bins = [0, 44, 81]
 
-sino1[rad_bin - 1, view_bin, plane_bin] = 1.0
-sino1[rad_bin, view_bin, plane_bin] = 1.4
-sino1[rad_bin + 1, view_bin, plane_bin] = 2.0
-
-sino2[rad_bin - 1, view_bin + 56, plane_bin] = 1.0
-sino2[rad_bin, view_bin + 56, plane_bin] = 1.4
-sino2[rad_bin + 1, view_bin + 56, plane_bin] = 2.0
+for plane_bin in plane_bins:
+    for view_bin in view_bins:
+        sino[rad_bin - 1, view_bin, plane_bin] = 1.0
+        sino[rad_bin, view_bin, plane_bin] = 1.4
+        sino[rad_bin + 1, view_bin, plane_bin] = 2.0
 
 # %%
 # back project the sinogram
 print("back projecting")
-sino1_back = proj.adjoint(sino1)
-sino2_back = proj.adjoint(sino2)
+sino_back = to_numpy_array(proj.adjoint(sino))
 
-sino_back = sino1_back + sino2_back
+sino_back_idl = np.swapaxes(readsav("sino_back.sav")["sino_back"].copy(), 0, 2)
+sino_back_idl *= sino_back.sum() / sino_back_idl.sum()
 
-# %%
-vmax = max(float(sino1_back.max()), float(sino2_back.max()))
-
-sl = img_shape[2] // 2
-img_plane = to_numpy_array(sino_back[:, :, sl]).copy()
-
-img_plane[0:5, 0:15] = vmax
+sino_back_idl = np.flip(sino_back_idl, (0, 1))
 
 # %%
+vmax = max(float(sino_back.max()), float(sino_back_idl.max()))
+ims = dict(vmin=0, vmax=vmax, origin="lower", cmap="Greys")
+ims2 = dict(vmin=-0.02 * vmax, vmax=0.02 * vmax, origin="lower", cmap="seismic")
 
-img_plane_idl = readsav("img_plane_idl.sav")["img_plane"].copy().T
-img_plane_idl *= img_plane.sum() / img_plane_idl.sum()
-
-
-# %%
-eps = img_plane_idl.max() / 1000
+ncols = len(plane_bins)
 
 fig, ax = plt.subplots(
-    1, 3, figsize=(18, 6), layout="constrained", sharex=True, sharey=True
+    3,
+    ncols,
+    figsize=(ncols * 4.2, 3 * 4.2),
+    layout="constrained",
+    sharex=True,
+    sharey=True,
 )
-ax[0].imshow(img_plane.T, origin="lower", vmin=0, vmax=vmax, cmap="Greys")
-ax[0].set_xlabel("x0")
-ax[0].set_ylabel("x1")
 
-ax[1].imshow(img_plane_idl.T, origin="lower", vmin=0, vmax=vmax, cmap="Greys")
-ax[1].set_xlabel("x0")
-ax[1].set_ylabel("x1")
+for i, pl in enumerate(plane_bins):
+    ax[0, i].imshow(sino_back[:, :, pl].T, **ims)
+    ax[1, i].imshow(sino_back_idl[:, :, pl].T, **ims)
+    ax[2, i].imshow((sino_back[:, :, pl] - sino_back_idl[:, :, pl]).T, **ims2)
+    ax[0, i].set_title(f"parallelproj backproj image plane {pl}", fontsize="medium")
+    ax[1, i].set_title(f"KUL IDL backproj image plane {pl}", fontsize="medium")
+    ax[2, i].set_title(f"parallelproj - KUL image plane {pl}", fontsize="medium")
 
-ax[2].imshow(
-    ((img_plane - img_plane_idl) / (img_plane_idl + eps)).T,
-    origin="lower",
-    vmin=-0.05,
-    vmax=0.05,
-    cmap="seismic",
-)
 fig.show()
-
-# %%
-
-ix1 = 470
-
-fig2, ax2 = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
-ax2[0].plot(img_plane[:, ix1], "k-", drawstyle="steps-mid")
-ax2[0].plot(img_plane_idl[:, ix1], "r:", drawstyle="steps-mid")
-
-ax2[1].plot(
-    (img_plane[:, ix1] - img_plane_idl[:, ix1]) / (img_plane_idl[:, ix1] + eps),
-    "k-",
-    drawstyle="steps-mid",
-)
-fig2.show()
-
-# %%
-# fig = plt.figure(figsize=(8, 8), tight_layout=True)
-# ax = fig.add_subplot(111, projection="3d")
-# scanner.show_lor_endpoints(ax)
-# fig.show()
