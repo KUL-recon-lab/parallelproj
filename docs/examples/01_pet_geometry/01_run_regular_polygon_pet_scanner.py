@@ -152,10 +152,13 @@ fig2.show()
 # --------------------------------------------------
 #
 # By default, endpoint indices increase **clockwise** when the ring is viewed
-# from the positive symmetry-axis direction.
-# :class:`.RingEndpointOrdering` lets you switch to **counterclockwise** ordering.
-# The ``phi0`` parameter rotates the starting angle of side 0 (in radians); it
-# is ignored when ``phis`` is supplied explicitly.
+# from the negative symmetry-axis direction (for ``symmetry_axis=2``: from -z
+# toward +z, the default 3D view with +x right and +y down).  Index 0 sits at
+# the top (-y).  :class:`.RingEndpointOrdering` lets you switch to
+# **counterclockwise** ordering.  The ``phi0`` parameter rotates the starting
+# angle of side 0 (in radians) as a right-hand rotation about the symmetry axis
+# (positive ``phi0`` moves side 0 toward +x); it is ignored when ``phis`` is
+# supplied explicitly.
 #
 # The 2x2 grid below shows all combinations of CW/CCW ordering with
 # ``phi0=0`` and ``phi0=pi/8`` (half a polygon step for an 8-sided scanner).

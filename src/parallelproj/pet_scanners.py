@@ -27,23 +27,20 @@ if TYPE_CHECKING:
 class RingEndpointOrdering(enum.Enum):
     """Direction in which endpoint indices increase around a detector ring.
 
-    The ordering is defined relative to the scanner's symmetry axis
-    (set via the ``symmetry_axis`` parameter of
-    :class:`RegularPolygonPETScannerGeometry`).  When the ring is viewed
-    from the **positive** symmetry-axis direction, the two conventions are:
+    The ordering is defined for the standard view of the scanner: looking
+    along the symmetry axis from its **negative** side toward the positive
+    side (for ``symmetry_axis=2`` this is looking from -z toward +z, the
+    default 3D view, with +x to the right and +y pointing down).  Index 0
+    sits at the 12 o'clock position (the top, i.e. the -y direction for
+    ``symmetry_axis=2``); the two conventions differ in which way the
+    indices then advance:
 
     ``CLOCKWISE``
-        Index 0 is at the 12 o'clock position and subsequent indices advance
-        clockwise.  This is the default and matches the original behaviour.
+        Indices advance clockwise on screen (toward +x first).  This is the
+        default.
 
     ``COUNTERCLOCKWISE``
-        Index 0 is at the 12 o'clock position and subsequent indices advance
-        counterclockwise.
-
-    For the common case ``symmetry_axis=2`` (axial = z), the ring lies in
-    the x-y plane and is viewed from above (-z).  Index 0 is at the top
-    (-y direction) and advances clockwise (toward +x) or counterclockwise
-    (toward -x) depending on the chosen convention.
+        Indices advance counterclockwise on screen (toward -x first).
     """
 
     CLOCKWISE = enum.auto()
@@ -411,7 +408,9 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             azimuthal offset of side 0 in radians, by default 0.  With the
             default (and ``symmetry_axis=2``) side 0 is centred on the -y axis,
             which is the "top" of the default 3D view (viewed from -z with +y
-            pointing down).  Only applied when ``phis`` is ``None``; ignored when
+            pointing down).  A positive ``phi0`` is a right-hand rotation about
+            the symmetry axis, i.e. for ``symmetry_axis=2`` it moves side 0
+            toward +x.  Only applied when ``phis`` is ``None``; ignored when
             ``phis`` is provided explicitly.
         lor_endpoint_positions : Array or None, optional
             1-D array of crystal positions (in mm) along each polygon side,
@@ -486,16 +485,9 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         )
 
         # angle of each "side"
-        #
-        # The ``+ pi`` offset anchors side 0 (when ``phi0=0``) on the -y axis,
-        # i.e. the *top* of the default 3D view (elev=0, roll=180,
-        # vertical_axis="y" -- viewed from -z with +y pointing down).  It is a
-        # global rotation of the whole ring, so it does not change the direction
-        # in which the endpoint index increases (CW/CCW).
         if phis is None:
             self._phis = (
                 phi0
-                + self.xp.pi
                 + 2
                 * self.xp.pi
                 * self.xp.arange(self._num_sides, dtype=xp.float32, device=dev)
@@ -611,7 +603,7 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         if inds is None:
             inds = self.lor_endpoint_numbers
 
-        if self._ring_endpoint_ordering is RingEndpointOrdering.CLOCKWISE:
+        if self._ring_endpoint_ordering is RingEndpointOrdering.COUNTERCLOCKWISE:
             side = inds // self._num_lor_endpoints_per_side
             within = inds - side * self._num_lor_endpoints_per_side
             new_side = self.xp.astype(
@@ -639,7 +631,13 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         cosphi = self.xp.cos(phi)
         sinphi = self.xp.sin(phi)
 
-        lor_endpoints[:, self.ax0] = cosphi * self.radius - sinphi * pos
+        # The transaxial ``ax0`` coordinate is reflected (leading minus sign) so
+        # that -- for ``symmetry_axis=2`` viewed from -z with +y pointing down
+        # (the default 3D view) -- side 0 (``phi0=0``) sits at the *top* (-y) and
+        # increasing ``phi``/``phi0`` is a right-hand rotation about +z (module 0
+        # moves toward +x).  Endpoint numbering then runs clockwise on screen for
+        # ``RingEndpointOrdering.CLOCKWISE`` (the identity ordering).
+        lor_endpoints[:, self.ax0] = -cosphi * self.radius + sinphi * pos
         lor_endpoints[:, self.ax1] = sinphi * self.radius + cosphi * pos
 
         return lor_endpoints
@@ -899,7 +897,9 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             azimuthal offset of side 0 in radians, by default 0.  With the
             default (and ``symmetry_axis=2``) side 0 is centred on the -y axis,
             which is the "top" of the default 3D view (viewed from -z with +y
-            pointing down).  Only applied when ``phis`` is ``None``; ignored when
+            pointing down).  A positive ``phi0`` is a right-hand rotation about
+            the symmetry axis, i.e. for ``symmetry_axis=2`` it moves side 0
+            toward +x.  Only applied when ``phis`` is ``None``; ignored when
             ``phis`` is provided explicitly.
         lor_endpoint_positions : Array or None, optional
             Custom 1-D array of crystal positions along each polygon side in mm.
