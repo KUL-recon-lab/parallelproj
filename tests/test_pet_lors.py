@@ -663,6 +663,11 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
     with pytest.raises(TypeError, match="target_layout"):
         ppl.SinogramAxialCompressionOperator(lor_s1, 3, target_layout="GE")  # type: ignore[arg-type]
 
+    with pytest.raises(TypeError, match="target_segment_order"):
+        ppl.SinogramAxialCompressionOperator(
+            lor_s1, 3, target_segment_order="POSITIVE_FIRST"  # type: ignore[arg-type]
+        )
+
     lor_s3_input = ppl.RegularPolygonPETLORDescriptor(
         scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
     )
