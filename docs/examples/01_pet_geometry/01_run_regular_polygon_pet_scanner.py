@@ -41,7 +41,7 @@ scanner1 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
-    ring_positions=xp.linspace(-4, 4, 3, device=dev),
+    ring_positions=xp.linspace(-16, 16, 3, device=dev),
     symmetry_axis=2,
 )
 
@@ -52,7 +52,7 @@ scanner2 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
-    ring_positions=xp.linspace(-4, 4, 3, device=dev),
+    ring_positions=xp.linspace(-16, 16, 3, device=dev),
     symmetry_axis=1,
 )
 
@@ -111,6 +111,8 @@ ax1 = fig.add_subplot(221, projection="3d")
 ax2 = fig.add_subplot(222, projection="3d")
 ax3 = fig.add_subplot(223, projection="3d")
 ax4 = fig.add_subplot(224, projection="3d")
+for ax in (ax1, ax2, ax3, ax4):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner1.show_lor_endpoints(ax1)
 scanner2.show_lor_endpoints(ax2)
 scanner3.show_lor_endpoints(ax3)
@@ -141,6 +143,7 @@ open_scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 
 fig2 = plt.figure(figsize=(8, 8), tight_layout=True)
 ax2a = fig2.add_subplot(111, projection="3d")
+ax2a.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 open_scanner.show_lor_endpoints(ax2a)
 fig2.show()
 
@@ -185,8 +188,8 @@ for ax, (ordering, phi0, title) in zip(axes.flat, configs):
         ring_endpoint_ordering=ordering,
         phi0=phi0,
     )
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
     scanner.show_lor_endpoints(ax, show_linear_index=True, annotation_fontsize=10)
-    ax.view_init(elev=90, azim=-90)
     ax.set_title(title, fontsize="medium")
 
 fig3.suptitle(
@@ -274,6 +277,9 @@ scanner5_uniform = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
     symmetry_axis=2,
 )
+
+for ax in (ax5a, ax5b):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 
 scanner5_uniform.show_lor_endpoints(ax5a)
 ax5a.set_title("Uniform spacing (4 mm)", fontsize="medium")

@@ -154,6 +154,8 @@ _ph = _last_plane_highest_seg(lor_desc1)
 fig = plt.figure(figsize=(16, 8), tight_layout=True)
 ax1 = fig.add_subplot(121, projection="3d")
 ax2 = fig.add_subplot(122, projection="3d")
+for ax in (ax1, ax2):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax1)
 lor_desc1.show_views(
     ax1,
@@ -238,6 +240,8 @@ _ph_s5 = _last_plane_highest_seg(lor_desc_s5)
 fig_3d1 = plt.figure(figsize=(16, 8), tight_layout=True)
 ax3d1a = fig_3d1.add_subplot(121, projection="3d")
 ax3d1b = fig_3d1.add_subplot(122, projection="3d")
+for ax in (ax3d1a, ax3d1b):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax3d1a)
 lor_desc_s5.show_views(
     ax3d1a,
@@ -308,6 +312,8 @@ _ph_s5_mrd9 = _last_plane_highest_seg(lor_desc_s5_mrd9)
 fig_3d2 = plt.figure(figsize=(16, 8), tight_layout=True)
 ax3d2a = fig_3d2.add_subplot(121, projection="3d")
 ax3d2b = fig_3d2.add_subplot(122, projection="3d")
+for ax in (ax3d2a, ax3d2b):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax3d2a)
 lor_desc_s5_mrd9.show_views(
     ax3d2a,
@@ -482,6 +488,7 @@ print(
 
 
 def _draw_panel(ax, view_direction, radial_direction):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")  # look down the ring (z) axis
     mini.show_lor_endpoints(ax, annotation_fontsize=9, show_linear_index=True)
     d = pl.RegularPolygonPETLORDescriptor(
         mini,
@@ -506,7 +513,6 @@ def _draw_panel(ax, view_direction, radial_direction):
     ax.set_title(
         f"view_direction={view_direction.name}, radial_direction={radial_direction.name}"
     )
-    ax.view_init(elev=90, azim=-90)  # look down the ring (z) axis
 
 
 fig_k = plt.figure(figsize=(13, 13), tight_layout=True)

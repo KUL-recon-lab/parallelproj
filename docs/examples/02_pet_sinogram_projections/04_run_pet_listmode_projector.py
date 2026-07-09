@@ -70,6 +70,7 @@ print(event_end_coordinates)
 
 fig = plt.figure(figsize=(8, 8))
 ax = fig.add_subplot(111, projection="3d")
+ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax)
 for i in range(event_start_coordinates.shape[0]):
     ax.plot(

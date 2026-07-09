@@ -82,6 +82,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
 
 fig = plt.figure(figsize=(8, 8))
 ax1 = fig.add_subplot(111, projection="3d")
+ax1.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 proj.show_geometry(ax1)
 fig.tight_layout()
 fig.show()

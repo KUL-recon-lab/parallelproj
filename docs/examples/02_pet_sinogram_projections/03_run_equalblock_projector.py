@@ -140,6 +140,8 @@ assert proj.adjointness_test(dtype=xp.float32)
 fig = plt.figure(figsize=(8, 4), tight_layout=True)
 ax0 = fig.add_subplot(121, projection="3d")
 ax1 = fig.add_subplot(122, projection="3d")
+for ax in (ax0, ax1):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 proj.show_geometry(ax0)
 proj.show_geometry(ax1)
 lor_desc.show_block_pair_lors(ax1, block_pair_nums=None, color=plt.cm.tab10(0))

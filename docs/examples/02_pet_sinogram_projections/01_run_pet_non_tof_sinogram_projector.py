@@ -89,6 +89,8 @@ proj2 = parallelproj.projectors.RegularPolygonPETProjector(
 fig = plt.figure(figsize=(16, 8))
 ax1 = fig.add_subplot(121, projection="3d")
 ax2 = fig.add_subplot(122, projection="3d")
+for ax in (ax1, ax2):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 proj.show_geometry(ax1)
 proj2.show_geometry(ax2, color=(0, 0, 1))
 fig.tight_layout()

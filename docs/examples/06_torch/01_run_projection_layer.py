@@ -323,6 +323,7 @@ else:
 
 fig = plt.figure(figsize=(10, 10))
 ax = fig.add_subplot(111, projection="3d")
+ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 proj.show_geometry(ax)
 fig.tight_layout()
 fig.show()

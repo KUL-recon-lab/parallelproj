@@ -97,6 +97,7 @@ scanner = parallelproj.pet_scanners.ModularizedPETScannerGeometry(mods)
 
 fig = plt.figure(tight_layout=True)
 ax = fig.add_subplot(111, projection="3d")
+ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax, annotation_fontsize=4, show_linear_index=False)
 fig.show()
 
@@ -137,6 +138,7 @@ lor_desc = parallelproj.pet_lors.EqualBlockPETLORDescriptor(
 
 fig2 = plt.figure(tight_layout=True)
 ax2 = fig2.add_subplot(111, projection="3d")
+ax2.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax2, annotation_fontsize=4, show_linear_index=False)
 lor_desc.show_block_pair_lors(
     ax2, block_pair_nums=xp.asarray([0], device=dev), color=plt.cm.tab10(0)
@@ -154,6 +156,7 @@ fig2.show()
 
 fig3 = plt.figure(tight_layout=True)
 ax3 = fig3.add_subplot(111, projection="3d")
+ax3.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax3, annotation_fontsize=4, show_linear_index=False)
 lor_desc.show_block_pair_lors(ax3, block_pair_nums=None, color=plt.cm.tab10(0))
 fig3.show()
