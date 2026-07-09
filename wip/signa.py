@@ -37,6 +37,7 @@ lor_desc = lors.RegularPolygonPETLORDescriptor(
         # num_rings=scanner.num_rings, max_ring_difference=scanner.num_rings - 1
         num_rings=scanner.num_rings,
         max_ring_difference=1,
+        segment_order=lors.SegmentOrder.NEGATIVE_FIRST,
     ),
     radial_trim=45,  # 447 - 90 = 357 bins, central -> 178
     view_direction=lors.ViewDirection.PLUS,  # default
@@ -73,7 +74,8 @@ sino_back = to_numpy_array(proj.adjoint(sino))
 sino_back_idl = np.swapaxes(readsav("sino_back.sav")["sino_back"].copy(), 0, 2)
 sino_back_idl *= sino_back.sum() / sino_back_idl.sum()
 
-sino_back_idl = np.flip(sino_back_idl, (0, 1))
+# need to flip the left right direction (x0/x direction) because of different defs of the coordinate systems
+sino_back_idl = np.flip(sino_back_idl, 0)
 
 print(np.sum((sino_back - sino_back_idl) ** 2))
 
