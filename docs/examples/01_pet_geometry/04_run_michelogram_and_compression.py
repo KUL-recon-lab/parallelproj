@@ -441,3 +441,85 @@ ax_ge.set_title(
     fontsize="small",
 )
 fig_ge.show()
+
+# %%
+# Segment ordering: positive-first vs negative-first
+# --------------------------------------------------
+#
+# Within the sinogram, segment ``0`` always comes first; the remaining
+# oblique segments are laid out as :math:`\pm k` *pairs*.  The
+# :class:`.SegmentOrder` enum controls which member of each pair precedes the
+# other:
+#
+# * ``SegmentOrder.POSITIVE_FIRST`` (default) -> ``0, +1, -1, +2, -2, ...``
+# * ``SegmentOrder.NEGATIVE_FIRST``           -> ``0, -1, +1, -2, +2, ...``
+#
+# This is a **pure permutation** of the sinogram planes: the ring pairs, the
+# per-plane multiplicities and the segment *numbering* are all unchanged --
+# only the plane *index* assigned to each ``(segment, axial midpoint)`` group
+# differs.  It applies to both the ``STANDARD`` and ``GE`` layouts and is set
+# on the :class:`.Michelogram` (and forwarded by :meth:`.Michelogram.ge` and
+# ``SinogramAxialCompressionOperator``'s ``target_segment_order`` argument).
+#
+# Below we build the same Michelogram under both orderings.  The plane-index
+# numerals in segment 0 are identical, but the numbering of the oblique
+# segments swaps: read off how the ``+k`` and ``-k`` staircases trade their
+# index ranges.  We do this once for a Siemens-style span-3 layout and once
+# for the GE layout, since the ordering knob applies to both.
+
+SegmentOrder = parallelproj.pet_lors.SegmentOrder
+
+
+def _show_segment_order_pair(make_michelogram, suptitle):
+    """Draw a POSITIVE_FIRST vs NEGATIVE_FIRST Michelogram pair.
+
+    ``make_michelogram(order)`` returns a :class:`.Michelogram` built with the
+    given :class:`.SegmentOrder`.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6.5), tight_layout=True)
+    for ax, order in zip(
+        axes, (SegmentOrder.POSITIVE_FIRST, SegmentOrder.NEGATIVE_FIRST)
+    ):
+        m_order = make_michelogram(order)
+        m_order.show(ax, plane_index_fontsize=8)
+        # de-duplicated, order-preserving segment sequence for the title
+        seen: list[int] = []
+        for s in (int(v) for v in to_numpy_array(m_order.plane_segment)):
+            if s not in seen:
+                seen.append(s)
+        ax.set_title(
+            f"{order.name}\nsegment order: "
+            + ", ".join(f"{s:+d}" if s != 0 else "0" for s in seen),
+            fontsize="medium",
+        )
+    fig.suptitle(suptitle, fontsize="large")
+    fig.show()
+
+
+# Siemens-style span-3 layout under both orderings
+_show_segment_order_pair(
+    lambda order: parallelproj.pet_lors.Michelogram(
+        num_rings=9,
+        max_ring_difference=8,
+        span=3,
+        segment_order=order,
+    ),
+    "Same span-3 Michelogram, two SegmentOrder conventions "
+    "(plane numbering of the oblique segments swaps)",
+)
+
+# %%
+# The same knob works for the **GE layout**.  Here segment 0 already folds the
+# ``dZ = {-1, 0, +1}`` cross planes into virtual direct planes, and each
+# oblique segment ``+/-k`` is a ``{+/-2k, +/-(2k+1)}`` staircase; the
+# ``segment_order`` only decides whether ``+k`` or ``-k`` is numbered first.
+# ``Michelogram.ge`` forwards the argument, so no ``layout=`` is needed.
+
+_show_segment_order_pair(
+    lambda order: parallelproj.pet_lors.Michelogram.ge(
+        num_rings=9,
+        max_ring_difference=8,
+        segment_order=order,
+    ),
+    "Same GE-layout Michelogram, two SegmentOrder conventions",
+)
