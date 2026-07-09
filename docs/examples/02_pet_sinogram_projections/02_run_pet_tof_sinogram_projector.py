@@ -44,7 +44,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_lor_endpoints_per_side=15,
     lor_spacing=2.3,
     ring_positions=xp.linspace(-4, 4, num_rings, device=dev),
-    symmetry_axis=1,
+    symmetry_axis=2,
 )
 
 # %%
@@ -69,7 +69,7 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 # define a first projector using an image with 40x8x40 voxels of size 2x2x2 mm
 # where the image center is at world coordinate (0, 0, 0)
 proj = parallelproj.projectors.RegularPolygonPETProjector(
-    lor_desc, img_shape=(40, 7, 40), voxel_size=(2.0, 2.0, 2.0)
+    lor_desc, img_shape=(40, 40, 7), voxel_size=(2.0, 2.0, 2.0)
 )
 
 

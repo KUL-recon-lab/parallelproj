@@ -59,7 +59,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_lor_endpoints_per_side=4,
     lor_spacing=8.0,
     ring_positions=2 * num_rings * xp.linspace(-1, 1, num_rings, device=dev),
-    symmetry_axis=1,
+    symmetry_axis=2,
 )
 
 # %%
