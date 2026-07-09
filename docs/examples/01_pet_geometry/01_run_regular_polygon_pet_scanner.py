@@ -193,7 +193,7 @@ for ax, (ordering, phi0, title) in zip(axes.flat, configs):
     ax.set_title(title, fontsize="medium")
 
 fig3.suptitle(
-    "Endpoint ordering x phi0  (symmetry_axis=2, viewed from +z)", fontsize=12
+    "Endpoint ordering x phi0  (symmetry_axis=2, viewed from -z)", fontsize=12
 )
 fig3.show()
 

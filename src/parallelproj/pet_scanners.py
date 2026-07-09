@@ -41,8 +41,8 @@ class RingEndpointOrdering(enum.Enum):
         counterclockwise.
 
     For the common case ``symmetry_axis=2`` (axial = z), the ring lies in
-    the x-y plane and is viewed from above (+z).  Index 0 is at the top
-    (+y direction) and advances clockwise (toward +x) or counterclockwise
+    the x-y plane and is viewed from above (-z).  Index 0 is at the top
+    (-y direction) and advances clockwise (toward +x) or counterclockwise
     (toward -x) depending on the chosen convention.
     """
 
@@ -604,7 +604,7 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         if inds is None:
             inds = self.lor_endpoint_numbers
 
-        if self._ring_endpoint_ordering is RingEndpointOrdering.COUNTERCLOCKWISE:
+        if self._ring_endpoint_ordering is RingEndpointOrdering.CLOCKWISE:
             side = inds // self._num_lor_endpoints_per_side
             within = inds - side * self._num_lor_endpoints_per_side
             new_side = self.xp.astype(
