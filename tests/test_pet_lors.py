@@ -412,7 +412,7 @@ def test_zig_zag_order(xp: ModuleType, dev: str) -> None:
 def test_view_radial_direction_and_anchor(xp: ModuleType, dev: str) -> None:
     """View 0's central bin connects detectors (0, N/2); ``view_direction`` and
     ``radial_direction`` each flip exactly their own axis while preserving that
-    anchor; the default scanner places module 0 on +y."""
+    anchor; the default scanner places module 0 on -y (top)."""
     import numpy as np
 
     scanner = pps.RegularPolygonPETScannerGeometry(
@@ -421,10 +421,10 @@ def test_view_radial_direction_and_anchor(xp: ModuleType, dev: str) -> None:
     )
     N = scanner.num_lor_endpoints_per_ring
 
-    # default: module 0 centred on +y (top) for symmetry_axis=2
+    # default: module 0 centred on -y (top of the default view) for symmetry_axis=2
     ep = to_numpy_array(scanner.all_lor_endpoints).reshape(-1, 3)
     c0 = ep[:4].mean(0)  # module-0 (first per_side endpoints) centre
-    assert abs(float(c0[0])) < 1e-3 and float(c0[1]) > 0.0
+    assert abs(float(c0[0])) < 1e-3 and float(c0[1]) < 0.0
 
     def desc(**kw):
         return ppl.RegularPolygonPETLORDescriptor(

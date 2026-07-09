@@ -409,9 +409,9 @@ class RegularPolygonPETScannerModule(PETScannerModule):
             default ``RingEndpointOrdering.CLOCKWISE``.
         phi0 : float, optional
             azimuthal offset of side 0 in radians, by default 0.  With the
-            default (and ``symmetry_axis=2``) side 0 is centred on the +y axis
-            ("top"), matching the vertical-axis reference used by most PET
-            frameworks.  Only applied when ``phis`` is ``None``; ignored when
+            default (and ``symmetry_axis=2``) side 0 is centred on the -y axis,
+            which is the "top" of the default 3D view (viewed from -z with +y
+            pointing down).  Only applied when ``phis`` is ``None``; ignored when
             ``phis`` is provided explicitly.
         lor_endpoint_positions : Array or None, optional
             1-D array of crystal positions (in mm) along each polygon side,
@@ -486,9 +486,16 @@ class RegularPolygonPETScannerModule(PETScannerModule):
         )
 
         # angle of each "side"
+        #
+        # The ``+ pi`` offset anchors side 0 (when ``phi0=0``) on the -y axis,
+        # i.e. the *top* of the default 3D view (elev=0, roll=180,
+        # vertical_axis="y" -- viewed from -z with +y pointing down).  It is a
+        # global rotation of the whole ring, so it does not change the direction
+        # in which the endpoint index increases (CW/CCW).
         if phis is None:
             self._phis = (
                 phi0
+                + self.xp.pi
                 + 2
                 * self.xp.pi
                 * self.xp.arange(self._num_sides, dtype=xp.float32, device=dev)
@@ -890,9 +897,9 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
             default ``RingEndpointOrdering.CLOCKWISE``.
         phi0 : float, optional
             azimuthal offset of side 0 in radians, by default 0.  With the
-            default (and ``symmetry_axis=2``) side 0 is centred on the +y axis
-            ("top"), matching the vertical-axis reference used by most PET
-            frameworks.  Only applied when ``phis`` is ``None``; ignored when
+            default (and ``symmetry_axis=2``) side 0 is centred on the -y axis,
+            which is the "top" of the default 3D view (viewed from -z with +y
+            pointing down).  Only applied when ``phis`` is ``None``; ignored when
             ``phis`` is provided explicitly.
         lor_endpoint_positions : Array or None, optional
             Custom 1-D array of crystal positions along each polygon side in mm.

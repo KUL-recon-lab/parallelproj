@@ -391,7 +391,7 @@ fig_seg_ge.show()
 # * ``ring_endpoint_ordering`` (on the *scanner*) -- physical crystal numbering
 #   direction around the ring (``CLOCKWISE`` / ``COUNTERCLOCKWISE``).
 # * ``phi0`` (on the *scanner*) -- azimuth of module 0.  The default ``0`` places
-#   module 0 on the +y axis (top) for ``symmetry_axis=2``.
+#   module 0 on the -y axis (top of the default view) for ``symmetry_axis=2``.
 # * ``zig_zag_order`` -- which endpoint takes the interleaving half-step
 #   (``END_FIRST`` / ``START_FIRST``).
 # * ``view_direction`` -- direction in which the view index advances
@@ -532,7 +532,7 @@ fig_k.show()
 # -----------------------
 #
 # The default is that view 0's central bin connects detectors ``(0, N/2)`` and
-# module 0 sits on +y.
+# module 0 sits on -y (top of the default view).
 # To line a descriptor up with a specific vendor's sinograms you set a few knobs
 # -- there is **no single "vendor" setting**, because e.g. different vendors use
 # opposite handedness:
