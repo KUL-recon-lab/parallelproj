@@ -24,6 +24,28 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
+# Scanner coordinate system (``symmetry_axis=2``)
+# -----------------------------------------------
+#
+# ``parallelproj`` labels the three world axes ``x0``, ``x1``, ``x2`` rather
+# than ``x``, ``y``, ``z``.  ``x0`` is the **left-most (first) axis of a 3-D
+# image array** (i.e. the axis you index first, ``img[i0, i1, i2]``), ``x1``
+# the second, and ``x2`` the third.
+#
+# For the common ``symmetry_axis=2`` case the cylinder (axial) axis is ``x2``.
+# Picture yourself **standing in front of the scanner, looking from -z to +z
+# (into the bore)**:
+#
+# * ``x0`` (``x``) runs **left to right**,
+# * ``x1`` (``y``) runs **top to bottom** (i.e. ``+x1`` points down),
+# * ``x2`` (``z``) runs **away from you, into the scanner**.
+#
+# This right-handed convention is aligned with the DICOM/patient (LPS) axes for
+# a head-first-supine patient, and it is why the 3-D plots below are drawn from
+# that "in front of the scanner" viewpoint (``ax.view_init(..., roll=180,
+# vertical_axis="y")``), so ``+x1`` appears pointing downward.
+
+# %%
 # Define four different PET scanners with different geometries
 # ------------------------------------------------------------
 # :class:`.RegularPolygonPETScannerGeometry` can be used to create the
