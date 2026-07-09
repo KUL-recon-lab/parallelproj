@@ -1291,10 +1291,14 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
         _ = desc.start_plane_index
 
 
-def test_michelogram_segment_order() -> None:
+def test_michelogram_segment_order(xp: ModuleType, dev: str) -> None:
     """SegmentOrder controls whether +k or -k precedes its partner; it is a
     pure permutation of the planes (counts/multiplicities/segment multiset
-    unchanged) and defaults to POSITIVE_FIRST for backward compatibility."""
+    unchanged) and defaults to POSITIVE_FIRST for backward compatibility.
+
+    ``Michelogram`` is array-backend agnostic (numpy internally), so the
+    ``xp``/``dev`` fixtures are accepted only to satisfy the module-level
+    parametrization."""
     import numpy as np
 
     SO = ppl.SegmentOrder
