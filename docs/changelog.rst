@@ -55,6 +55,15 @@ Major new capabilities
   "span 2" in STIR).  ``span`` is ignored for this layout and
   :attr:`Michelogram.span` returns ``None``.  Combine it with a matching
   ``RegularPolygonPETLORDescriptor`` for the GE scanner of interest.
+- **Selectable segment ordering** for ``Michelogram``: new ``SegmentOrder`` enum and
+  ``segment_order=`` argument (also on ``Michelogram.ge`` and, as
+  ``target_segment_order=``, on ``SinogramAxialCompressionOperator``).
+  ``SegmentOrder.POSITIVE_FIRST`` (default) keeps the existing
+  ``0, +1, -1, +2, -2, …`` layout; ``SegmentOrder.NEGATIVE_FIRST`` gives
+  ``0, -1, +1, -2, +2, …`` (negative segment before the positive one of each
+  ``±k`` pair).  This is a pure permutation of the sinogram planes -- segment
+  numbering, plane counts and multiplicities are unchanged -- and works for both
+  the ``STANDARD`` and ``GE`` layouts.
 - **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
   that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
   ``mode="average"``).  A ``target_layout=MichelogramLayout.GE`` option compresses a

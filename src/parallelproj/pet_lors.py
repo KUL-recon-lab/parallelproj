@@ -126,6 +126,23 @@ class MichelogramLayout(enum.Enum):
     """
 
 
+class SegmentOrder(enum.Enum):
+    """Order in which the signed oblique segments are laid out in a
+    :class:`Michelogram`.
+
+    Segment 0 always comes first; the two conventions differ only in whether
+    the positive or the negative member of each :math:`\\pm k` pair precedes
+    the other.  This is a pure permutation of the sinogram planes -- the number
+    of planes, their multiplicities and the segment *numbering*
+    (:meth:`Michelogram.ring_diff_to_segment`) are unaffected.
+    """
+
+    POSITIVE_FIRST = enum.auto()
+    """Segments ordered ``0, +1, -1, +2, -2, ...`` (default)."""
+    NEGATIVE_FIRST = enum.auto()
+    """Segments ordered ``0, -1, +1, -2, +2, ...``."""
+
+
 class Michelogram:
     """Axial plane layout for a cylindrical PET scanner under odd span.
 
@@ -161,7 +178,17 @@ class Michelogram:
         Values larger than ``num_rings - 1`` have no extra effect.
     span : int, optional
         Axial compression factor -- must be odd and :math:`\\ge 1`.
-        Default ``1`` (no compression).
+        Default ``1`` (no compression).  Ignored (and reported as ``None``)
+        for ``layout=MichelogramLayout.GE``.
+    layout : MichelogramLayout, optional
+        Axial plane layout / segmentation convention, by default
+        ``MichelogramLayout.STANDARD``.  See :class:`MichelogramLayout`.
+    segment_order : SegmentOrder, optional
+        Order of the signed oblique segments, by default
+        ``SegmentOrder.POSITIVE_FIRST`` (``0, +1, -1, +2, -2, ...``).  Use
+        ``SegmentOrder.NEGATIVE_FIRST`` for ``0, -1, +1, -2, +2, ...``.  This
+        only permutes the sinogram planes; segment numbering and plane counts
+        are unchanged.  See :class:`SegmentOrder`.
 
     Examples
     --------
@@ -173,6 +200,11 @@ class Michelogram:
     >>> int(m.ring_diff_to_segment(0)), int(m.ring_diff_to_segment(2)), \
         int(m.ring_diff_to_segment(-2))
     (0, 1, -1)
+    >>> m.plane_segment.tolist()  # POSITIVE_FIRST (default): +1 before -1
+    [0, 0, 0, 0, 0, 1, -1]
+    >>> m2 = Michelogram(3, 2, span=3, segment_order=SegmentOrder.NEGATIVE_FIRST)
+    >>> m2.plane_segment.tolist()  # NEGATIVE_FIRST: -1 before +1
+    [0, 0, 0, 0, 0, -1, 1]
     """
 
     # ------------------------------------------------------------------
@@ -185,6 +217,7 @@ class Michelogram:
         max_ring_difference: int,
         span: int = 1,
         layout: MichelogramLayout = MichelogramLayout.STANDARD,
+        segment_order: SegmentOrder = SegmentOrder.POSITIVE_FIRST,
     ) -> None:
         if not isinstance(num_rings, int) or num_rings < 1:
             raise ValueError("num_rings must be a positive integer")
@@ -192,8 +225,11 @@ class Michelogram:
             raise ValueError("max_ring_difference must be a non-negative integer")
         if not isinstance(layout, MichelogramLayout):
             raise TypeError("layout must be a MichelogramLayout")
+        if not isinstance(segment_order, SegmentOrder):
+            raise TypeError("segment_order must be a SegmentOrder")
 
         self._layout = layout
+        self._segment_order = segment_order
 
         if layout is MichelogramLayout.GE:
             # GE layout has a fixed (mixed) segmentation; span is meaningless.
@@ -219,14 +255,25 @@ class Michelogram:
         self._build()
 
     @classmethod
-    def ge(cls, num_rings: int, max_ring_difference: int) -> "Michelogram":
+    def ge(
+        cls,
+        num_rings: int,
+        max_ring_difference: int,
+        segment_order: SegmentOrder = SegmentOrder.POSITIVE_FIRST,
+    ) -> "Michelogram":
         """Convenience constructor for the GE-style layout.
 
         Equivalent to ``Michelogram(num_rings, max_ring_difference,
-        layout=MichelogramLayout.GE)``.  See :class:`MichelogramLayout` for the
-        segmentation definition.
+        layout=MichelogramLayout.GE, segment_order=segment_order)``.  See
+        :class:`MichelogramLayout` for the segmentation definition and
+        :class:`SegmentOrder` for the segment ordering.
         """
-        return cls(num_rings, max_ring_difference, layout=MichelogramLayout.GE)
+        return cls(
+            num_rings,
+            max_ring_difference,
+            layout=MichelogramLayout.GE,
+            segment_order=segment_order,
+        )
 
     def ring_diff_to_segment(self, rd: int) -> int:
         """Signed segment number for a given ring difference :math:`e - s`.
@@ -271,9 +318,13 @@ class Michelogram:
                 key = (seg, s + e)
                 plane_groups.setdefault(key, []).append((s, e))
 
-        # standard segment sequence + within-segment axial-midpoint order.
+        # Segment sequence + within-segment axial-midpoint order.  ``sign``
+        # selects which member of each +/-k segment pair comes first:
+        #   POSITIVE_FIRST (sign=-1): 0, +1, -1, +2, -2, ...
+        #   NEGATIVE_FIRST (sign=+1): 0, -1, +1, -2, +2, ...
+        sign = 1 if self._segment_order is SegmentOrder.NEGATIVE_FIRST else -1
         sorted_keys = sorted(
-            plane_groups.keys(), key=lambda k: (abs(k[0]), -k[0], k[1])
+            plane_groups.keys(), key=lambda k: (abs(k[0]), sign * k[0], k[1])
         )
 
         num_planes = len(sorted_keys)
@@ -336,6 +387,12 @@ class Michelogram:
     def layout(self) -> MichelogramLayout:
         """Axial plane layout convention (``STANDARD`` or ``GE``)."""
         return self._layout
+
+    @property
+    def segment_order(self) -> SegmentOrder:
+        """Order of the signed oblique segments (``POSITIVE_FIRST`` or
+        ``NEGATIVE_FIRST``)."""
+        return self._segment_order
 
     @property
     def num_planes(self) -> int:
@@ -593,7 +650,9 @@ class Michelogram:
 
         Convenience wrapper around :meth:`compression_index_maps_to` that
         builds the target Michelogram internally as
-        ``Michelogram(self.num_rings, self.max_ring_difference, span=target_span)``.
+        ``Michelogram(self.num_rings, self.max_ring_difference,
+        span=target_span, segment_order=self.segment_order)`` (the segment
+        ordering is inherited from ``self``).
 
         Parameters
         ----------
@@ -615,7 +674,10 @@ class Michelogram:
         if not isinstance(target_span, int) or target_span < 1 or target_span % 2 == 0:
             raise ValueError("target_span must be an odd positive integer")
         target = Michelogram(
-            self._num_rings, self._max_ring_difference, span=target_span
+            self._num_rings,
+            self._max_ring_difference,
+            span=target_span,
+            segment_order=self._segment_order,
         )
         return self.compression_index_maps_to(target)
 
@@ -955,6 +1017,8 @@ class Michelogram:
             extra = "layout=GE"
         else:
             extra = f"span={self._span}"
+        if self._segment_order is not SegmentOrder.POSITIVE_FIRST:
+            extra += f", segment_order={self._segment_order.name}"
         return (
             f"{self.__class__.__name__}("
             f"num_rings={self._num_rings}, "
@@ -1956,6 +2020,9 @@ class SinogramAxialCompressionOperator(LinearOperator):
         Axial layout of the output sinogram.  ``STANDARD`` (default) uses
         ``target_span``; ``GE`` compresses the span-1 input to the GE layout
         (``target_span`` is ignored).  The GE target requires a span-1 input.
+    target_segment_order : SegmentOrder, optional
+        Segment ordering of the output sinogram, by default
+        ``SegmentOrder.POSITIVE_FIRST``.  See :class:`SegmentOrder`.
 
     Examples
     --------
@@ -1984,6 +2051,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
         mode: str = "sum",
         num_tof_bins: int | None = None,
         target_layout: MichelogramLayout = MichelogramLayout.STANDARD,
+        target_segment_order: SegmentOrder = SegmentOrder.POSITIVE_FIRST,
     ) -> None:
         if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
             raise TypeError("lor_descriptor must be a RegularPolygonPETLORDescriptor")
@@ -1991,6 +2059,8 @@ class SinogramAxialCompressionOperator(LinearOperator):
             raise ValueError("input lor_descriptor must have span=1")
         if not isinstance(target_layout, MichelogramLayout):
             raise TypeError("target_layout must be a MichelogramLayout")
+        if not isinstance(target_segment_order, SegmentOrder):
+            raise TypeError("target_segment_order must be a SegmentOrder")
         if mode not in ("sum", "average"):
             raise ValueError(f"mode must be 'sum' or 'average', got {mode!r}")
         if num_tof_bins is not None and (
@@ -2002,6 +2072,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
 
         self._lor_descriptor = lor_descriptor
         self._target_layout = target_layout
+        self._target_segment_order = target_segment_order
         self._mode = mode
         self._num_tof_bins = num_tof_bins
 
@@ -2018,6 +2089,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
                 num_rings=lor_descriptor.scanner.num_rings,
                 max_ring_difference=lor_descriptor.max_ring_difference,
                 layout=MichelogramLayout.GE,
+                segment_order=target_segment_order,
             )
         else:
             if (
@@ -2031,6 +2103,7 @@ class SinogramAxialCompressionOperator(LinearOperator):
                 num_rings=lor_descriptor.scanner.num_rings,
                 max_ring_difference=lor_descriptor.max_ring_difference,
                 span=self._target_span,
+                segment_order=target_segment_order,
             )
 
         self._out_lor_descriptor = RegularPolygonPETLORDescriptor(
