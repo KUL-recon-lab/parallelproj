@@ -412,7 +412,7 @@ def test_zig_zag_order(xp: ModuleType, dev: str) -> None:
 def test_view_radial_direction_and_anchor(xp: ModuleType, dev: str) -> None:
     """View 0's central bin connects detectors (0, N/2); ``view_direction`` and
     ``radial_direction`` each flip exactly their own axis while preserving that
-    anchor; the default scanner places module 0 on +y."""
+    anchor; the default scanner places module 0 on -y (top)."""
     import numpy as np
 
     scanner = pps.RegularPolygonPETScannerGeometry(
@@ -421,10 +421,10 @@ def test_view_radial_direction_and_anchor(xp: ModuleType, dev: str) -> None:
     )
     N = scanner.num_lor_endpoints_per_ring
 
-    # default: module 0 centred on +y (top) for symmetry_axis=2
+    # default: module 0 centred on -y (top of the default view) for symmetry_axis=2
     ep = to_numpy_array(scanner.all_lor_endpoints).reshape(-1, 3)
     c0 = ep[:4].mean(0)  # module-0 (first per_side endpoints) centre
-    assert abs(float(c0[0])) < 1e-3 and float(c0[1]) > 0.0
+    assert abs(float(c0[0])) < 1e-3 and float(c0[1]) < 0.0
 
     def desc(**kw):
         return ppl.RegularPolygonPETLORDescriptor(
@@ -662,6 +662,11 @@ def test_sinogram_axial_compression_operator(xp: ModuleType, dev: str) -> None:
 
     with pytest.raises(TypeError, match="target_layout"):
         ppl.SinogramAxialCompressionOperator(lor_s1, 3, target_layout="GE")  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="target_segment_order"):
+        ppl.SinogramAxialCompressionOperator(
+            lor_s1, 3, target_segment_order="POSITIVE_FIRST"  # type: ignore[arg-type]
+        )
 
     lor_s3_input = ppl.RegularPolygonPETLORDescriptor(
         scanner, ppl.Michelogram(scanner.num_rings, 2, span=3)
@@ -1289,6 +1294,54 @@ def test_michelogram_ge_layout(xp: ModuleType, dev: str) -> None:
     assert int(desc.num_planes) == int(ge.num_planes) == 31
     with pytest.raises(ValueError):
         _ = desc.start_plane_index
+
+
+def test_michelogram_segment_order(xp: ModuleType, dev: str) -> None:
+    """SegmentOrder controls whether +k or -k precedes its partner; it is a
+    pure permutation of the planes (counts/multiplicities/segment multiset
+    unchanged) and defaults to POSITIVE_FIRST for backward compatibility.
+
+    ``Michelogram`` is array-backend agnostic (numpy internally), so the
+    ``xp``/``dev`` fixtures are accepted only to satisfy the module-level
+    parametrization."""
+    import numpy as np
+
+    SO = ppl.SegmentOrder
+
+    # default is POSITIVE_FIRST: 0, +1, -1
+    m_pos = ppl.Michelogram(3, 2, span=3)
+    m_neg = ppl.Michelogram(3, 2, span=3, segment_order=SO.NEGATIVE_FIRST)
+    assert m_pos.segment_order is SO.POSITIVE_FIRST
+    assert list(m_pos.plane_segment) == [0, 0, 0, 0, 0, 1, -1]
+    assert list(m_neg.plane_segment) == [0, 0, 0, 0, 0, -1, 1]
+
+    # pure permutation: same plane count, segment multiset and total ring pairs
+    a = ppl.Michelogram(13, 11, span=9)
+    b = ppl.Michelogram(13, 11, span=9, segment_order=SO.NEGATIVE_FIRST)
+    assert a.num_planes == b.num_planes
+    assert sorted(a.plane_segment.tolist()) == sorted(b.plane_segment.tolist())
+    assert int(a.plane_multiplicity.sum()) == int(b.plane_multiplicity.sum())
+    # the two orderings differ only in the oblique-segment sign sequence
+    assert not np.array_equal(a.plane_segment, b.plane_segment)
+
+    # GE layout + ge() convenience constructor honour the ordering
+    ge_pos = ppl.Michelogram.ge(6, 5)
+    ge_neg = ppl.Michelogram.ge(6, 5, segment_order=SO.NEGATIVE_FIRST)
+    assert ge_pos.segment_order is SO.POSITIVE_FIRST
+    assert ge_neg.segment_order is SO.NEGATIVE_FIRST
+    # first oblique segment pair is +1,-1 vs -1,+1
+    seg_pos = ge_pos.plane_segment.tolist()
+    seg_neg = ge_neg.plane_segment.tolist()
+    assert seg_pos.index(1) < seg_pos.index(-1)
+    assert seg_neg.index(-1) < seg_neg.index(1)
+
+    # repr only advertises the ordering when it is non-default
+    assert "segment_order" not in repr(m_pos)
+    assert "segment_order=NEGATIVE_FIRST" in repr(m_neg)
+
+    # invalid type is rejected
+    with pytest.raises(TypeError):
+        ppl.Michelogram(3, 2, span=3, segment_order="nope")
 
 
 def test_michelogram_plane_for_ring_pair(xp: ModuleType, dev: str) -> None:

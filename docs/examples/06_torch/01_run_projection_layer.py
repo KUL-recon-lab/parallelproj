@@ -229,7 +229,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_lor_endpoints_per_side=6,
     lor_spacing=3.0,
     ring_positions=torch.linspace(-4, 4, num_rings, device=dev),
-    symmetry_axis=1,
+    symmetry_axis=2,
 )
 
 # setup the LOR descriptor that defines the sinogram
@@ -241,7 +241,7 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 )
 
 proj = parallelproj.projectors.RegularPolygonPETProjector(
-    lor_desc, img_shape=(20, 5, 20), voxel_size=(2.0, 2.0, 2.0)
+    lor_desc, img_shape=(20, 20, 5), voxel_size=(2.0, 2.0, 2.0)
 )
 
 # %%
@@ -323,6 +323,7 @@ else:
 
 fig = plt.figure(figsize=(10, 10))
 ax = fig.add_subplot(111, projection="3d")
+ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 proj.show_geometry(ax)
 fig.tight_layout()
 fig.show()

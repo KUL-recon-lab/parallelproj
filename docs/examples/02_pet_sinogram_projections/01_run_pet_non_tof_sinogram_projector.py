@@ -43,7 +43,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_lor_endpoints_per_side=15,
     lor_spacing=2.3,
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
-    symmetry_axis=1,
+    symmetry_axis=2,
 )
 
 # %%
@@ -64,19 +64,19 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 # that combines the scanner, LOR and image geometry. The latter is defined by
 # the image shape, the voxel size, and the image origin.
 
-# define a first projector using an image with 40x8x40 voxels of size 2x2x2 mm
+# define a first projector using an image with 40x40x8 voxels of size 2x2x2 mm
 # where the image center is at world coordinate (0, 0, 0)
 proj = parallelproj.projectors.RegularPolygonPETProjector(
-    lor_desc, img_shape=(40, 8, 40), voxel_size=(2.0, 2.0, 2.0)
+    lor_desc, img_shape=(40, 40, 8), voxel_size=(2.0, 2.0, 2.0)
 )
 
-# define a second projector using an image with 20x8x30 voxels of size 3x2x2 mm
+# define a second projector using an image with 20x30x8 voxels of size 3x2x2 mm
 # that is off-center
 proj2 = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc,
-    img_shape=(20, 8, 30),
+    img_shape=(20, 30, 8),
     voxel_size=(3.0, 2.0, 2.0),
-    img_origin=(-19, -7, -19),
+    img_origin=(-19, -19, -7),
 )
 
 # %%
@@ -89,6 +89,8 @@ proj2 = parallelproj.projectors.RegularPolygonPETProjector(
 fig = plt.figure(figsize=(16, 8))
 ax1 = fig.add_subplot(121, projection="3d")
 ax2 = fig.add_subplot(122, projection="3d")
+for ax in (ax1, ax2):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 proj.show_geometry(ax1)
 proj2.show_geometry(ax2, color=(0, 0, 1))
 fig.tight_layout()

@@ -55,6 +55,15 @@ Major new capabilities
   "span 2" in STIR).  ``span`` is ignored for this layout and
   :attr:`Michelogram.span` returns ``None``.  Combine it with a matching
   ``RegularPolygonPETLORDescriptor`` for the GE scanner of interest.
+- **Selectable segment ordering** for ``Michelogram``: new ``SegmentOrder`` enum and
+  ``segment_order=`` argument (also on ``Michelogram.ge`` and, as
+  ``target_segment_order=``, on ``SinogramAxialCompressionOperator``).
+  ``SegmentOrder.POSITIVE_FIRST`` (default) keeps the existing
+  ``0, +1, -1, +2, -2, …`` layout; ``SegmentOrder.NEGATIVE_FIRST`` gives
+  ``0, -1, +1, -2, +2, …`` (negative segment before the positive one of each
+  ``±k`` pair).  This is a pure permutation of the sinogram planes -- segment
+  numbering, plane counts and multiplicities are unchanged -- and works for both
+  the ``STANDARD`` and ``GE`` layouts.
 - **``SinogramAxialCompressionOperator``** (``parallelproj.pet_lors``): ``LinearOperator``
   that axially compresses a span-1 sinogram to a higher odd span (``mode="sum"`` or
   ``mode="average"``).  A ``target_layout=MichelogramLayout.GE`` option compresses a
@@ -164,9 +173,10 @@ New examples and documentation
   scanner / sinogram geometry, projectors, iterative algorithms, listmode algorithms,
   transmission / joint estimation, and PyTorch integration. Highlights below.
 - **New example: Michelograms and axial sinogram compression** — how the
-  ``Michelogram`` maps ring pairs to sinogram planes/segments, and using
+  ``Michelogram`` maps ring pairs to sinogram planes/segments, using
   ``SinogramAxialCompressionOperator`` to compress a span-1 sinogram to a higher odd
-  span (and to/from the GE layout).
+  span (and to/from the GE layout), and a ``SegmentOrder`` comparison
+  (positive-first vs negative-first) for both the STANDARD and GE layouts.
 - **New example: zig-zag LOR sampling in a sinogram view** — visualises the
   ``SinogramZigZagOrder`` crystal/LOR endpoint pairing within a view.
 - **New example: sinogram symmetries** — partitioning ring pairs into symmetry
@@ -251,10 +261,33 @@ Breaking Changes
   ``view_direction`` (:class:`~parallelproj.pet_lors.ViewDirection`) and
   ``radial_direction`` (:class:`~parallelproj.pet_lors.RadialDirection`), which
   flip the view / radial index directions.  Together with the scanner's
-  ``ring_endpoint_ordering`` (crystal numbering), ``phi0`` (module-0 azimuth,
-  default +y for ``symmetry_axis=2``) and ``zig_zag_order`` they reproduce any
-  vendor's ``(view, radial) <-> detector-pair`` convention.  See the
+  ``ring_endpoint_ordering`` (crystal numbering), ``phi0`` (module-0 azimuth;
+  ``phi0=0`` puts module 0 at the top -- ``-y`` for ``symmetry_axis=2`` -- see
+  the coordinate-convention change below) and ``zig_zag_order`` they reproduce
+  any vendor's ``(view, radial) <-> detector-pair`` convention.  See the
   ``01_pet_geometry/02_run_regular_polygon_pet_sino.py`` example.
+- **World coordinate / detector-orientation convention changed (breaking)**:
+  for ``symmetry_axis=2`` the transaxial detector layout is now defined for the
+  standard viewpoint -- standing in front of the scanner, looking along the bore from
+  ``-z`` toward ``+z``, with ``x0`` running left->right and ``x1`` top->bottom
+  (``+x1`` points down), aligned with the DICOM/LPS axes of a head-first-supine
+  patient.  Concretely, relative to earlier v2.0 pre-releases:
+
+  - module/side 0 (``phi0=0``) now sits at the **top** (``-x1``) instead of
+    ``+x1``;
+  - ``phi0`` is now a **right-hand rotation about the symmetry axis** -- a
+    positive ``phi0`` moves module 0 toward ``+x0`` (previously ``-x0``);
+  - ``RingEndpointOrdering.CLOCKWISE`` / ``COUNTERCLOCKWISE`` are defined as
+    clockwise / counterclockwise **as seen in that ``-z`` view** (the physical
+    numbering for each enum value therefore swapped).
+
+  These follow from reflecting the transaxial ``ax0`` coordinate of every
+  ``RegularPolygonPETScannerGeometry`` endpoint (for ``symmetry_axis=2`` this is
+  the ``x1``/``y`` axis), so **absolute endpoint coordinates and the module-0 /
+  crystal-0 anchor of existing scanners differ**.  Segment numbering, plane
+  counts and sinogram shapes are unaffected.  The 3-D example plots now render
+  this viewpoint via ``ax.view_init(elev=..., azim=..., roll=180,
+  vertical_axis="y")``.
 - **``TOFNonTOFElementwiseMultiplicationOperator`` removed**.
 - **``ParallelViewProjector3D`` signature changed**: the ``span`` and
   ``max_ring_diff`` keyword arguments have been replaced by a single

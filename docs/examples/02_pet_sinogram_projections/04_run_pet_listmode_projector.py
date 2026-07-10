@@ -45,7 +45,7 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_lor_endpoints_per_side=15,
     lor_spacing=2.3,
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
-    symmetry_axis=1,
+    symmetry_axis=2,
 )
 
 # %%
@@ -70,6 +70,7 @@ print(event_end_coordinates)
 
 fig = plt.figure(figsize=(8, 8))
 ax = fig.add_subplot(111, projection="3d")
+ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner.show_lor_endpoints(ax)
 for i in range(event_start_coordinates.shape[0]):
     ax.plot(
@@ -85,8 +86,8 @@ fig.show()
 # Setup a non-TOF listmode projector and a test image
 # ---------------------------------------------------
 
-img_shape = (40, 9, 40)
-voxel_size = (2.0, 3.0, 2.0)
+img_shape = (40, 40, 9)
+voxel_size = (2.0, 2.0, 3.0)
 
 lm_proj = parallelproj.projectors.ListmodePETProjector(
     event_start_coordinates, event_end_coordinates, img_shape, voxel_size

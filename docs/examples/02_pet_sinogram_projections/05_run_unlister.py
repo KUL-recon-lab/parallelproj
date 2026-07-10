@@ -350,6 +350,7 @@ print(f"num counts in unlisted TOF sinogram: {int(xp.sum(unlisted_tof_sino))}")
 
 fig_sign = plt.figure(figsize=(10, 8))
 ax_sign = fig_sign.add_subplot(111, projection="3d")
+ax_sign.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 lor_desc_sign.show_tof_bins(
     ax=ax_sign, tof_parameters=proj_sign.tof_parameters, views=0, show_colorbar=True
 )
@@ -358,7 +359,6 @@ lim = radius_sign * 1.3
 ax_sign.set_xlim(-lim, lim)
 ax_sign.set_ylim(-lim, lim)
 ax_sign.set_zlim(0, 50)
-ax_sign.view_init(elev=45, azim=-45)
 fig_sign.tight_layout()
 fig_sign.show()
 

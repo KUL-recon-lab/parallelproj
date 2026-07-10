@@ -24,6 +24,28 @@ from example_utils import suggest_array_backend_and_device
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
+# Scanner coordinate system (``symmetry_axis=2``)
+# -----------------------------------------------
+#
+# ``parallelproj`` labels the three world axes ``x0``, ``x1``, ``x2`` rather
+# than ``x``, ``y``, ``z``.  ``x0`` is the **left-most (first) axis of a 3-D
+# image array** (i.e. the axis you index first, ``img[i0, i1, i2]``), ``x1``
+# the second, and ``x2`` the third.
+#
+# For the common ``symmetry_axis=2`` case the cylinder (axial) axis is ``x2``.
+# Picture yourself **standing in front of the scanner, looking from -z to +z
+# (into the bore)**:
+#
+# * ``x0`` (``x``) runs **left to right**,
+# * ``x1`` (``y``) runs **top to bottom** (i.e. ``+x1`` points down),
+# * ``x2`` (``z``) runs **away from you, into the scanner**.
+#
+# This right-handed convention is aligned with the DICOM/patient (LPS) axes for
+# a head-first-supine patient, and it is why the 3-D plots below are drawn from
+# that "in front of the scanner" viewpoint (``ax.view_init(..., roll=180,
+# vertical_axis="y")``), so ``+x1`` appears pointing downward.
+
+# %%
 # Define four different PET scanners with different geometries
 # ------------------------------------------------------------
 # :class:`.RegularPolygonPETScannerGeometry` can be used to create the
@@ -41,7 +63,7 @@ scanner1 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
-    ring_positions=xp.linspace(-4, 4, 3, device=dev),
+    ring_positions=xp.linspace(-16, 16, 3, device=dev),
     symmetry_axis=2,
 )
 
@@ -52,7 +74,7 @@ scanner2 = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     num_sides=12,
     num_lor_endpoints_per_side=8,
     lor_spacing=4.0,
-    ring_positions=xp.linspace(-4, 4, 3, device=dev),
+    ring_positions=xp.linspace(-16, 16, 3, device=dev),
     symmetry_axis=1,
 )
 
@@ -111,6 +133,8 @@ ax1 = fig.add_subplot(221, projection="3d")
 ax2 = fig.add_subplot(222, projection="3d")
 ax3 = fig.add_subplot(223, projection="3d")
 ax4 = fig.add_subplot(224, projection="3d")
+for ax in (ax1, ax2, ax3, ax4):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 scanner1.show_lor_endpoints(ax1)
 scanner2.show_lor_endpoints(ax2)
 scanner3.show_lor_endpoints(ax3)
@@ -141,6 +165,7 @@ open_scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
 
 fig2 = plt.figure(figsize=(8, 8), tight_layout=True)
 ax2a = fig2.add_subplot(111, projection="3d")
+ax2a.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 open_scanner.show_lor_endpoints(ax2a)
 fig2.show()
 
@@ -149,10 +174,13 @@ fig2.show()
 # --------------------------------------------------
 #
 # By default, endpoint indices increase **clockwise** when the ring is viewed
-# from the positive symmetry-axis direction.
-# :class:`.RingEndpointOrdering` lets you switch to **counterclockwise** ordering.
-# The ``phi0`` parameter rotates the starting angle of side 0 (in radians); it
-# is ignored when ``phis`` is supplied explicitly.
+# from the negative symmetry-axis direction (for ``symmetry_axis=2``: from -z
+# toward +z, the default 3D view with +x right and +y down).  Index 0 sits at
+# the top (-y).  :class:`.RingEndpointOrdering` lets you switch to
+# **counterclockwise** ordering.  The ``phi0`` parameter rotates the starting
+# angle of side 0 (in radians) as a right-hand rotation about the symmetry axis
+# (positive ``phi0`` moves side 0 toward +x); it is ignored when ``phis`` is
+# supplied explicitly.
 #
 # The 2x2 grid below shows all combinations of CW/CCW ordering with
 # ``phi0=0`` and ``phi0=pi/8`` (half a polygon step for an 8-sided scanner).
@@ -185,12 +213,12 @@ for ax, (ordering, phi0, title) in zip(axes.flat, configs):
         ring_endpoint_ordering=ordering,
         phi0=phi0,
     )
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
     scanner.show_lor_endpoints(ax, show_linear_index=True, annotation_fontsize=10)
-    ax.view_init(elev=90, azim=-90)
     ax.set_title(title, fontsize="medium")
 
 fig3.suptitle(
-    "Endpoint ordering x phi0  (symmetry_axis=2, viewed from +z)", fontsize=12
+    "Endpoint ordering x phi0  (symmetry_axis=2, viewed from -z)", fontsize=12
 )
 fig3.show()
 
@@ -274,6 +302,9 @@ scanner5_uniform = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     ring_positions=xp.asarray([0.0], dtype=xp.float32, device=dev),
     symmetry_axis=2,
 )
+
+for ax in (ax5a, ax5b):
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
 
 scanner5_uniform.show_lor_endpoints(ax5a)
 ax5a.set_title("Uniform spacing (4 mm)", fontsize="medium")

@@ -332,18 +332,19 @@ def test_phi0(xp: ModuleType, dev: str) -> None:
     assert np.allclose(phis_with, phis_base + phi0_val, atol=1e-5)
 
     # --- endpoint coordinates are consistent with the shifted phis ---
-    # phi0 rotates the ring in the (ax0, ax1) plane.
-    # For symmetry_axis=2: ax0=col1, ax1=col0.
-    # A shift phi → phi+phi0 acts as a rotation in (ax0, ax1) by phi0:
-    #   new[:, ax0] = cos(phi0)*old[:, ax0] - sin(phi0)*old[:, ax1]
-    #   new[:, ax1] = sin(phi0)*old[:, ax0] + cos(phi0)*old[:, ax1]
+    # positive phi0 is a right-hand rotation about +z: for symmetry_axis=2
+    # (ax0=col1=y, ax1=col0=x) module 0 moves from the top (-y) toward +x.
+    # Because the transaxial ax0 coordinate is reflected, a shift
+    # phi → phi+phi0 acts as a rotation by -phi0 in the (ax0, ax1) plane:
+    #   new[:, ax0] =  cos(phi0)*old[:, ax0] + sin(phi0)*old[:, ax1]
+    #   new[:, ax1] = -sin(phi0)*old[:, ax0] + cos(phi0)*old[:, ax1]
     ax0, ax1 = 1, 0  # for symmetry_axis=2
     pts_new = to_numpy_array(s.all_lor_endpoints)
     pts_old = to_numpy_array(s0.all_lor_endpoints)
     cos_a, sin_a = math.cos(phi0_val), math.sin(phi0_val)
     pts_expected = pts_old.copy()
-    pts_expected[:, ax0] = cos_a * pts_old[:, ax0] - sin_a * pts_old[:, ax1]
-    pts_expected[:, ax1] = sin_a * pts_old[:, ax0] + cos_a * pts_old[:, ax1]
+    pts_expected[:, ax0] = cos_a * pts_old[:, ax0] + sin_a * pts_old[:, ax1]
+    pts_expected[:, ax1] = -sin_a * pts_old[:, ax0] + cos_a * pts_old[:, ax1]
     assert np.allclose(pts_new, pts_expected, atol=1e-5)
 
     # --- phi0 is ignored when phis are supplied explicitly ---
