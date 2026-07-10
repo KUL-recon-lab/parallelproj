@@ -36,7 +36,7 @@ lor_desc = lors.RegularPolygonPETLORDescriptor(
     lors.Michelogram.ge(
         # num_rings=scanner.num_rings, max_ring_difference=scanner.num_rings - 1
         num_rings=scanner.num_rings,
-        max_ring_difference=1,
+        max_ring_difference=3,
         segment_order=lors.SegmentOrder.NEGATIVE_FIRST,
     ),
     radial_trim=45,  # 447 - 90 = 357 bins, central -> 178
@@ -44,6 +44,12 @@ lor_desc = lors.RegularPolygonPETLORDescriptor(
     radial_direction=lors.RadialDirection.MINUS,  # KUL radial-axis labelling
     zig_zag_order=lors.SinogramZigZagOrder.START_FIRST,
 )
+
+fig_m, ax_m = plt.subplots(figsize=(9, 9))
+lor_desc.michelogram.show(ax_m, plane_index_fontsize=8)
+ax_m.set_xlim(-0.5, 11)
+ax_m.set_ylim(-0.5, 11)
+fig_m.show()
 
 # %%
 
@@ -58,50 +64,53 @@ sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
 rad_bin = 170
 view_bins = [0, 56, 63]
-plane_bins = [0, 44, 81]
+plane_bins = [0, 44, 81, 89, 173, 174, 258]
 
-for plane_bin in plane_bins:
+for ip, plane_bin in enumerate(plane_bins):
     for view_bin in view_bins:
-        sino[rad_bin - 1, view_bin, plane_bin] = 1.0
-        sino[rad_bin, view_bin, plane_bin] = 1.4
-        sino[rad_bin + 1, view_bin, plane_bin] = 2.0
+        sino[rad_bin - 1, view_bin + ip, plane_bin] = 1.0 + 0.1 * ip
+        sino[rad_bin, view_bin + ip, plane_bin] = 1.4 + 0.1 * ip
+        sino[rad_bin + 1, view_bin + ip, plane_bin] = 2.0 + 0.1 * ip
 
 # %%
 # back project the sinogram
 print("back projecting")
 sino_back = to_numpy_array(proj.adjoint(sino))
 
-sino_back_idl = np.swapaxes(readsav("sino_back.sav")["sino_back"].copy(), 0, 2)
+sino_back_idl = np.swapaxes(
+    readsav("sino_back.sav")["sino_back"].copy().squeeze(), 0, 2
+)
 sino_back_idl *= sino_back.sum() / sino_back_idl.sum()
 
 # need to flip the left right direction (x0/x direction) because of different defs of the coordinate systems
 sino_back_idl = np.flip(sino_back_idl, 0)
-
-print(np.sum((sino_back - sino_back_idl) ** 2))
 
 # %%
 vmax = max(float(sino_back.max()), float(sino_back_idl.max()))
 ims = dict(vmin=0, origin="lower", cmap="Greys")
 ims2 = dict(vmin=-0.02 * vmax, vmax=0.02 * vmax, origin="lower", cmap="seismic")
 
-ncols = len(plane_bins)
+
+img_sls = [0, 1, 44, 81, 87, 88]
+
+ncols = len(img_sls)
 
 fig, ax = plt.subplots(
     3,
     ncols,
-    figsize=(ncols * 4.2, 3 * 4.2),
+    figsize=(ncols * 3.0, 3 * 3.0),
     layout="constrained",
     sharex=True,
     sharey=True,
 )
 
-for i, pl in enumerate(plane_bins):
+for i, pl in enumerate(img_sls):
     ax[0, i].imshow(sino_back[:, :, pl].T, vmax=vmax, **ims)
     ax[1, i].imshow(sino_back_idl[:, :, pl].T, vmax=vmax, **ims)
     ax[2, i].imshow((sino_back[:, :, pl] - sino_back_idl[:, :, pl]).T, **ims2)
-    ax[0, i].set_title(f"parallelproj backproj image plane {pl}", fontsize="medium")
-    ax[1, i].set_title(f"KUL IDL backproj image plane {pl}", fontsize="medium")
-    ax[2, i].set_title(f"parallelproj - KUL image plane {pl}", fontsize="medium")
+    ax[0, i].set_title(f"pp bp {pl}", fontsize="medium")
+    ax[1, i].set_title(f"IDL bp {pl}", fontsize="medium")
+    ax[2, i].set_title(f"pp - IDL {pl}", fontsize="medium")
 
 fig.show()
 
