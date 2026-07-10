@@ -2077,3 +2077,36 @@ def test_tof_bin_mashing_validation(xp: ModuleType, dev: str) -> None:
         ppl.TOFBinMashingOperator(tp, (4, 5), mashing_factor=4)
     with pytest.raises(ValueError, match="mode"):
         ppl.TOFBinMashingOperator(tp, (4, 5), mashing_factor=3, mode="bad")
+
+
+def test_demo_lor_descriptors_g_family(xp: ModuleType, dev: str) -> None:
+    """The G1/G2 demo LOR descriptor getters build the expected geometry, share
+    the g-family conventions, and remain fully overridable via keyword."""
+    # G1: 28 modules, 623.6 mm bore, 5 axial units -> 45 rings
+    g1 = ppl.get_lor_descriptor_G1(xp, dev)
+    s1 = g1.scanner
+    assert s1.num_sides == 28
+    assert s1.num_rings == 45
+    assert abs(float(s1.radius) - (0.5 * 623.6 + 8.57)) < 1e-4
+
+    # G2: 34 modules, 744.1 mm bore, 4 axial units (default) -> 36 rings
+    g2 = ppl.get_lor_descriptor_G2(xp, dev)
+    s2 = g2.scanner
+    assert s2.num_sides == 34
+    assert s2.num_rings == 36
+    assert abs(float(s2.radius) - (0.5 * 744.1 + 8.57)) < 1e-4
+
+    # shared g-family conventions on both
+    for d in (g1, g2):
+        assert d.scanner.ring_endpoint_ordering is ppl.RingEndpointOrdering.CLOCKWISE
+        assert d.michelogram.segment_order is ppl.SegmentOrder.NEGATIVE_FIRST
+        assert d.view_direction is ppl.ViewDirection.PLUS
+        assert d.radial_direction is ppl.RadialDirection.MINUS
+        assert d.zig_zag_order is ppl.SinogramZigZagOrder.START_FIRST
+
+    # G2 axial extent is configurable (5- and 6-unit configs)
+    assert ppl.get_lor_descriptor_G2(xp, dev, num_units=5).scanner.num_rings == 45
+    assert ppl.get_lor_descriptor_G2(xp, dev, num_units=6).scanner.num_rings == 54
+
+    # any defining parameter can still be overridden via keyword
+    assert ppl.get_lor_descriptor_G1(xp, dev, num_modules=30).scanner.num_sides == 30

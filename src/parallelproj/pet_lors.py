@@ -3181,13 +3181,14 @@ class TOFBinMashingOperator(LinearOperator):
         )
 
 
-def get_lor_descriptor_G1(
+def _get_lor_descriptor_g(
     xp,
     dev,
-    face_to_face_distance_mm: float = 623.6,
+    *,
+    face_to_face_distance_mm: float,
+    num_modules: int,
+    num_units: int,
     avg_doi_mm: float = 8.57,
-    num_modules: int = 28,
-    num_units: int = 5,
     num_ax_xtals_per_unit: int = 9,
     num_transax_xtals_per_unit: int = 16,
     transax_xtal_width_mm: float = 4.03125,
@@ -3197,7 +3198,35 @@ def get_lor_descriptor_G1(
     phi0: float = 0.0,
     radial_trim: int = 45,
     max_ring_difference: None | int = None,
-):
+) -> RegularPolygonPETLORDescriptor:
+    """Shared builder for the ``g``-family demo LOR descriptors.
+
+    Builds a cylindrical regular-polygon TOF PET scanner whose rings are stacked
+    from ``num_units`` axial detector units (``num_ax_xtals_per_unit`` crystal
+    rings each, separated by ``unit_gap_mm`` gaps) and wraps it in a LOR
+    descriptor using the mixed cross-plane ("GE-style" / span-2) axial layout
+    (:class:`MichelogramLayout` ``GE``) with ``NEGATIVE_FIRST`` segment ordering.
+
+    The three geometry-defining arguments (``face_to_face_distance_mm``,
+    ``num_modules``, ``num_units``) are required; the remaining arguments capture
+    the conventions shared across the ``g``-family and rarely need changing.
+
+    Parameters
+    ----------
+    face_to_face_distance_mm : float
+        distance between opposing detector faces (bore), in mm.  The effective
+        endpoint radius is ``0.5 * face_to_face_distance_mm + avg_doi_mm``.
+    num_modules : int
+        number of polygon sides (detector modules per ring).
+    num_units : int
+        number of axial detector units; the scanner has
+        ``num_units * num_ax_xtals_per_unit`` crystal rings.
+    avg_doi_mm : float, optional
+        average depth of interaction added to the geometric radius, by default
+        8.57 (appropriate for 25 mm LYSO at 511 keV).
+    max_ring_difference : int or None, optional
+        maximum ring difference; ``None`` (default) uses ``num_rings - 1``.
+    """
 
     r: Array = xp.arange(num_ax_xtals_per_unit * num_units, device=dev)
     ring_positions = r * ax_xtal_width_mm + (r // num_ax_xtals_per_unit) * unit_gap_mm
@@ -3232,3 +3261,53 @@ def get_lor_descriptor_G1(
         radial_direction=RadialDirection.MINUS,
         zig_zag_order=SinogramZigZagOrder.START_FIRST,
     )
+
+
+def get_lor_descriptor_G1(xp, dev, **kwargs) -> RegularPolygonPETLORDescriptor:
+    """Demo LOR descriptor **G1**.
+
+    A cylindrical TOF PET scanner with 28 detector modules, a 623.6 mm
+    face-to-face (bore) distance and 5 axial units (45 crystal rings), using the
+    mixed cross-plane axial layout.  All defaults reproduce the reference
+    definition; any of the :func:`_get_lor_descriptor_g` arguments can be
+    overridden via keyword (e.g. ``num_units=6``, ``radial_trim=30``).
+
+    Parameters
+    ----------
+    xp : ModuleType
+        array-API module.
+    dev : str
+        device.
+    **kwargs
+        overrides forwarded to :func:`_get_lor_descriptor_g`.
+    """
+    kwargs.setdefault("face_to_face_distance_mm", 623.6)
+    kwargs.setdefault("num_modules", 28)
+    kwargs.setdefault("num_units", 5)
+    return _get_lor_descriptor_g(xp, dev, **kwargs)
+
+
+def get_lor_descriptor_G2(xp, dev, **kwargs) -> RegularPolygonPETLORDescriptor:
+    """Demo LOR descriptor **G2**.
+
+    A cylindrical TOF PET scanner with 34 detector modules, a 744.1 mm
+    face-to-face (bore) distance and, by default, 4 axial units (36 crystal
+    rings), using the mixed cross-plane axial layout.  It shares the same 25 mm
+    LYSO crystals as G1 (hence the same ``avg_doi_mm``).  The axial extent is
+    configurable via ``num_units`` (this scanner family also ships in 5- and
+    6-unit configurations); any other :func:`_get_lor_descriptor_g` argument can
+    likewise be overridden via keyword.
+
+    Parameters
+    ----------
+    xp : ModuleType
+        array-API module.
+    dev : str
+        device.
+    **kwargs
+        overrides forwarded to :func:`_get_lor_descriptor_g`.
+    """
+    kwargs.setdefault("face_to_face_distance_mm", 744.1)
+    kwargs.setdefault("num_modules", 34)
+    kwargs.setdefault("num_units", 4)
+    return _get_lor_descriptor_g(xp, dev, **kwargs)
