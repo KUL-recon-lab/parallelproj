@@ -35,6 +35,7 @@ from .tof import TOFParameters
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
+    RingEndpointOrdering,
 )
 
 
@@ -3178,3 +3179,56 @@ class TOFBinMashingOperator(LinearOperator):
             f"mode={self._mode!r}, num_tofbins: {self._num_tofbins} -> "
             f"{self._num_out}, non_tof_data_shape={self._non_tof_data_shape})"
         )
+
+
+def get_lor_descriptor_G1(
+    xp,
+    dev,
+    face_to_face_distance_mm: float = 623.6,
+    avg_doi_mm: float = 8.57,
+    num_modules: int = 28,
+    num_units: int = 5,
+    num_ax_xtals_per_unit: int = 9,
+    num_transax_xtals_per_unit: int = 16,
+    transax_xtal_width_mm: float = 4.03125,
+    ax_xtal_width_mm: float = 5.31556,
+    unit_gap_mm: float = 2.8,
+    symmetry_axis: int = 2,
+    phi0: float = 0.0,
+    radial_trim: int = 45,
+    max_ring_difference: None | int = None,
+):
+
+    r: Array = xp.arange(num_ax_xtals_per_unit * num_units, device=dev)
+    ring_positions = r * ax_xtal_width_mm + (r // num_ax_xtals_per_unit) * unit_gap_mm
+    ring_positions -= ring_positions.mean()  # center at 0
+
+    scanner = RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=0.5 * face_to_face_distance_mm
+        + avg_doi_mm,  # distance center to endpoint = 0.5*face_to_face + avg_doi
+        num_sides=num_modules,
+        num_lor_endpoints_per_side=num_transax_xtals_per_unit,
+        lor_spacing=transax_xtal_width_mm,
+        ring_positions=ring_positions,
+        symmetry_axis=symmetry_axis,
+        ring_endpoint_ordering=RingEndpointOrdering.CLOCKWISE,
+        phi0=phi0,
+    )
+
+    if max_ring_difference is None:
+        max_ring_difference = scanner.num_rings - 1
+
+    return RegularPolygonPETLORDescriptor(
+        scanner,
+        Michelogram.ge(
+            num_rings=scanner.num_rings,
+            max_ring_difference=max_ring_difference,
+            segment_order=SegmentOrder.NEGATIVE_FIRST,
+        ),
+        radial_trim=radial_trim,
+        view_direction=ViewDirection.PLUS,
+        radial_direction=RadialDirection.MINUS,
+        zig_zag_order=SinogramZigZagOrder.START_FIRST,
+    )

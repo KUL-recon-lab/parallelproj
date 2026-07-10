@@ -3,60 +3,31 @@ import numpy as np
 from scipy.io import readsav
 
 import parallelproj.pet_lors as lors
-import parallelproj.pet_scanners as scanners
 import parallelproj.projectors as projectors
 
 from parallelproj import Array, to_numpy_array
 
-# %%
 import array_api_compat.torch as xp
 
+# %%
 dev = "cuda"
-
-# %%
-r: Array = xp.arange(45, device=dev)
-ring_positions = r * 5.31556 + (r // 9) * 2.8
-ring_positions -= ring_positions.mean()  # center at 0
-
-scanner = scanners.RegularPolygonPETScannerGeometry(
-    xp,
-    dev,
-    radius=320.37,  # (623.6 + 2*8.57)/2  -> apothem, DOI included
-    num_sides=28,  # nrmodule
-    num_lor_endpoints_per_side=16,  # modnrdet
-    lor_spacing=4.03125,  # detsizemm_xy (mm)
-    ring_positions=ring_positions,  # see below (mm)
-    symmetry_axis=2,
-    ring_endpoint_ordering=scanners.RingEndpointOrdering.CLOCKWISE,  # default
-    phi0=0.0,  # default
-)
-
-lor_desc = lors.RegularPolygonPETLORDescriptor(
-    scanner,
-    lors.Michelogram.ge(
-        # num_rings=scanner.num_rings, max_ring_difference=scanner.num_rings - 1
-        num_rings=scanner.num_rings,
-        max_ring_difference=3,
-        segment_order=lors.SegmentOrder.NEGATIVE_FIRST,
-    ),
-    radial_trim=45,  # 447 - 90 = 357 bins, central -> 178
-    view_direction=lors.ViewDirection.PLUS,  # default
-    radial_direction=lors.RadialDirection.MINUS,  # KUL radial-axis labelling
-    zig_zag_order=lors.SinogramZigZagOrder.START_FIRST,
-)
-
-fig_m, ax_m = plt.subplots(figsize=(9, 9))
-lor_desc.michelogram.show(ax_m, plane_index_fontsize=8)
-ax_m.set_xlim(-0.5, 11)
-ax_m.set_ylim(-0.5, 11)
-fig_m.show()
-
-# %%
-
 img_shape = (500, 500, 89)
 vox_size = (0.5, 0.5, 2.79)
+show_michelogram = False
 
+
+# %%
+lor_desc = lors.get_lor_descriptor_G1(xp, dev)
 proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
+
+# %%
+if show_michelogram:
+    fig_m, ax_m = plt.subplots(figsize=(9, 9))
+    lor_desc.michelogram.show(ax_m, plane_index_fontsize=8)
+    ax_m.set_xlim(-0.5, 11)
+    ax_m.set_ylim(-0.5, 11)
+    fig_m.show()
+
 
 # %%
 # setup a sinogram that has a 1 in a single bin
