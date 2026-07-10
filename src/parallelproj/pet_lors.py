@@ -3310,4 +3310,5 @@ def get_lor_descriptor_G2(xp, dev, **kwargs) -> RegularPolygonPETLORDescriptor:
     kwargs.setdefault("face_to_face_distance_mm", 744.1)
     kwargs.setdefault("num_modules", 34)
     kwargs.setdefault("num_units", 4)
+    kwargs.setdefault("radial_trim", 64)
     return _get_lor_descriptor_g(xp, dev, **kwargs)
