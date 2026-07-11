@@ -10,7 +10,7 @@ timeres = 0.385
 proj = nidef_ge_signa(/raytracer, /true_axialsampling, /true_radialsampling,$ 
                       pixelsizemm = pixsizemm, planesepmm = planesepmm,$ 
                       nrcols = nrcols, nrrows = nrrows, nrplanes = nrplanes,$ 
-                      nrsegments = 45, segments = [0,-1,1,-2,2], timeres = timeres)
+                      nrsegments = 45, segments = [0,-1,1,-2,2,-3,3], timeres = timeres)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -27,17 +27,19 @@ proj = nidef_ge_signa(/raytracer, /true_axialsampling, /true_radialsampling,$
 
 rad_bin = 170
 view_bins = [0, 74, 148]
-plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420]
-tof_bin = 7
+plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420, 498, 536]
+tof_bins = [10, 19]
 
-sino = fltarr(357, 224, 421, 27)
+sino = fltarr(357, 224, 575, 27)
 
 ip = 0
 
 FOREACH plane_bin, plane_bins DO BEGIN
     FOREACH view_bin, view_bins DO BEGIN
-        sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1*ip
-        sino[rad_bin+11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1*ip
+        FOREACH tof_bin, tof_bins DO BEGIN
+            sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1*ip
+            sino[rad_bin+11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1*ip
+        ENDFOREACH
     ENDFOREACH
     ip = ip + 1
 ENDFOREACH

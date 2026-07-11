@@ -18,7 +18,7 @@ show_michelogram = False
 
 
 # %%
-lor_desc = lors.get_lor_descriptor_G1(xp, dev, max_ring_difference=5)
+lor_desc = lors.get_lor_descriptor_G1(xp, dev, max_ring_difference=7)
 proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
 
 proj.tof_parameters = tof.TOFParameters(
@@ -45,13 +45,14 @@ sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
 rad_bin = 170
 view_bins = [0, 74, 148]
-plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420]
-tof_bin = 7
+plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420, 498, 536]
+tof_bins = [10, 19]
 
 for ip, plane_bin in enumerate(plane_bins):
     for view_bin in view_bins:
-        sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1 * ip
-        sino[rad_bin + 11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1 * ip
+        for tof_bin in tof_bins:
+            sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1 * ip
+            sino[rad_bin + 11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1 * ip
 
 # %%
 # back project the sinogram
@@ -69,17 +70,18 @@ sino_back_idl = np.flip(sino_back_idl, 0)
 # %%
 vmax = max(float(sino_back.max()), float(sino_back_idl.max()))
 ims = dict(vmin=0, origin="lower", cmap="Greys")
-ims2 = dict(vmin=-0.02 * vmax, vmax=0.02 * vmax, origin="lower", cmap="seismic")
+ims2 = dict(vmin=-0.03 * vmax, vmax=0.03 * vmax, origin="lower", cmap="seismic")
+ims3 = dict(vmin=-0.10, vmax=0.10, origin="lower", cmap="seismic")
 
 
-img_sls = [0, 1, 44, 81, 87, 88]
+img_sls = [0, 1, 2, 43, 44, 81, 87]
 
 ncols = len(img_sls)
 
 fig, ax = plt.subplots(
-    3,
+    4,
     ncols,
-    figsize=(ncols * 3.0, 3 * 3.0),
+    figsize=(ncols * 2.0, 4 * 2.0),
     layout="constrained",
     sharex=True,
     sharey=True,
@@ -89,8 +91,16 @@ for i, pl in enumerate(img_sls):
     ax[0, i].imshow(sino_back[:, :, pl].T, vmax=vmax, **ims)
     ax[1, i].imshow(sino_back_idl[:, :, pl].T, vmax=vmax, **ims)
     ax[2, i].imshow((sino_back[:, :, pl] - sino_back_idl[:, :, pl]).T, **ims2)
+    ax[3, i].imshow(
+        (
+            (sino_back[:, :, pl] - sino_back_idl[:, :, pl])
+            / (sino_back_idl[:, :, pl] + sino_back_idl[:, :, pl].max() * 0.01)
+        ).T,
+        **ims2,
+    )
     ax[0, i].set_title(f"pp bp {pl}", fontsize="medium")
     ax[1, i].set_title(f"IDL bp {pl}", fontsize="medium")
     ax[2, i].set_title(f"pp - IDL {pl}", fontsize="medium")
+    ax[3, i].set_title(f"(pp - IDL)/IDL {pl}", fontsize="medium")
 
 fig.show()
