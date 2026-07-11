@@ -3228,9 +3228,12 @@ def _get_lor_descriptor_g(
         maximum ring difference; ``None`` (default) uses ``num_rings - 1``.
     """
 
-    r: Array = xp.arange(num_ax_xtals_per_unit * num_units, device=dev)
-    ring_positions = r * ax_xtal_width_mm + (r // num_ax_xtals_per_unit) * unit_gap_mm
-    ring_positions -= ring_positions.mean()  # center at 0
+    n_rings = num_ax_xtals_per_unit * num_units
+    idx: Array = xp.arange(n_rings, device=dev)
+    r = xp.astype(idx, xp.float32)
+    unit = xp.astype(idx // num_ax_xtals_per_unit, xp.float32)
+    ring_positions = r * ax_xtal_width_mm + unit * unit_gap_mm
+    ring_positions = ring_positions - xp.mean(ring_positions)  # center at 0
 
     scanner = RegularPolygonPETScannerGeometry(
         xp,

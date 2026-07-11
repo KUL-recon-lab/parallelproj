@@ -2110,3 +2110,9 @@ def test_demo_lor_descriptors_g_family(xp: ModuleType, dev: str) -> None:
 
     # any defining parameter can still be overridden via keyword
     assert ppl.get_lor_descriptor_G1(xp, dev, num_modules=30).scanner.num_sides == 30
+
+    # an explicit max_ring_difference restricts the oblique segments
+    assert (
+        ppl.get_lor_descriptor_G2(xp, dev, max_ring_difference=3).num_planes
+        < g2.num_planes
+    )
