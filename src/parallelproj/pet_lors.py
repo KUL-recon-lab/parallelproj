@@ -3188,6 +3188,7 @@ def _get_lor_descriptor_g(
     face_to_face_distance_mm: float,
     num_modules: int,
     num_units: int,
+    radial_trim: int,
     avg_doi_mm: float = 8.57,
     num_ax_xtals_per_unit: int = 9,
     num_transax_xtals_per_unit: int = 16,
@@ -3196,7 +3197,6 @@ def _get_lor_descriptor_g(
     unit_gap_mm: float = 2.8,
     symmetry_axis: int = 2,
     phi0: float = 0.0,
-    radial_trim: int = 45,
     max_ring_difference: None | int = None,
 ) -> RegularPolygonPETLORDescriptor:
     """Shared builder for the ``g``-family demo LOR descriptors.
@@ -3287,6 +3287,7 @@ def get_lor_descriptor_G1(xp, dev, **kwargs) -> RegularPolygonPETLORDescriptor:
     kwargs.setdefault("face_to_face_distance_mm", 623.6)
     kwargs.setdefault("num_modules", 28)
     kwargs.setdefault("num_units", 5)
+    kwargs.setdefault("radial_trim", 45)
     return _get_lor_descriptor_g(xp, dev, **kwargs)
 
 
