@@ -181,3 +181,89 @@ fig2, _, widgets2 = show_vol_cuts(
     to_numpy_array(x_fwd_back), fig_title="back projection"
 )
 fig2.show()
+
+# %%
+# LOR start / end convention and the TOF-bin direction
+# ----------------------------------------------------
+#
+# A sinogram bin defines a line of response (LOR) between two detectors, but
+# *which* of the two endpoints is the "start" (``xstart``) and which is the
+# "end" (``xend``) is a convention.  For **non-TOF** projections it is
+# irrelevant -- the line integral is the same in either direction.  For **TOF**
+# it matters: the TOF-bin axis is defined *along* ``xstart -> xend``, so the
+# first TOF bin sits near ``xstart``.  Different vendors adopt different
+# start/end conventions, which flips where the first TOF bin lives.
+#
+# :class:`.LOREndpointOrder` on :class:`.RegularPolygonPETLORDescriptor` lets
+# you choose: ``START_END`` (default) or ``END_START`` (endpoints swapped).
+# Below we make the effect visible by back-projecting a sinogram that is zero
+# everywhere except a few LORs (in several views) at an **off-center TOF bin**.
+# The back-projected activity is localised near that TOF position along each
+# LOR; swapping the endpoints reflects every blob to the opposite side (a
+# point reflection through the scanner centre).
+#
+# For a clear picture we use a transaxial FOV that covers the bore and a finer
+# TOF binning than above (so an off-center bin falls *inside* the image).
+
+LOREndpointOrder = parallelproj.pet_lors.LOREndpointOrder
+
+
+def _tof_descriptor(order):
+    return parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
+        scanner,
+        parallelproj.pet_lors.Michelogram(
+            scanner.num_rings, max_ring_difference=1, span=1
+        ),
+        radial_trim=10,
+        sinogram_order=parallelproj.pet_lors.SinogramSpatialAxisOrder.RVP,
+        lor_endpoint_order=order,
+    )
+
+
+demo_img_shape = (80, 80, 7)
+demo_voxel_size = (1.6, 1.6, 2.0)  # ~128 mm transaxial FOV (covers the bore)
+demo_tof = parallelproj.tof.TOFParameters(
+    num_tofbins=9, tofbin_width=16.0, sigma_tof=6.0, num_sigmas=3.0
+)
+
+proj_se = parallelproj.projectors.RegularPolygonPETProjector(
+    _tof_descriptor(LOREndpointOrder.START_END), demo_img_shape, demo_voxel_size
+)
+proj_es = parallelproj.projectors.RegularPolygonPETProjector(
+    _tof_descriptor(LOREndpointOrder.END_START), demo_img_shape, demo_voxel_size
+)
+proj_se.tof_parameters = demo_tof
+proj_es.tof_parameters = demo_tof
+
+# sinogram: a few central-radial LORs across several views, all set at the
+# same off-center TOF bin (bin 1 of 9; the central bin is bin 4)
+y_tof = xp.zeros(proj_se.out_shape, device=dev, dtype=xp.float32)
+r_center = proj_se.out_shape[0] // 2
+plane_center = proj_se.out_shape[2] // 2
+tof_bin = 1  # off-center
+for view in (0, 20, 40, 60):
+    for rad in (r_center - 1, r_center, r_center + 1):
+        y_tof[rad, view, plane_center, tof_bin] = 1.0
+
+# back project with both conventions and show the transaxial max-intensity
+# projection (over the axial axis)
+bp_se = to_numpy_array(proj_se.adjoint(y_tof)).max(axis=2)
+bp_es = to_numpy_array(proj_es.adjoint(y_tof)).max(axis=2)
+
+fig3, ax3 = plt.subplots(1, 2, figsize=(9, 4.6), tight_layout=True)
+vmax = float(max(bp_se.max(), bp_es.max()))
+for a, bp, title in (
+    (ax3[0], bp_se, "LOREndpointOrder.START_END"),
+    (ax3[1], bp_es, "LOREndpointOrder.END_START"),
+):
+    a.imshow(bp.T, origin="lower", cmap="Greys", vmax=vmax)
+    a.axhline(demo_img_shape[1] / 2 - 0.5, color="w", lw=0.4, ls=":")
+    a.axvline(demo_img_shape[0] / 2 - 0.5, color="w", lw=0.4, ls=":")
+    a.set_title(title, fontsize="medium")
+    a.set_xlabel("x0 voxel")
+    a.set_ylabel("x1 voxel")
+fig3.suptitle(
+    "Back projection of a single off-center TOF bin: swapping the LOR\n"
+    "start/end reflects the TOF-localised activity through the centre"
+)
+fig3.show()

@@ -43,7 +43,11 @@ class TOFParameters:
         Global shift of the TOF bin grid centre from the LOR midpoint in mm.
         This is a scalar approximation (identical for all LORs); default ``0``.
         A non-zero value is needed when systematic timing offsets are present,
-        e.g. due to unequal cable lengths or electronics delays.
+        e.g. due to unequal cable lengths or electronics delays.  The offset is
+        measured along the ``xstart -> xend`` direction of each LOR, so if the
+        LOR endpoint convention is reversed (see
+        :class:`~parallelproj.pet_lors.LOREndpointOrder` ``END_START``) a
+        non-zero offset must be negated to keep the same physical meaning.
 
     Raises
     ------

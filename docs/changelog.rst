@@ -133,6 +133,13 @@ Smaller additions and improvements
   ``RingEndpointOrdering`` (with new ``phis``, ``phi0``, ``ring_endpoint_ordering``
   and ``lor_endpoint_positions`` arguments on ``RegularPolygonPETScannerGeometry``)
   make the crystal / LOR endpoint ordering explicit and configurable.
+- **Selectable LOR start/end (TOF-bin) convention**: new ``LOREndpointOrder`` enum
+  and ``lor_endpoint_order`` argument on ``RegularPolygonPETLORDescriptor``.
+  ``START_END`` (default) keeps the current behaviour; ``END_START`` swaps
+  ``xstart``/``xend`` for every LOR.  Non-TOF projections are unchanged; for TOF
+  this reverses the TOF-bin axis, letting users match a given vendor's start/end
+  (and hence first-TOF-bin) convention.  See the "PET TOF sinogram projector"
+  example.
 - **``ParallelViewProjector3D`` now supports any odd span**: the projector
   accepts a :class:`~parallelproj.pet_lors.Michelogram` and uses the
   averaged-LOR z-position per plane (exact for span=1, standard approximation

@@ -2116,3 +2116,84 @@ def test_demo_lor_descriptors_g_family(xp: ModuleType, dev: str) -> None:
         ppl.get_lor_descriptor_G2(xp, dev, max_ring_difference=3).num_planes
         < g2.num_planes
     )
+
+
+def test_lor_endpoint_order(xp: ModuleType, dev: str) -> None:
+    """LOREndpointOrder swaps xstart<->xend: geometrically a no-op (non-TOF
+    projections are invariant up to float precision) but it reverses the
+    TOF-bin axis."""
+    import numpy as np
+    import parallelproj.projectors as pj
+    import parallelproj.tof as tof
+
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=12,
+        num_lor_endpoints_per_side=15,
+        lor_spacing=2.3,
+        ring_positions=xp.linspace(-4, 4, 3, device=dev),
+        symmetry_axis=2,
+    )
+
+    def make(order):
+        return ppl.RegularPolygonPETLORDescriptor(
+            scanner,
+            ppl.Michelogram(scanner.num_rings, 1, span=1),
+            radial_trim=10,
+            lor_endpoint_order=order,
+        )
+
+    d0 = make(ppl.LOREndpointOrder.START_END)
+    d1 = make(ppl.LOREndpointOrder.END_START)
+
+    # default value and property
+    assert d0.lor_endpoint_order is ppl.LOREndpointOrder.START_END
+    assert d1.lor_endpoint_order is ppl.LOREndpointOrder.END_START
+
+    # the two endpoints are exactly exchanged
+    xs0, xe0 = d0.get_lor_coordinates()
+    xs1, xe1 = d1.get_lor_coordinates()
+    assert np.array_equal(to_numpy_array(xs1), to_numpy_array(xe0))
+    assert np.array_equal(to_numpy_array(xe1), to_numpy_array(xs0))
+
+    img_shape, vox = (40, 40, 7), (2.0, 2.0, 2.0)
+    x = xp.zeros(img_shape, device=dev, dtype=xp.float32)
+    x[20, :, 3] = 1.0
+    x[6, 10:, 3] = 1.0
+
+    p0 = pj.RegularPolygonPETProjector(d0, img_shape, vox)
+    p1 = pj.RegularPolygonPETProjector(d1, img_shape, vox)
+
+    # non-TOF forward projection is invariant up to float precision
+    f0 = to_numpy_array(p0(x))
+    f1 = to_numpy_array(p1(x))
+    assert np.allclose(f0, f1, rtol=1e-4, atol=1e-3)
+
+    # TOF forward projection is reversed along the TOF-bin axis
+    # (tofcenter_offset == 0, so the bins reflect around the centre)
+    tp = tof.TOFParameters(
+        num_tofbins=9, tofbin_width=78.0, sigma_tof=24.4, num_sigmas=3.0
+    )
+    p0.tof_parameters = tp
+    p1.tof_parameters = tp
+    t0 = to_numpy_array(p0(x))
+    t1 = to_numpy_array(p1(x))
+    assert t1.shape == t0.shape
+    assert np.allclose(t1, t0[..., ::-1], rtol=1e-4, atol=1e-3)
+
+    # adjointness still holds for the swapped descriptor
+    rng = np.random.default_rng(0)
+    y = xp.asarray(rng.random(tuple(t1.shape)).astype(np.float32), device=dev)
+    lhs = float(xp.sum(p1(x) * y))
+    rhs = float(xp.sum(x * p1.adjoint(y)))
+    assert abs(lhs - rhs) <= 1e-3 * abs(lhs)
+
+    # invalid type is rejected
+    with pytest.raises(TypeError, match="lor_endpoint_order"):
+        ppl.RegularPolygonPETLORDescriptor(
+            scanner,
+            ppl.Michelogram(scanner.num_rings, 1, span=1),
+            lor_endpoint_order="END_START",  # type: ignore[arg-type]
+        )

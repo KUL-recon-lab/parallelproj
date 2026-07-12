@@ -105,6 +105,29 @@ class RadialDirection(enum.Enum):
     """Radial index increases with decreasing detector-index difference."""
 
 
+class LOREndpointOrder(enum.Enum):
+    """Which physical endpoint of each LOR is the start (``xstart``) vs the end
+    (``xend``).
+
+    Non-TOF projections are unaffected (an LOR is geometrically symmetric).  For
+    TOF, the TOF-bin axis is defined along ``xstart -> xend``, so swapping the
+    endpoints reverses the TOF bins (bin ``k`` <-> bin ``num_tofbins - 1 - k``).
+    Use this to match a given vendor's start/end -- and hence TOF-bin --
+    convention.
+
+    Note
+    ----
+    :attr:`TOFParameters.tofcenter_offset` is measured along ``xstart -> xend``
+    and is **not** adjusted automatically.  If you combine a non-zero
+    ``tofcenter_offset`` with ``END_START``, negate the offset yourself.
+    """
+
+    START_END = enum.auto()
+    """``xstart`` is the descriptor's start endpoint (default; original behaviour)."""
+    END_START = enum.auto()
+    """``xstart`` and ``xend`` are exchanged for every LOR."""
+
+
 class MichelogramLayout(enum.Enum):
     """Axial plane layout / segmentation convention for a :class:`Michelogram`."""
 
@@ -1252,6 +1275,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         zig_zag_order: SinogramZigZagOrder = SinogramZigZagOrder.END_FIRST,
         view_direction: ViewDirection = ViewDirection.PLUS,
         radial_direction: RadialDirection = RadialDirection.PLUS,
+        lor_endpoint_order: LOREndpointOrder = LOREndpointOrder.START_END,
     ) -> None:
         """
 
@@ -1283,6 +1307,12 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             Together with ``ring_endpoint_ordering`` (crystal numbering) and
             ``view_direction`` these knobs reproduce any vendor's
             ``(view, radial) <-> detector-pair`` convention.
+        lor_endpoint_order : LOREndpointOrder, optional
+            which physical endpoint of each LOR is the start (``xstart``) vs the
+            end (``xend``), by default ``LOREndpointOrder.START_END``.  Only
+            matters for TOF, where it reverses the TOF-bin axis; non-TOF
+            projections are unchanged.  See :class:`LOREndpointOrder` (note the
+            ``tofcenter_offset`` caveat for non-zero offsets).
         """
 
         super().__init__(scanner)
@@ -1317,10 +1347,14 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             )
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
+        if not isinstance(lor_endpoint_order, LOREndpointOrder):
+            raise TypeError("lor_endpoint_order must be a LOREndpointOrder")
+
         self._sinogram_order = sinogram_order
         self._zig_zag_order = zig_zag_order
         self._view_direction = view_direction
         self._radial_direction = radial_direction
+        self._lor_endpoint_order = lor_endpoint_order
 
         # declare all attributes set by the setup methods so they are
         # visible in __init__
@@ -1339,6 +1373,29 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         self._setup_plane_data()
         self._setup_view_indices()
+        if self._lor_endpoint_order is LOREndpointOrder.END_START:
+            self._swap_lor_endpoints()
+
+    def _swap_lor_endpoints(self) -> None:
+        """Exchange the start/end endpoint of every LOR (see LOREndpointOrder).
+
+        Swaps both the transaxial (in-ring) and axial (plane) start/end arrays
+        together, so that ``xstart`` <-> ``xend`` and every ``start_*`` /
+        ``end_*`` property stay mutually consistent.  Geometrically a no-op for
+        non-TOF; for TOF it reverses the TOF-bin axis.
+        """
+        self._start_in_ring_index, self._end_in_ring_index = (
+            self._end_in_ring_index,
+            self._start_in_ring_index,
+        )
+        self._start_plane_z, self._end_plane_z = (
+            self._end_plane_z,
+            self._start_plane_z,
+        )
+        self._start_plane_index, self._end_plane_index = (
+            self._end_plane_index,
+            self._start_plane_index,
+        )
 
     @property
     def scanner(self) -> RegularPolygonPETScannerGeometry:
@@ -1457,6 +1514,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def radial_direction(self) -> RadialDirection:
         """direction in which the radial index increases"""
         return self._radial_direction
+
+    @property
+    def lor_endpoint_order(self) -> LOREndpointOrder:
+        """which physical endpoint is the LOR start (``xstart``) vs end (``xend``)"""
+        return self._lor_endpoint_order
 
     @property
     def plane_axis_num(self) -> int:
