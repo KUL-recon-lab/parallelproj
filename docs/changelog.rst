@@ -140,13 +140,16 @@ Smaller additions and improvements
   this reverses the TOF-bin axis, letting users match a given vendor's start/end
   (and hence first-TOF-bin) convention.  See the "PET TOF sinogram projector"
   example.
-- **Ready-made demo LOR descriptors**: ``get_lor_descriptor_G1`` and
+- **Ready-made demo scanners**: ``get_lor_descriptor_G1`` /
   ``get_lor_descriptor_G2`` (in ``parallelproj.pet_lors``) return fully
   configured ``RegularPolygonPETLORDescriptor`` objects for two built-in
-  cylindrical TOF scanner geometries, so users can start projecting without
-  assembling the scanner, Michelogram and sinogram conventions themselves.  All
-  geometry / convention parameters are exposed as keyword overrides (e.g.
-  ``num_units``, ``radial_trim``, ``max_ring_difference``).
+  cylindrical TOF scanner geometries, and the matching ``get_tof_parameters_G1``
+  / ``get_tof_parameters_G2`` (in ``parallelproj.tof``) return their
+  ``TOFParameters``.  Users can start projecting without assembling the scanner,
+  Michelogram, sinogram conventions and TOF model themselves.  All geometry /
+  convention / timing parameters are exposed as keyword overrides (e.g.
+  ``num_units``, ``radial_trim``, ``max_ring_difference``, ``num_tofbins``,
+  ``sigma_tof``).
 - **``ParallelViewProjector3D`` now supports any odd span**: the projector
   accepts a :class:`~parallelproj.pet_lors.Michelogram` and uses the
   averaged-LOR z-position per plane (exact for span=1, standard approximation

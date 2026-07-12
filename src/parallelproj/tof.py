@@ -100,3 +100,33 @@ class TOFParameters:
             raise ValueError(
                 f"tofcenter_offset must be finite (mm), got {self.tofcenter_offset!r}"
             )
+
+
+def get_tof_parameters_G1(**kwargs) -> TOFParameters:
+    """Demo :class:`TOFParameters` **G1** (matches the G1 scanner).
+
+    Defaults to 27 TOF bins with a 385 ps coincidence timing resolution
+    (``sigma_tof``) and a 169 ps TOF-bin width, converted from ns to mm via
+    ``x = t * C_MM_PER_NS / 2``.  Pair it with
+    :func:`parallelproj.pet_lors.get_lor_descriptor_G1`.  Any
+    :class:`TOFParameters` field (``num_tofbins``, ``tofbin_width``,
+    ``sigma_tof``, ``num_sigmas``, ``tofcenter_offset``) can be overridden via
+    keyword.
+    """
+    kwargs.setdefault("num_tofbins", 27)
+    kwargs.setdefault("tofbin_width", 0.169 * 0.5 * C_MM_PER_NS)
+    kwargs.setdefault("sigma_tof", 0.385 * 0.5 * C_MM_PER_NS / 2.3548)
+    return TOFParameters(**kwargs)
+
+
+def get_tof_parameters_G2(**kwargs) -> TOFParameters:
+    """Demo :class:`TOFParameters` **G2** (matches the G2 scanner).
+
+    Identical to :func:`get_tof_parameters_G1` but with 29 TOF bins by default.
+    Pair it with :func:`parallelproj.pet_lors.get_lor_descriptor_G2`.  Any
+    :class:`TOFParameters` field can be overridden via keyword.
+    """
+    kwargs.setdefault("num_tofbins", 29)
+    kwargs.setdefault("tofbin_width", 0.169 * 0.5 * C_MM_PER_NS)
+    kwargs.setdefault("sigma_tof", 0.385 * 0.5 * C_MM_PER_NS / 2.3548)
+    return TOFParameters(**kwargs)
