@@ -4,6 +4,7 @@ from scipy.io import readsav
 
 import parallelproj.pet_lors as lors
 import parallelproj.projectors as projectors
+import parallelproj.tof as tof
 
 from parallelproj import Array, to_numpy_array
 
@@ -11,14 +12,23 @@ import array_api_compat.torch as xp
 
 # %%
 dev = "cuda"
-img_shape = (500, 500, 89)
-vox_size = (0.5, 0.5, 2.79)
+img_shape = (275, 275, 89)
+vox_size = (2.0, 2.0, 2.79)
 show_michelogram = False
 
 
 # %%
-lor_desc = lors.get_lor_descriptor_G1(xp, dev)
+lor_desc = lors.get_lor_descriptor_G1(xp, dev, max_ring_difference=1)
 proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
+
+proj.tof_parameters = tof.TOFParameters(
+    num_tofbins=27,
+    tofbin_width=0.169 * 0.5 * tof.C_MM_PER_NS,
+    sigma_tof=0.385 * 0.5 * tof.C_MM_PER_NS / 2.35,
+)
+
+proj.tof = True
+
 
 # %%
 if show_michelogram:
@@ -34,14 +44,14 @@ if show_michelogram:
 sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
 rad_bin = 170
-view_bins = [0, 56, 63]
-plane_bins = [0, 44, 81, 89, 173, 174, 258]
+view_bins = [0, 74, 148]
+plane_bins = [0, 44, 80]
+tof_bin = 11
 
 for ip, plane_bin in enumerate(plane_bins):
     for view_bin in view_bins:
-        sino[rad_bin - 1, view_bin + ip, plane_bin] = 1.0 + 0.1 * ip
-        sino[rad_bin, view_bin + ip, plane_bin] = 1.4 + 0.1 * ip
-        sino[rad_bin + 1, view_bin + ip, plane_bin] = 2.0 + 0.1 * ip
+        sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1 * ip
+        sino[rad_bin + 11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1 * ip
 
 # %%
 # back project the sinogram
@@ -49,7 +59,7 @@ print("back projecting")
 sino_back = to_numpy_array(proj.adjoint(sino))
 
 sino_back_idl = np.swapaxes(
-    readsav("sino_back.sav")["sino_back"].copy().squeeze(), 0, 2
+    readsav("tof_sino_back.sav")["sino_back"].copy().squeeze(), 0, 2
 )
 sino_back_idl *= sino_back.sum() / sino_back_idl.sum()
 
@@ -94,7 +104,7 @@ fig2, ax2 = plt.subplots(
     sharey=True,
 )
 
-for i, x1 in enumerate([50, 250, 400]):
+for i, x1 in enumerate([50, 100, 150]):
     ax2[0, i].imshow(sino_back[:, x1, :].T, **ims)
     ax2[1, i].imshow(sino_back_idl[:, x1, :].T, **ims)
     ax2[2, i].imshow((sino_back[:, x1, :] - sino_back_idl[:, x1, :]).T, **ims2)

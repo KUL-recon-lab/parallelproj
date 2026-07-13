@@ -11,13 +11,13 @@ import array_api_compat.torch as xp
 
 # %%
 dev = "cuda"
-img_shape = (500, 500, 89)
+img_shape = (500, 500, 71)
 vox_size = (0.5, 0.5, 2.79)
 show_michelogram = False
 
 
 # %%
-lor_desc = lors.get_lor_descriptor_G1(xp, dev)
+lor_desc = lors.get_lor_descriptor_G2(xp, dev, avg_doi_mm=8.51)
 proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
 
 # %%
@@ -35,7 +35,7 @@ sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
 rad_bin = 170
 view_bins = [0, 56, 63]
-plane_bins = [0, 44, 81, 89, 173, 174, 258]
+plane_bins = [0, 35, 61, 71, 137, 138, 204]
 
 for ip, plane_bin in enumerate(plane_bins):
     for view_bin in view_bins:
@@ -49,7 +49,7 @@ print("back projecting")
 sino_back = to_numpy_array(proj.adjoint(sino))
 
 sino_back_idl = np.swapaxes(
-    readsav("sino_back.sav")["sino_back"].copy().squeeze(), 0, 2
+    readsav("sino_back_dmi.sav")["sino_back"].copy().squeeze(), 0, 2
 )
 sino_back_idl *= sino_back.sum() / sino_back_idl.sum()
 
@@ -62,7 +62,7 @@ ims = dict(vmin=0, origin="lower", cmap="Greys")
 ims2 = dict(vmin=-0.02 * vmax, vmax=0.02 * vmax, origin="lower", cmap="seismic")
 
 
-img_sls = [0, 1, 44, 81, 87, 88]
+img_sls = [0, 1, 35, 61, 68, 69]
 
 ncols = len(img_sls)
 

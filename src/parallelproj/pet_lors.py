@@ -35,6 +35,7 @@ from .tof import TOFParameters
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
+    RingEndpointOrdering,
 )
 
 
@@ -102,6 +103,29 @@ class RadialDirection(enum.Enum):
     """Radial index increases with increasing detector-index difference (default)."""
     MINUS = enum.auto()
     """Radial index increases with decreasing detector-index difference."""
+
+
+class LOREndpointOrder(enum.Enum):
+    """Which physical endpoint of each LOR is the start (``xstart``) vs the end
+    (``xend``).
+
+    Non-TOF projections are unaffected (an LOR is geometrically symmetric).  For
+    TOF, the TOF-bin axis is defined along ``xstart -> xend``, so swapping the
+    endpoints reverses the TOF bins (bin ``k`` <-> bin ``num_tofbins - 1 - k``).
+    Use this to match a given vendor's start/end -- and hence TOF-bin --
+    convention.
+
+    Note
+    ----
+    :attr:`TOFParameters.tofcenter_offset` is measured along ``xstart -> xend``
+    and is **not** adjusted automatically.  If you combine a non-zero
+    ``tofcenter_offset`` with ``END_START``, negate the offset yourself.
+    """
+
+    START_END = enum.auto()
+    """``xstart`` is the descriptor's start endpoint (default; original behaviour)."""
+    END_START = enum.auto()
+    """``xstart`` and ``xend`` are exchanged for every LOR."""
 
 
 class MichelogramLayout(enum.Enum):
@@ -1251,6 +1275,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         zig_zag_order: SinogramZigZagOrder = SinogramZigZagOrder.END_FIRST,
         view_direction: ViewDirection = ViewDirection.PLUS,
         radial_direction: RadialDirection = RadialDirection.PLUS,
+        lor_endpoint_order: LOREndpointOrder = LOREndpointOrder.START_END,
     ) -> None:
         """
 
@@ -1282,6 +1307,12 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             Together with ``ring_endpoint_ordering`` (crystal numbering) and
             ``view_direction`` these knobs reproduce any vendor's
             ``(view, radial) <-> detector-pair`` convention.
+        lor_endpoint_order : LOREndpointOrder, optional
+            which physical endpoint of each LOR is the start (``xstart``) vs the
+            end (``xend``), by default ``LOREndpointOrder.START_END``.  Only
+            matters for TOF, where it reverses the TOF-bin axis; non-TOF
+            projections are unchanged.  See :class:`LOREndpointOrder` (note the
+            ``tofcenter_offset`` caveat for non-zero offsets).
         """
 
         super().__init__(scanner)
@@ -1316,10 +1347,14 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             )
         self._num_views = scanner.num_lor_endpoints_per_ring // 2
 
+        if not isinstance(lor_endpoint_order, LOREndpointOrder):
+            raise TypeError("lor_endpoint_order must be a LOREndpointOrder")
+
         self._sinogram_order = sinogram_order
         self._zig_zag_order = zig_zag_order
         self._view_direction = view_direction
         self._radial_direction = radial_direction
+        self._lor_endpoint_order = lor_endpoint_order
 
         # declare all attributes set by the setup methods so they are
         # visible in __init__
@@ -1338,6 +1373,29 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
 
         self._setup_plane_data()
         self._setup_view_indices()
+        if self._lor_endpoint_order is LOREndpointOrder.END_START:
+            self._swap_lor_endpoints()
+
+    def _swap_lor_endpoints(self) -> None:
+        """Exchange the start/end endpoint of every LOR (see LOREndpointOrder).
+
+        Swaps both the transaxial (in-ring) and axial (plane) start/end arrays
+        together, so that ``xstart`` <-> ``xend`` and every ``start_*`` /
+        ``end_*`` property stay mutually consistent.  Geometrically a no-op for
+        non-TOF; for TOF it reverses the TOF-bin axis.
+        """
+        self._start_in_ring_index, self._end_in_ring_index = (
+            self._end_in_ring_index,
+            self._start_in_ring_index,
+        )
+        self._start_plane_z, self._end_plane_z = (
+            self._end_plane_z,
+            self._start_plane_z,
+        )
+        self._start_plane_index, self._end_plane_index = (
+            self._end_plane_index,
+            self._start_plane_index,
+        )
 
     @property
     def scanner(self) -> RegularPolygonPETScannerGeometry:
@@ -1456,6 +1514,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
     def radial_direction(self) -> RadialDirection:
         """direction in which the radial index increases"""
         return self._radial_direction
+
+    @property
+    def lor_endpoint_order(self) -> LOREndpointOrder:
+        """which physical endpoint is the LOR start (``xstart``) vs end (``xend``)"""
+        return self._lor_endpoint_order
 
     @property
     def plane_axis_num(self) -> int:
@@ -3178,3 +3241,140 @@ class TOFBinMashingOperator(LinearOperator):
             f"mode={self._mode!r}, num_tofbins: {self._num_tofbins} -> "
             f"{self._num_out}, non_tof_data_shape={self._non_tof_data_shape})"
         )
+
+
+def _get_lor_descriptor_g(
+    xp,
+    dev,
+    *,
+    face_to_face_distance_mm: float,
+    num_modules: int,
+    num_units: int,
+    radial_trim: int,
+    avg_doi_mm: float = 8.57,
+    num_ax_xtals_per_unit: int = 9,
+    num_transax_xtals_per_unit: int = 16,
+    transax_xtal_width_mm: float = 4.03125,
+    ax_xtal_width_mm: float = 5.31556,
+    unit_gap_mm: float = 2.8,
+    symmetry_axis: int = 2,
+    phi0: float = 0.0,
+    max_ring_difference: None | int = None,
+) -> RegularPolygonPETLORDescriptor:
+    """Shared builder for the ``g``-family demo LOR descriptors.
+
+    Builds a cylindrical regular-polygon TOF PET scanner whose rings are stacked
+    from ``num_units`` axial detector units (``num_ax_xtals_per_unit`` crystal
+    rings each, separated by ``unit_gap_mm`` gaps) and wraps it in a LOR
+    descriptor using the mixed cross-plane ("GE-style" / span-2) axial layout
+    (:class:`MichelogramLayout` ``GE``) with ``NEGATIVE_FIRST`` segment ordering.
+
+    The three geometry-defining arguments (``face_to_face_distance_mm``,
+    ``num_modules``, ``num_units``) are required; the remaining arguments capture
+    the conventions shared across the ``g``-family and rarely need changing.
+
+    Parameters
+    ----------
+    face_to_face_distance_mm : float
+        distance between opposing detector faces (bore), in mm.  The effective
+        endpoint radius is ``0.5 * face_to_face_distance_mm + avg_doi_mm``.
+    num_modules : int
+        number of polygon sides (detector modules per ring).
+    num_units : int
+        number of axial detector units; the scanner has
+        ``num_units * num_ax_xtals_per_unit`` crystal rings.
+    avg_doi_mm : float, optional
+        average depth of interaction added to the geometric radius, by default
+        8.57 (appropriate for 25 mm LYSO at 511 keV).
+    max_ring_difference : int or None, optional
+        maximum ring difference; ``None`` (default) uses ``num_rings - 1``.
+    """
+
+    n_rings = num_ax_xtals_per_unit * num_units
+    idx: Array = xp.arange(n_rings, device=dev)
+    r = xp.astype(idx, xp.float32)
+    unit = xp.astype(idx // num_ax_xtals_per_unit, xp.float32)
+    ring_positions = r * ax_xtal_width_mm + unit * unit_gap_mm
+    ring_positions = ring_positions - xp.mean(ring_positions)  # center at 0
+
+    scanner = RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=0.5 * face_to_face_distance_mm
+        + avg_doi_mm,  # distance center to endpoint = 0.5*face_to_face + avg_doi
+        num_sides=num_modules,
+        num_lor_endpoints_per_side=num_transax_xtals_per_unit,
+        lor_spacing=transax_xtal_width_mm,
+        ring_positions=ring_positions,
+        symmetry_axis=symmetry_axis,
+        ring_endpoint_ordering=RingEndpointOrdering.CLOCKWISE,
+        phi0=phi0,
+    )
+
+    if max_ring_difference is None:
+        max_ring_difference = scanner.num_rings - 1
+
+    return RegularPolygonPETLORDescriptor(
+        scanner,
+        Michelogram.ge(
+            num_rings=scanner.num_rings,
+            max_ring_difference=max_ring_difference,
+            segment_order=SegmentOrder.NEGATIVE_FIRST,
+        ),
+        radial_trim=radial_trim,
+        view_direction=ViewDirection.PLUS,
+        radial_direction=RadialDirection.MINUS,
+        zig_zag_order=SinogramZigZagOrder.START_FIRST,
+    )
+
+
+def get_lor_descriptor_G1(xp, dev, **kwargs) -> RegularPolygonPETLORDescriptor:
+    """Demo LOR descriptor **G1**.
+
+    A cylindrical TOF PET scanner with 28 detector modules, a 623.6 mm
+    face-to-face (bore) distance and 5 axial units (45 crystal rings), using the
+    mixed cross-plane axial layout.  All defaults reproduce the reference
+    definition; any of the :func:`_get_lor_descriptor_g` arguments can be
+    overridden via keyword (e.g. ``num_units=6``, ``radial_trim=30``).
+
+    Parameters
+    ----------
+    xp : ModuleType
+        array-API module.
+    dev : str
+        device.
+    **kwargs
+        overrides forwarded to :func:`_get_lor_descriptor_g`.
+    """
+    kwargs.setdefault("face_to_face_distance_mm", 623.6)
+    kwargs.setdefault("num_modules", 28)
+    kwargs.setdefault("num_units", 5)
+    kwargs.setdefault("radial_trim", 45)
+    return _get_lor_descriptor_g(xp, dev, **kwargs)
+
+
+def get_lor_descriptor_G2(xp, dev, **kwargs) -> RegularPolygonPETLORDescriptor:
+    """Demo LOR descriptor **G2**.
+
+    A cylindrical TOF PET scanner with 34 detector modules, a 744.1 mm
+    face-to-face (bore) distance and, by default, 4 axial units (36 crystal
+    rings), using the mixed cross-plane axial layout.  It shares the same 25 mm
+    LYSO crystals as G1 (hence the same ``avg_doi_mm``).  The axial extent is
+    configurable via ``num_units`` (this scanner family also ships in 5- and
+    6-unit configurations); any other :func:`_get_lor_descriptor_g` argument can
+    likewise be overridden via keyword.
+
+    Parameters
+    ----------
+    xp : ModuleType
+        array-API module.
+    dev : str
+        device.
+    **kwargs
+        overrides forwarded to :func:`_get_lor_descriptor_g`.
+    """
+    kwargs.setdefault("face_to_face_distance_mm", 744.1)
+    kwargs.setdefault("num_modules", 34)
+    kwargs.setdefault("num_units", 4)
+    kwargs.setdefault("radial_trim", 64)
+    return _get_lor_descriptor_g(xp, dev, **kwargs)
