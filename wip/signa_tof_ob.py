@@ -21,13 +21,7 @@ show_michelogram = False
 lor_desc = lors.get_lor_descriptor_G1(xp, dev, max_ring_difference=7)
 proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
 
-proj.tof_parameters = tof.TOFParameters(
-    num_tofbins=27,
-    tofbin_width=0.169 * 0.5 * tof.C_MM_PER_NS,
-    sigma_tof=0.385 * 0.5 * tof.C_MM_PER_NS / 2.35,
-)
-
-proj.tof = True
+proj.tof_parameters = tof.get_tof_parameters_G1()
 
 
 # %%
@@ -44,7 +38,7 @@ if show_michelogram:
 sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
 rad_bin = 170
-view_bins = [0, 74, 148]
+view_bins = [8, 74, 148]
 plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420, 498, 536]
 tof_bins = [10, 19]
 
@@ -70,7 +64,7 @@ sino_back_idl = np.flip(sino_back_idl, 0)
 # %%
 vmax = max(float(sino_back.max()), float(sino_back_idl.max()))
 ims = dict(vmin=0, origin="lower", cmap="Greys")
-ims2 = dict(vmin=-0.03 * vmax, vmax=0.03 * vmax, origin="lower", cmap="seismic")
+ims2 = dict(vmin=-0.02 * vmax, vmax=0.02 * vmax, origin="lower", cmap="seismic")
 ims3 = dict(vmin=-0.10, vmax=0.10, origin="lower", cmap="seismic")
 
 
@@ -96,7 +90,7 @@ for i, pl in enumerate(img_sls):
             (sino_back[:, :, pl] - sino_back_idl[:, :, pl])
             / (sino_back_idl[:, :, pl] + sino_back_idl[:, :, pl].max() * 0.01)
         ).T,
-        **ims2,
+        **ims3,
     )
     ax[0, i].set_title(f"pp bp {pl}", fontsize="medium")
     ax[1, i].set_title(f"IDL bp {pl}", fontsize="medium")
@@ -104,3 +98,9 @@ for i, pl in enumerate(img_sls):
     ax[3, i].set_title(f"(pp - IDL)/IDL {pl}", fontsize="medium")
 
 fig.show()
+
+fig2, ax = plt.subplots(figsize=(7, 7), layout="constrained")
+ax.plot(sino_back[133, :, 0], ".-")
+ax.plot(sino_back_idl[133, :, 0], ".:", ms=4)
+ax.set_xlim(150, 280)
+fig2.show()

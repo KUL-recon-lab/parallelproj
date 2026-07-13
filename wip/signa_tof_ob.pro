@@ -26,7 +26,7 @@ proj = nidef_ge_signa(/raytracer, /true_axialsampling, /true_radialsampling,$
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 rad_bin = 170
-view_bins = [0, 74, 148]
+view_bins = [8, 74, 148]
 plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420, 498, 536]
 tof_bins = [10, 19]
 
@@ -43,8 +43,6 @@ FOREACH plane_bin, plane_bins DO BEGIN
     ENDFOREACH
     ip = ip + 1
 ENDFOREACH
-
-;save, sino, FILENAME="sino_back.sav"
 
 print, "backprojecting sino"
 sino_back = fltarr(nrcols,nrrows,nrplanes)
