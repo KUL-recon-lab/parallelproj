@@ -37,16 +37,18 @@ if show_michelogram:
 # setup a sinogram that has a 1 in a single bin
 sino: Array = xp.zeros(proj.out_shape, dtype=xp.float32, device=dev)
 
-rad_bin = 170
-view_bins = [8, 74, 148]
+rad_bins = [150, 179, 200]
+view_bins = [8, 148]
 plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420, 498, 536]
-tof_bins = [10, 19]
+tof_bins = [9, 21]
 
-for ip, plane_bin in enumerate(plane_bins):
-    for view_bin in view_bins:
-        for tof_bin in tof_bins:
-            sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1 * ip
-            sino[rad_bin + 11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1 * ip
+for view_bin in view_bins:
+    for ip, plane_bin in enumerate(plane_bins):
+        for ir, rad_bin in enumerate(rad_bins):
+            for it, tof_bin in enumerate(tof_bins):
+                sino[rad_bin, view_bin, plane_bin, tof_bin] = (
+                    0.2 * ir + 0.01 * ip + (it + 1)
+                )
 
 # %%
 # back project the sinogram
@@ -100,7 +102,7 @@ for i, pl in enumerate(img_sls):
 fig.show()
 
 fig2, ax = plt.subplots(figsize=(7, 7), layout="constrained")
-ax.plot(sino_back[133, :, 0], ".-")
-ax.plot(sino_back_idl[133, :, 0], ".:", ms=4)
-ax.set_xlim(150, 280)
+ax.plot(sino_back[137, :, 0], ".-")
+ax.plot(sino_back_idl[137, :, 0], ".:", ms=4)
+# ax.set_xlim(150, 280)
 fig2.show()

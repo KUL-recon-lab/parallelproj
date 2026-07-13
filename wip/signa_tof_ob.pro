@@ -25,23 +25,27 @@ proj = nidef_ge_signa(/raytracer, /true_axialsampling, /true_radialsampling,$
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-rad_bin = 170
-view_bins = [8, 74, 148]
+rad_bins = [150, 179, 200]
+view_bins = [8, 148]
 plane_bins = [0, 44, 81, 89, 173, 174, 258, 259, 420, 498, 536]
-tof_bins = [10, 19]
+tof_bins = [9, 21]
 
 sino = fltarr(357, 224, 575, 27)
 
-ip = 0
-
-FOREACH plane_bin, plane_bins DO BEGIN
-    FOREACH view_bin, view_bins DO BEGIN
-        FOREACH tof_bin, tof_bins DO BEGIN
-            sino[rad_bin, view_bin, plane_bin, tof_bin] = 1.4 + 0.1*ip
-            sino[rad_bin+11, view_bin, plane_bin, tof_bin] = 1.6 + 0.1*ip
+FOREACH view_bin, view_bins DO BEGIN
+    ip = 0
+    FOREACH plane_bin, plane_bins DO BEGIN
+        ir = 0
+        FOREACH rad_bin, rad_bins DO BEGIN
+            it = 0
+            FOREACH tof_bin, tof_bins DO BEGIN
+                sino[rad_bin, view_bin, plane_bin, tof_bin] = 0.2*ir + 0.01*ip + (it + 1)
+                it = it + 1
+            ENDFOREACH
+            ir = ir + 1
         ENDFOREACH
+        ip = ip + 1
     ENDFOREACH
-    ip = ip + 1
 ENDFOREACH
 
 print, "backprojecting sino"
