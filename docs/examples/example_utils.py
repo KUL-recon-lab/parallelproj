@@ -333,21 +333,28 @@ def show_vol_cuts(
         _cb.exception_handler = _filter_resize_bug
 
     if is_4d:
+        # rows: images | leading slider (+ its slice-entry) | 3 sliders |
+        #       3 slice-entry boxes | vmin/vmax/cmap | colorbar
+        gs = fig.add_gridspec(
+            6, 3, height_ratios=[8, 1, 1, 1, 1, 0.5], hspace=0.6, wspace=0.35
+        )
+        ax_s0 = fig.add_subplot(gs[1, 0:2])
+        ax_ntb0 = fig.add_subplot(gs[1, 2])  # leading-axis slice entry
+        ax_sl = [fig.add_subplot(gs[2, c]) for c in range(3)]
+        ax_ntb = [fig.add_subplot(gs[3, c]) for c in range(3)]
+        ax_tb = [fig.add_subplot(gs[4, c]) for c in range(3)]
+        ax_cb = fig.add_subplot(gs[5, :])
+    else:
+        # rows: images | 3 sliders | 3 slice-entry boxes | vmin/vmax/cmap | colorbar
         gs = fig.add_gridspec(
             5, 3, height_ratios=[8, 1, 1, 1, 0.5], hspace=0.6, wspace=0.35
         )
-        ax_s0 = fig.add_subplot(gs[1, :])
-        ax_sl = [fig.add_subplot(gs[2, c]) for c in range(3)]
+        ax_s0 = None
+        ax_ntb0 = None
+        ax_sl = [fig.add_subplot(gs[1, c]) for c in range(3)]
+        ax_ntb = [fig.add_subplot(gs[2, c]) for c in range(3)]
         ax_tb = [fig.add_subplot(gs[3, c]) for c in range(3)]
         ax_cb = fig.add_subplot(gs[4, :])
-    else:
-        gs = fig.add_gridspec(
-            4, 3, height_ratios=[8, 1, 1, 0.5], hspace=0.6, wspace=0.35
-        )
-        ax_s0 = None
-        ax_sl = [fig.add_subplot(gs[1, c]) for c in range(3)]
-        ax_tb = [fig.add_subplot(gs[2, c]) for c in range(3)]
-        ax_cb = fig.add_subplot(gs[3, :])
 
     ax_im = [fig.add_subplot(gs[0, c]) for c in range(3)]
 
@@ -421,13 +428,35 @@ def show_vol_cuts(
         else:
             fig.canvas.draw_idle()
 
-    # each spatial slider only affects its own panel; the leading-axis slider
-    # (4-D only) affects all three
-    sx.on_changed(lambda _v: _render([0]))
-    sy.on_changed(lambda _v: _render([1]))
-    sz.on_changed(lambda _v: _render([2]))
+    # axis -> (entry box, slider); filled in when the entry boxes are built
+    # below.  Lets slider drags / clicks push the current index into the box.
+    _entry_for_axis = {}
+
+    def _sync_entry(axis):
+        pair = _entry_for_axis.get(axis)
+        if pair is None:
+            return
+        entry, slider = pair
+        txt = str(int(slider.val))
+        if entry.text_disp.get_text() != txt:
+            # update the text artist directly (no submit, no extra draw); it
+            # refreshes on the redraw the slider already schedules
+            entry.text_disp.set_text(txt)
+
+    # each spatial slider affects only its own panel (and its own entry box);
+    # the leading-axis slider (4-D only) affects all three panels
+    def _slider_cb(axis, panels):
+        def _cb(_v):
+            _render(panels)
+            _sync_entry(axis)
+
+        return _cb
+
+    sx.on_changed(_slider_cb(0, [0]))
+    sy.on_changed(_slider_cb(1, [1]))
+    sz.on_changed(_slider_cb(2, [2]))
     if s0 is not None:
-        s0.on_changed(lambda _v: _render([0, 1, 2]))
+        s0.on_changed(_slider_cb("t", [0, 1, 2]))
 
     # --- click-to-locate: clicking a panel moves the two orthogonal panels ---
     # index-axis a (0=x, 1=y, 2=z) is the slice axis of panel a, so re-rendering
@@ -456,8 +485,37 @@ def show_vol_cuts(
             slider.eventson = True
             panels.append(axis)  # index-axis a <-> panel a
         _render(sorted(panels))
+        for axis in panels:
+            _sync_entry(axis)  # click used eventson=False, so sync boxes here
 
     fig.canvas.mpl_connect("button_press_event", _on_click)
+
+    # --- direct slice-number entry: type an index and press Enter to jump ----
+    def _attach_slice_entry(ax_box, label, slider, n, axis):
+        entry = TextBox(ax_box, label, initial=str(int(slider.val)))
+
+        def _submit(text, _entry=entry, _slider=slider, _n=n):
+            try:
+                v = int(round(float(text)))
+            except (ValueError, TypeError):
+                v = int(_slider.val)
+            v = max(0, min(_n - 1, v))
+            _entry.text_disp.set_text(str(v))  # show the clamped value
+            # set_val fires the slider callback -> _render + _sync_entry; no
+            # entry.set_val() here, so there is no submit-recursion
+            _slider.set_val(v)
+
+        entry.on_submit(_submit)
+        _entry_for_axis[axis] = (entry, slider)
+        return entry
+
+    slice_entries = {
+        lx: _attach_slice_entry(ax_ntb[0], lx, sx, nx, 0),
+        ly: _attach_slice_entry(ax_ntb[1], ly, sy, ny, 1),
+        lz: _attach_slice_entry(ax_ntb[2], lz, sz, nz, 2),
+    }
+    if is_4d:
+        slice_entries[l0] = _attach_slice_entry(ax_ntb0, l0, s0, n0, "t")
 
     cb = fig.colorbar(ims[0], cax=ax_cb, orientation="horizontal")
 
@@ -503,6 +561,8 @@ def show_vol_cuts(
         # keep a strong ref to the click callback (also handy for tests)
         "on_click": _on_click,
     }
+    for _lab, _entry in slice_entries.items():
+        widgets[f"e_{_lab}"] = _entry
     if s0 is not None:
         widgets[f"s_{l0}"] = s0
 
