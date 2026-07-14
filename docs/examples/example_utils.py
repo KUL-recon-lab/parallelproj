@@ -384,24 +384,6 @@ def show_vol_cuts(
         ax.set_xlabel(panel_xlabels[c])
         ax.set_ylabel(panel_ylabels[c])
 
-    # slice-index read-out shown *inside* each panel (blittable, unlike a title)
-    _panel_index_label = [lx, ly, lz]
-    idx_txt = [
-        ax_im[c].text(
-            0.03,
-            0.97,
-            "",
-            transform=ax_im[c].transAxes,
-            va="top",
-            ha="left",
-            fontsize="medium",
-            family="monospace",
-            color="black",
-            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1.5),
-        )
-        for c in range(3)
-    ]
-
     sx = Slider(ax_sl[0], lx, 0, nx - 1, valinit=ix0, valstep=1)
     sy = Slider(ax_sl[1], ly, 0, ny - 1, valinit=iy0, valstep=1)
     sz = Slider(ax_sl[2], lz, 0, nz - 1, valinit=iz0, valstep=1)
@@ -410,13 +392,6 @@ def show_vol_cuts(
     def _current_indices():
         i0 = int(s0.val) if s0 is not None else None
         return i0, int(sx.val), int(sy.val), int(sz.val)
-
-    def _set_index_text(c, ix, iy, iz):
-        val = (ix, iy, iz)[c]
-        idx_txt[c].set_text(f"{_panel_index_label[c]} = {val:>4d}")
-
-    for c in range(3):
-        _set_index_text(c, ix0, iy0, iz0)
 
     # --- fast (blitted) rendering -------------------------------------------
     # Moving a slider re-renders only the affected panel(s), and (when the
@@ -438,12 +413,10 @@ def show_vol_cuts(
         i0, ix, iy, iz = _current_indices()
         for c in panels:
             ims[c].set_data(_panel_cut(c, i0, ix, iy, iz))
-            _set_index_text(c, ix, iy, iz)
         if _use_blit and all(_bg[c] is not None for c in panels):
             for c in panels:
                 fig.canvas.restore_region(_bg[c])
                 ax_im[c].draw_artist(ims[c])
-                ax_im[c].draw_artist(idx_txt[c])
                 fig.canvas.blit(ax_im[c].bbox)
         else:
             fig.canvas.draw_idle()
@@ -527,8 +500,7 @@ def show_vol_cuts(
         "tb_vmin": tb_vmin,
         "tb_vmax": tb_vmax,
         "tb_cmap": tb_cmap,
-        # keep strong refs to the callbacks / in-axes artists (also handy for tests)
-        "idx_text": idx_txt,
+        # keep a strong ref to the click callback (also handy for tests)
         "on_click": _on_click,
     }
     if s0 is not None:
