@@ -1276,6 +1276,7 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         view_direction: ViewDirection = ViewDirection.PLUS,
         radial_direction: RadialDirection = RadialDirection.PLUS,
         lor_endpoint_order: LOREndpointOrder = LOREndpointOrder.START_END,
+        view0_shift: int = 0,
     ) -> None:
         """
 
@@ -1313,6 +1314,13 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
             matters for TOF, where it reverses the TOF-bin axis; non-TOF
             projections are unchanged.  See :class:`LOREndpointOrder` (note the
             ``tofcenter_offset`` caveat for non-zero offsets).
+        view0_shift : int, optional
+            non-negative integer ``m`` (default 0) that shifts the detector
+            anchor of the views: view 0's central radial bin then connects
+            detectors ``((0 + m) mod N, (N/2 + m) mod N)`` instead of
+            ``(0, N/2)`` (``N`` = number of detectors per ring).  The same
+            shift is applied to every view, i.e. it rotates the
+            ``view -> detector-pair`` assignment by ``m`` crystals.
         """
 
         super().__init__(scanner)
@@ -1350,11 +1358,15 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         if not isinstance(lor_endpoint_order, LOREndpointOrder):
             raise TypeError("lor_endpoint_order must be a LOREndpointOrder")
 
+        if not isinstance(view0_shift, (int, np.integer)) or view0_shift < 0:
+            raise ValueError("view0_shift must be a non-negative integer")
+
         self._sinogram_order = sinogram_order
         self._zig_zag_order = zig_zag_order
         self._view_direction = view_direction
         self._radial_direction = radial_direction
         self._lor_endpoint_order = lor_endpoint_order
+        self._view0_shift = int(view0_shift)
 
         # declare all attributes set by the setup methods so they are
         # visible in __init__
@@ -1521,6 +1533,12 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         return self._lor_endpoint_order
 
     @property
+    def view0_shift(self) -> int:
+        """detector-anchor shift ``m`` of the views (view 0's central bin
+        connects ``((0 + m) mod N, (N/2 + m) mod N)``)"""
+        return self._view0_shift
+
+    @property
     def plane_axis_num(self) -> int:
         """the axis number of the plane axis"""
         return self.sinogram_order.name.find("P")
@@ -1612,7 +1630,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         ``ceil(t/2)`` (swapped by ``zig_zag_order``), ``s_v = +/-1`` from
         ``view_direction`` and the radial coordinate is flipped by
         ``radial_direction`` (``s_r = +/-1``).  ``ring_endpoint_ordering`` on
-        the scanner independently controls the physical crystal numbering.
+        the scanner independently controls the physical crystal numbering.  A
+        non-negative ``view0_shift = m`` adds ``m`` to both endpoints, so view
+        0's central bin connects ``((0 + m) mod N, (N/2 + m) mod N)``.
         """
         n = self._scanner.num_lor_endpoints_per_ring
         nv = self._num_views  # = n // 2
@@ -1632,7 +1652,8 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         if self._zig_zag_order is SinogramZigZagOrder.START_FIRST:
             a, b = b, a
 
-        v = s_v * np.arange(nv, dtype=np.int64)[:, None]  # (nv, 1)
+        # ``view0_shift`` rotates the detector anchor of every view by m crystals
+        v = s_v * np.arange(nv, dtype=np.int64)[:, None] + self._view0_shift  # (nv, 1)
         start = (v + a[None, :]) % n  # (nv, n-1)
         end = (v - b[None, :] + n // 2) % n
 
