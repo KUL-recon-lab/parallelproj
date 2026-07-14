@@ -236,6 +236,7 @@ def show_vol_cuts(
     vmin: float | None = None,
     vmax: float | None = None,
     cmap: str = "Greys",
+    origin: str | tuple[str, str, str] = ("lower", "lower", "upper"),
     figsize: tuple[int, int] = (12, 6),
 ) -> tuple:
     """Display interactive 2D cuts through a 3D or 4D array.
@@ -262,6 +263,12 @@ def show_vol_cuts(
         ``vol``.
     cmap : str, optional
         Initial matplotlib colormap name.  Default ``"Greys"``.
+    origin : str or tuple of three str, optional
+        ``imshow`` origin for each of the three panels.  A single string is
+        applied to all panels; a 3-tuple sets them individually.  Default
+        ``("lower", "lower", "upper")`` -- the right-most (transaxial ``x``-``y``)
+        panel uses ``"upper"`` so the vertical axis ``x1``/``y`` runs top to
+        bottom, matching the scanner coordinate convention.
     figsize : tuple, optional
         Figure size in inches.
 
@@ -344,51 +351,140 @@ def show_vol_cuts(
 
     ax_im = [fig.add_subplot(gs[0, c]) for c in range(3)]
 
+    if isinstance(origin, str):
+        origins = [origin, origin, origin]
+    else:
+        origins = list(origin)
+    if len(origins) != 3:
+        raise ValueError("origin must be a string or a sequence of three strings")
+
     aspects = [dz / dy, dz / dx, dy / dx]
     panel_xlabels = [ly, lx, lx]
     panel_ylabels = [lz, lz, ly]
 
-    def _get_cuts(i0, ix, iy, iz):
+    # per-panel cut extractor: panel 0 depends on ix, panel 1 on iy, panel 2 on iz
+    def _panel_cut(c, i0, ix, iy, iz):
         if is_4d:
-            return vol[i0, ix, :, :].T, vol[i0, :, iy, :].T, vol[i0, :, :, iz].T
-        return vol[ix, :, :].T, vol[:, iy, :].T, vol[:, :, iz].T
+            return (vol[i0, ix, :, :], vol[i0, :, iy, :], vol[i0, :, :, iz])[c].T
+        return (vol[ix, :, :], vol[:, iy, :], vol[:, :, iz])[c].T
 
-    c0, c1, c2 = _get_cuts(i00, ix0, iy0, iz0)
-    imkw = dict(vmin=vmin, vmax=vmax, cmap=cmap, origin="lower")
     ims = [
-        ax_im[0].imshow(c0, aspect=aspects[0], **imkw),
-        ax_im[1].imshow(c1, aspect=aspects[1], **imkw),
-        ax_im[2].imshow(c2, aspect=aspects[2], **imkw),
+        ax_im[c].imshow(
+            _panel_cut(c, i00, ix0, iy0, iz0),
+            aspect=aspects[c],
+            origin=origins[c],
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+        )
+        for c in range(3)
     ]
 
-    for i, ax in enumerate(ax_im):
-        ax.set_xlabel(panel_xlabels[i])
-        ax.set_ylabel(panel_ylabels[i])
-    ax_im[0].set_title(f"{lx} = {ix0}")
-    ax_im[1].set_title(f"{ly} = {iy0}")
-    ax_im[2].set_title(f"{lz} = {iz0}")
+    for c, ax in enumerate(ax_im):
+        ax.set_xlabel(panel_xlabels[c])
+        ax.set_ylabel(panel_ylabels[c])
+
+    # slice-index read-out shown *inside* each panel (blittable, unlike a title)
+    _panel_index_label = [lx, ly, lz]
+    idx_txt = [
+        ax_im[c].text(
+            0.03,
+            0.97,
+            "",
+            transform=ax_im[c].transAxes,
+            va="top",
+            ha="left",
+            fontsize="medium",
+            family="monospace",
+            color="black",
+            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1.5),
+        )
+        for c in range(3)
+    ]
 
     sx = Slider(ax_sl[0], lx, 0, nx - 1, valinit=ix0, valstep=1)
     sy = Slider(ax_sl[1], ly, 0, ny - 1, valinit=iy0, valstep=1)
     sz = Slider(ax_sl[2], lz, 0, nz - 1, valinit=iz0, valstep=1)
     s0 = Slider(ax_s0, l0, 0, n0 - 1, valinit=i00, valstep=1) if is_4d else None
 
-    def update_slices(_):
+    def _current_indices():
         i0 = int(s0.val) if s0 is not None else None
-        ix, iy, iz = int(sx.val), int(sy.val), int(sz.val)
-        cuts = _get_cuts(i0, ix, iy, iz)
-        for j, im in enumerate(ims):
-            im.set_data(cuts[j])
-        ax_im[0].set_title(f"{lx} = {ix}")
-        ax_im[1].set_title(f"{ly} = {iy}")
-        ax_im[2].set_title(f"{lz} = {iz}")
-        fig.canvas.draw_idle()
+        return i0, int(sx.val), int(sy.val), int(sz.val)
 
-    sx.on_changed(update_slices)
-    sy.on_changed(update_slices)
-    sz.on_changed(update_slices)
+    def _set_index_text(c, ix, iy, iz):
+        val = (ix, iy, iz)[c]
+        idx_txt[c].set_text(f"{_panel_index_label[c]} = {val:>4d}")
+
+    for c in range(3):
+        _set_index_text(c, ix0, iy0, iz0)
+
+    # --- fast (blitted) rendering -------------------------------------------
+    # Moving a slider re-renders only the affected panel(s), and (when the
+    # backend supports it) blits just that panel instead of redrawing the whole
+    # figure.  Backgrounds are captured on every full draw (covers resize and
+    # colour-scale / colormap changes).
+    _use_blit = bool(getattr(fig.canvas, "supports_blit", False))
+    _bg = [None, None, None]
+
+    def _capture_backgrounds(_event=None):
+        if not _use_blit:
+            return
+        for c in range(3):
+            _bg[c] = fig.canvas.copy_from_bbox(ax_im[c].bbox)
+
+    fig.canvas.mpl_connect("draw_event", _capture_backgrounds)
+
+    def _render(panels):
+        i0, ix, iy, iz = _current_indices()
+        for c in panels:
+            ims[c].set_data(_panel_cut(c, i0, ix, iy, iz))
+            _set_index_text(c, ix, iy, iz)
+        if _use_blit and all(_bg[c] is not None for c in panels):
+            for c in panels:
+                fig.canvas.restore_region(_bg[c])
+                ax_im[c].draw_artist(ims[c])
+                ax_im[c].draw_artist(idx_txt[c])
+                fig.canvas.blit(ax_im[c].bbox)
+        else:
+            fig.canvas.draw_idle()
+
+    # each spatial slider only affects its own panel; the leading-axis slider
+    # (4-D only) affects all three
+    sx.on_changed(lambda _v: _render([0]))
+    sy.on_changed(lambda _v: _render([1]))
+    sz.on_changed(lambda _v: _render([2]))
     if s0 is not None:
-        s0.on_changed(update_slices)
+        s0.on_changed(lambda _v: _render([0, 1, 2]))
+
+    # --- click-to-locate: clicking a panel moves the two orthogonal panels ---
+    # index-axis a (0=x, 1=y, 2=z) is the slice axis of panel a, so re-rendering
+    # panel a exactly follows a change of index-axis a.
+    _slider_for_axis = {0: sx, 1: sy, 2: sz}
+    _axis_extent = {0: nx, 1: ny, 2: nz}
+    # per panel: (horizontal index-axis, vertical index-axis) of the displayed cut
+    _panel_click_axes = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
+
+    def _on_click(event):
+        if event.button != 1 or event.inaxes not in ax_im:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        toolbar = getattr(fig.canvas, "toolbar", None)
+        if toolbar is not None and getattr(toolbar, "mode", ""):
+            return  # ignore clicks while the zoom / pan tool is active
+        c = ax_im.index(event.inaxes)
+        col_axis, row_axis = _panel_click_axes[c]
+        panels = []
+        for axis, coord in ((col_axis, event.xdata), (row_axis, event.ydata)):
+            value = max(0, min(_axis_extent[axis] - 1, int(round(coord))))
+            slider = _slider_for_axis[axis]
+            slider.eventson = False  # set both, then render once
+            slider.set_val(value)
+            slider.eventson = True
+            panels.append(axis)  # index-axis a <-> panel a
+        _render(sorted(panels))
+
+    fig.canvas.mpl_connect("button_press_event", _on_click)
 
     cb = fig.colorbar(ims[0], cax=ax_cb, orientation="horizontal")
 
@@ -431,6 +527,9 @@ def show_vol_cuts(
         "tb_vmin": tb_vmin,
         "tb_vmax": tb_vmax,
         "tb_cmap": tb_cmap,
+        # keep strong refs to the callbacks / in-axes artists (also handy for tests)
+        "idx_text": idx_txt,
+        "on_click": _on_click,
     }
     if s0 is not None:
         widgets[f"s_{l0}"] = s0
