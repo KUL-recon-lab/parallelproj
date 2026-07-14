@@ -528,6 +528,52 @@ fig_k.suptitle("view 0 = black, view 1 = red  (each with matching radial-bin lab
 fig_k.show()
 
 # %%
+# User-defined view-0 anchor shift (``view0_shift``)
+# --------------------------------------------------
+#
+# By default view 0's central radial bin connects detectors ``(0, N/2)``.  The
+# ``view0_shift=m`` argument (a non-negative integer) rotates the detector
+# anchor of *every* view by ``m`` crystals, so view 0's central bin instead
+# connects ``((0+m) mod N, (N/2+m) mod N)``.  Below we draw the *complete*
+# view 0 (all radial bins, via :meth:`.show_views`) on an 8-module x 5-crystal
+# ring for ``m=0`` (default) and ``m=2``: the whole parallel set of LORs rotates
+# by ``m`` crystals while the rest of the sinogram indexing is unchanged.
+
+mini_shift = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
+    xp,
+    dev,
+    radius=100.0,
+    num_sides=8,
+    num_lor_endpoints_per_side=5,
+    lor_spacing=10.0,
+    ring_positions=xp.asarray([0.0], device=dev),
+    symmetry_axis=2,
+)
+
+fig_sh, ax_sh = plt.subplots(
+    1, 2, figsize=(12, 6), subplot_kw={"projection": "3d"}, tight_layout=True
+)
+for _ax, _m in zip(ax_sh, (0, 2)):
+    _ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
+    mini_shift.show_lor_endpoints(_ax, annotation_fontsize=8, show_linear_index=True)
+    d = pl.RegularPolygonPETLORDescriptor(mini_shift, radial_trim=0, view0_shift=_m)
+    d.show_views(
+        _ax,
+        views=xp.asarray([0], device=dev),
+        planes=xp.asarray([0], device=dev),
+        lw=1.0,
+        color="tab:red",
+    )
+    s_idx = int(parallelproj.to_numpy_array(d.start_in_ring_index)[0, (d.num_rad - 1) // 2])
+    e_idx = int(parallelproj.to_numpy_array(d.end_in_ring_index)[0, (d.num_rad - 1) // 2])
+    _ax.set_title(f"view0_shift={_m}\ncentral bin = ({s_idx}, {e_idx})")
+fig_sh.suptitle(
+    f"complete view 0 for view0_shift = 0 and 2  "
+    f"(N = {mini_shift.num_lor_endpoints_per_ring})"
+)
+fig_sh.show()
+
+# %%
 # Typical vendor settings
 # -----------------------
 #

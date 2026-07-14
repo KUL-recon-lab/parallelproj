@@ -88,15 +88,15 @@ testpaths = ["tests"]
 # pyproject.toml form, so only the pixi-specific bits need to live here.
 channels = ["conda-forge"]
 # Rich platforms (pixi >= 0.71): besides the plain OS/arch platforms used by
-# the CPU environments, we declare two CUDA-tagged ``linux-64`` platforms for
-# the GPU environments.  These are *distinct platform identities* from the
-# plain ``linux-64`` (they carry a ``__cuda`` virtual package), so the CPU
-# environments stay on plain ``linux-64`` and remain installable on GPU-less
-# CI / Read the Docs runners.  The CUDA-tagged platforms are referenced by
-# name from the ``cuda12`` / ``cuda13`` features; the plain platforms are
-# kept off the GPU envs (and the CUDA ones off the CPU envs) via the ``cpu``
-# feature below.  This replaces the now-deprecated feature-level
-# ``system-requirements = { cuda = ... }``.
+# the CPU environments, we declare CUDA-tagged ``linux-64`` and ``win-64``
+# platforms for the GPU environments.  These are *distinct platform identities*
+# from the plain ``linux-64`` / ``win-64`` (they carry a ``__cuda`` virtual
+# package), so the CPU environments stay on the plain platforms and remain
+# installable on GPU-less CI / Read the Docs runners.  The CUDA-tagged
+# platforms are referenced by name from the ``cuda12`` / ``cuda13`` features;
+# the plain platforms are kept off the GPU envs (and the CUDA ones off the CPU
+# envs) via the ``cpu`` feature below.  This replaces the now-deprecated
+# feature-level ``system-requirements = { cuda = ... }``.
 platforms = [
     "linux-64",
     "osx-arm64",
@@ -104,6 +104,8 @@ platforms = [
     "win-64",
     { name = "linux-64-cuda12", platform = "linux-64", cuda = "12.0" },
     { name = "linux-64-cuda13", platform = "linux-64", cuda = "13.0" },
+    { name = "win-64-cuda12", platform = "win-64", cuda = "12.0" },
+    { name = "win-64-cuda13", platform = "win-64", cuda = "13.0" },
 ]
 preview = ["pixi-build"]
 
@@ -293,21 +295,21 @@ platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
 
 # ---- CUDA 12 stack ----
 #
-# GPU environments only make sense on linux-64 (where conda-forge ships
-# CUDA-enabled builds of pytorch and cupy).
+# GPU environments are supported on linux-64 and win-64 (conda-forge ships
+# CUDA-enabled builds of parallelproj-core, pytorch and cupy for both).
 #
-# We use pixi's "rich platform" support (pixi >= 0.71) to declare a
-# CUDA-tagged ``linux-64`` platform here.  This is the replacement for the
+# We use pixi's "rich platform" support (pixi >= 0.71) to declare CUDA-tagged
+# ``linux-64`` / ``win-64`` platforms here.  This is the replacement for the
 # now-deprecated ``system-requirements = { cuda = "12" }``.  Crucially, it
-# keeps this CUDA linux-64 platform a *distinct identity* from the plain
-# ``linux-64`` declared in [tool.pixi.workspace]: the CPU environments
-# (test/docs/default) stay on plain linux-64 (no ``__cuda``) so they install
-# on GPU-less CI / Read the Docs runners, while only the GPU environments
-# carry the ``__cuda`` requirement.  The ``cuda-version`` constraint then
-# steers pytorch/cupy to their cuda-12 builds.
+# keeps these CUDA platforms *distinct identities* from the plain ``linux-64``
+# / ``win-64`` declared in [tool.pixi.workspace]: the CPU environments
+# (test/docs/default) stay on the plain platforms (no ``__cuda``) so they
+# install on GPU-less CI / Read the Docs runners, while only the GPU
+# environments carry the ``__cuda`` requirement.  The ``cuda-version``
+# constraint then steers pytorch/cupy to their cuda-12 builds.
 
 [tool.pixi.feature.cuda12]
-platforms = ["linux-64-cuda12"]
+platforms = ["linux-64-cuda12", "win-64-cuda12"]
 
 [tool.pixi.feature.cuda12.dependencies]
 cuda-version = "12.*"
@@ -315,16 +317,24 @@ cupy = "*"
 # CUDA build of pytorch (selected via the cuda-tagged platform above).
 pytorch = "*"
 
+# On Windows a system-wide CUDA install may set CUDA_PATH; override it so
+# cupy's NVRTC uses the conda-managed CUDA headers instead of the system ones.
+[tool.pixi.feature.cuda12.target.win-64.activation.env]
+CUDA_PATH = "$CONDA_PREFIX/Library"
+
 # ---- CUDA 13 stack ----
 
 [tool.pixi.feature.cuda13]
-platforms = ["linux-64-cuda13"]
+platforms = ["linux-64-cuda13", "win-64-cuda13"]
 
 [tool.pixi.feature.cuda13.dependencies]
 cuda-version = "13.*"
 cupy = "*"
 # CUDA build of pytorch (selected via the cuda-tagged platform above).
 pytorch = "*"
+
+[tool.pixi.feature.cuda13.target.win-64.activation.env]
+CUDA_PATH = "$CONDA_PREFIX/Library"
 
 # ---- environments ----
 #

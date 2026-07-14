@@ -2197,3 +2197,45 @@ def test_lor_endpoint_order(xp: ModuleType, dev: str) -> None:
             ppl.Michelogram(scanner.num_rings, 1, span=1),
             lor_endpoint_order="END_START",  # type: ignore[arg-type]
         )
+
+
+def test_view0_shift(xp: ModuleType, dev: str) -> None:
+    """view0_shift=m rotates every view's detector anchor by m crystals, so
+    view 0's central bin connects ((0+m) mod N, (N/2+m) mod N)."""
+    import numpy as np
+
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp, dev, radius=100.0, num_sides=8, num_lor_endpoints_per_side=4,
+        lor_spacing=4.0, ring_positions=xp.asarray([0.0], device=dev), symmetry_axis=2,
+    )
+    N = scanner.num_lor_endpoints_per_ring  # 32
+
+    def make(m):
+        return ppl.RegularPolygonPETLORDescriptor(
+            scanner, ppl.Michelogram(scanner.num_rings, 0, span=1),
+            radial_trim=0, view0_shift=m,
+        )
+
+    d0 = make(0)
+    d3 = make(3)
+    rc = (d0.num_rad - 1) // 2  # central radial bin
+
+    s0 = np.asarray(to_numpy_array(d0.start_in_ring_index))
+    e0 = np.asarray(to_numpy_array(d0.end_in_ring_index))
+    s3 = np.asarray(to_numpy_array(d3.start_in_ring_index))
+    e3 = np.asarray(to_numpy_array(d3.end_in_ring_index))
+
+    assert d0.view0_shift == 0 and d3.view0_shift == 3
+    # default: view 0 central bin connects (0, N/2)
+    assert (int(s0[0, rc]), int(e0[0, rc])) == (0, N // 2)
+    # shifted: view 0 central bin connects (m, N/2 + m)
+    assert (int(s3[0, rc]), int(e3[0, rc])) == (3, N // 2 + 3)
+    # the whole map is the m=0 map with +m (mod N) on both endpoints
+    assert np.array_equal(s3, (s0 + 3) % N)
+    assert np.array_equal(e3, (e0 + 3) % N)
+
+    # non-negative integer required
+    with pytest.raises(ValueError, match="view0_shift"):
+        make(-1)
+    with pytest.raises(ValueError, match="view0_shift"):
+        make(2.5)  # type: ignore[arg-type]
