@@ -12,9 +12,25 @@ import parallelproj.projectors as projectors
 import parallelproj.tof as tof
 
 from parallelproj import to_numpy_array, Array
+
+import sys
+
+sys.path.append("../docs/examples/")
+
 from example_utils import show_vol_cuts
 
 import array_api_compat.torch as xp
+
+
+# %%
+def _load_sino_mat(sino_path: Path, arr_mod, device, verbose=True):
+
+    if verbose:
+        print(f"loading {sino_path}")
+    sino_np = np.ascontiguousarray(np.swapaxes(loadmat(sino_path)["data"].copy(), 1, 2))
+
+    return arr_mod.asarray(sino_np, device=device)
+
 
 # %%
 dev = "cuda"
@@ -27,39 +43,48 @@ num_subsets = 34
 res_model_fwhm_mm = 3.5
 
 # %%
+print("Setting up lor descriptor and projector")
 lor_desc = lors.get_lor_descriptor_G2(xp, dev)
 proj = projectors.RegularPolygonPETProjector(lor_desc, img_shape, vox_size)
 
 # proj.tof_parameters = tof.get_tof_parameters_G1()
 
-# %%
-# read all on-TOF sionograms we need
-
-
-def _load_sino(fname: str, verbose=True):
-    data_path = Path("dmi_nema") / fname
-    if verbose:
-        print(f"loading {data_path}")
-    return xp.asarray(
-        np.ascontiguousarray(np.swapaxes(loadmat(data_path)["data"].copy(), 1, 2)),
-        device=dev,
-    )
-
-
-prompts = _load_sino("prompts_f1b1.mat")
-dtPuc = _load_sino("dtPuc_f1b1.mat")
-norm = _load_sino("norm.mat")
-
-
-acfs = _load_sino("acf_f1b1.mat")
-scatter = _load_sino("scatter_f1b1.mat")
-randoms = _load_sino("randoms_f1b1.mat")
 
 # %%
-mult_corrections = acfs * dtPuc / norm
-contamination = scatter + randoms
+# read the prompts sinogram
+data_path = Path("dmi_nema")
 
-# mult_op = operators.ElementwiseMultiplicationOperator(mult_corrections)
+prompts = _load_sino_mat(data_path / "prompts_f1b1.mat", xp, dev)
+
+# %%
+# read all multiplicative corrections for the fwd model
+mult_corr_file = data_path / "mult_corrections.npy"
+
+if mult_corr_file.exists():
+    mult_corrections = xp.asarray(np.load(mult_corr_file), device=dev)
+else:
+    dtPuc = _load_sino_mat(data_path / "dtPuc_f1b1.mat", xp, dev)
+    norm = _load_sino_mat(data_path / "norm.mat", xp, dev)
+    acfs = _load_sino_mat(data_path / "acf_f1b1.mat", xp, dev)
+    mult_corrections = acfs * dtPuc / norm
+    np.save(mult_corr_file, to_numpy_array(mult_corrections))
+
+# %%
+# read all additive corrections for the fwd model (contaminations)
+
+contam_file = data_path / "contaminations.npy"
+
+if contam_file.exists():
+    contamination = xp.asarray(np.load(contam_file), device=dev)
+else:
+    scatter = _load_sino_mat(data_path / "scatter_f1b1.mat", xp, dev)
+    randoms = _load_sino_mat(data_path / "randoms_f1b1.mat", xp, dev)
+    contamination = scatter + randoms
+    np.save(contam_file, to_numpy_array(contamination))
+
+
+# %%
+# setup the complete fwd model
 
 res_model = operators.GaussianFilterOperator(
     proj.in_shape,
@@ -141,6 +166,7 @@ def em_update(
 
 # %%
 # caluclate subset adjoint ones (sensitivity images per subset)
+print("Calculating adjoint ones")
 subset_adjoint_ones = xp.zeros((num_subsets,) + img_shape, dtype=xp.float32, device=dev)
 for k, op in enumerate(pet_subset_linop_seq):
     subset_adjoint_ones[k] = op.adjoint(
