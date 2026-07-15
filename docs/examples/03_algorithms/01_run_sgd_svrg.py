@@ -567,12 +567,12 @@ fig.show()
 
 # %%
 fig, axs, widgets = show_vol_cuts(
-    to_numpy_array(sgd_recons), voxel_size=voxel_size, fig_title="SGD result"
+    sgd_recons, voxel_size=voxel_size, fig_title="SGD result"
 )
 fig.show()
 
 # %%
 fig2, axs2, widgets = show_vol_cuts(
-    to_numpy_array(svrg_recons), voxel_size=voxel_size, fig_title="SVRG result"
+    svrg_recons, voxel_size=voxel_size, fig_title="SVRG result"
 )
 fig2.show()

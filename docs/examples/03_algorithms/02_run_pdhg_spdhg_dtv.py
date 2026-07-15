@@ -720,7 +720,7 @@ vmax = 1.2 * float(xp.max(x_true))
 
 # %%
 fig_true, _, widgets_true = show_vol_cuts(
-    to_numpy_array(x_true),
+    x_true,
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
@@ -730,7 +730,7 @@ fig_true.show()
 
 # %%
 fig_mlem, _, widgets_mlem = show_vol_cuts(
-    to_numpy_array(x_mlem),
+    x_mlem,
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
@@ -740,7 +740,7 @@ fig_mlem.show()
 
 # %%
 fig_pdhg, _, widgets_pdhg = show_vol_cuts(
-    to_numpy_array(x_pdhg),
+    x_pdhg,
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
@@ -751,7 +751,7 @@ fig_pdhg.show()
 
 # %%
 fig_spdhg, _, widgets_spdhg = show_vol_cuts(
-    to_numpy_array(x_spdhg),
+    x_spdhg,
     voxel_size=voxel_size,
     vmin=0,
     vmax=vmax,
@@ -761,7 +761,7 @@ fig_spdhg.show()
 
 # %%
 fig_struct, _, widgets_struct = show_vol_cuts(
-    to_numpy_array(x_struct), voxel_size=voxel_size, fig_title="structural image"
+    x_struct, voxel_size=voxel_size, fig_title="structural image"
 )
 fig_struct.show()
 

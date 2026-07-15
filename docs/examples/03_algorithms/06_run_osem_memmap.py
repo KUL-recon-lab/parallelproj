@@ -431,7 +431,7 @@ fig.show()
 # --------------------
 
 fig, axs, widgets = show_vol_cuts(
-    to_numpy_array(x_osem),
+    x_osem,
     voxel_size=voxel_size,
     fig_title=f"OSEM {num_epochs} epochs (disk-backed)",
     vmin=0,

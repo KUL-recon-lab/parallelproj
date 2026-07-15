@@ -636,7 +636,7 @@ fig.show()
 vmax = float(xp.max(x_svrg))
 
 fig, axs, widgets = show_vol_cuts(
-    to_numpy_array(x_osem),
+    x_osem,
     voxel_size=voxel_size,
     fig_title="OSEM result",
     vmin=0,
@@ -646,7 +646,7 @@ fig.show()
 
 # %%
 fig2, axs2, widgets2 = show_vol_cuts(
-    to_numpy_array(x_svrg),
+    x_svrg,
     voxel_size=voxel_size,
     fig_title="SVRG result",
     vmin=0,
