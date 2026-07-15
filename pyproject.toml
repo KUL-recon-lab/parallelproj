@@ -260,6 +260,7 @@ docs-gpu = { cmd = "sphinx-build -b html docs docs/_build/html", env = { BUILD_A
 
 [tool.pixi.feature.examples.dependencies]
 ipython = "*"
+h5py = ">=3.0"
 
 [tool.pixi.feature.examples.tasks]
 ipython-examples = { cmd = "ipython", env = { PYTHONPATH = "docs/examples" }, description = "Start IPython with docs/examples/ on PYTHONPATH for interactive example exploration." }
