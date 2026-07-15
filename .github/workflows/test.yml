@@ -55,7 +55,7 @@ jobs:
       - name: Set up pixi
         uses: prefix-dev/setup-pixi@v0.9.6
         with:
-          pixi-version: v0.72.2
+          pixi-version: v0.73.0
           environments: ${{ matrix.env }}
           cache: true
 
