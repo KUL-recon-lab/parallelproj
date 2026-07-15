@@ -789,7 +789,7 @@ vmax = float(xp.max(x_sgd_sino))
 
 # %%
 fig_sgd_sino, _, widgets_sgd_sino = show_vol_cuts(
-    to_numpy_array(x_sgd_sino),
+    x_sgd_sino,
     vmin=0,
     vmax=vmax,
     fig_title=f"Sino-SGD ({num_subsets} subsets, {num_epochs} epochs)",
@@ -798,7 +798,7 @@ fig_sgd_sino.show()
 
 # %%
 fig_sgd_lm, _, widgets_sgd_lm = show_vol_cuts(
-    to_numpy_array(x_sgd_lm),
+    x_sgd_lm,
     vmin=0,
     vmax=vmax,
     fig_title=f"LM-SGD ({num_subsets} subsets, {num_epochs} epochs)",
@@ -807,7 +807,7 @@ fig_sgd_lm.show()
 
 # %%
 fig_svrg_sino, _, widgets_svrg_sino = show_vol_cuts(
-    to_numpy_array(x_svrg_sino),
+    x_svrg_sino,
     vmin=0,
     vmax=vmax,
     fig_title=f"Sino-SVRG ({num_subsets} subsets, {num_epochs} epochs)",
@@ -816,7 +816,7 @@ fig_svrg_sino.show()
 
 # %%
 fig_svrg_lm, _, widgets_svrg_lm = show_vol_cuts(
-    to_numpy_array(x_svrg_lm),
+    x_svrg_lm,
     vmin=0,
     vmax=vmax,
     fig_title=f"LM-SVRG ({num_subsets} subsets, {num_epochs} epochs)",

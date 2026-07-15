@@ -558,7 +558,7 @@ grad_lm = lm_neg_logL.gradient(x_init)
 vmax = float(xp.max(xp.abs(x_init / adjoint_ones) * grad_sinogram))
 
 fig_gs, _, widgets_gs = show_vol_cuts(
-    to_numpy_array((x_init / adjoint_ones) * grad_sinogram),
+    (x_init / adjoint_ones) * grad_sinogram,
     vmin=-vmax,
     vmax=vmax,
     cmap="seismic",
@@ -568,7 +568,7 @@ fig_gs.show()
 # %%
 # Preconditioned gradient of the listmode objective (should match the sinogram plot above)
 fig_glm, _, widgets_glm = show_vol_cuts(
-    to_numpy_array((x_init / adjoint_ones) * grad_lm),
+    (x_init / adjoint_ones) * grad_lm,
     vmin=-vmax,
     vmax=vmax,
     cmap="seismic",
@@ -898,7 +898,7 @@ vmax = float(xp.max(x_mlem_sino if run_mlem else x_osem_sino))
 # %%
 if run_mlem:
     fig_xsino, _, widgets_xsino = show_vol_cuts(
-        to_numpy_array(x_mlem_sino),
+        x_mlem_sino,
         vmin=0,
         vmax=vmax,
         fig_title=f"Sinogram MLEM ({num_epochs_mlem} iterations)",
@@ -908,7 +908,7 @@ if run_mlem:
 # %%
 if run_mlem:
     fig_xlm, _, widgets_xlm = show_vol_cuts(
-        to_numpy_array(x_mlem_lm),
+        x_mlem_lm,
         vmin=0,
         vmax=vmax,
         fig_title=f"Listmode MLEM ({num_epochs_mlem} iterations)",
@@ -917,7 +917,7 @@ if run_mlem:
 
 # %%
 fig_xosino, _, widgets_xosino = show_vol_cuts(
-    to_numpy_array(x_osem_sino),
+    x_osem_sino,
     vmin=0,
     vmax=vmax,
     fig_title=f"Sinogram OSEM ({num_subsets} subsets, {num_epochs} epochs)",
@@ -926,7 +926,7 @@ fig_xosino.show()
 
 # %%
 fig_xolm, _, widgets_xolm = show_vol_cuts(
-    to_numpy_array(x_osem_lm),
+    x_osem_lm,
     vmin=0,
     vmax=vmax,
     fig_title=f"Listmode OSEM ({num_subsets} subsets, {num_epochs} epochs)",
@@ -935,7 +935,7 @@ fig_xolm.show()
 
 # %%
 fig_xssvrg, _, widgets_xssvrg = show_vol_cuts(
-    to_numpy_array(x_svrg_sino),
+    x_svrg_sino,
     vmin=0,
     vmax=vmax,
     fig_title=f"Sinogram SVRG ({num_subsets} subsets, {num_epochs} epochs)",
@@ -944,7 +944,7 @@ fig_xssvrg.show()
 
 # %%
 fig_xlsvrg, _, widgets_xlsvrg = show_vol_cuts(
-    to_numpy_array(x_svrg_lm),
+    x_svrg_lm,
     vmin=0,
     vmax=vmax,
     fig_title=f"Listmode SVRG ({num_subsets} subsets, {num_epochs} epochs)",

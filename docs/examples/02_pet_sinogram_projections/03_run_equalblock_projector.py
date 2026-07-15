@@ -173,7 +173,7 @@ ax3.set_title("forward projection of ones")
 fig3.show()
 
 fig4, _, widgets4 = show_vol_cuts(
-    to_numpy_array(ones_back), fig_title="back projection of ones"
+    ones_back, fig_title="back projection of ones"
 )
 fig4.show()
 
@@ -219,6 +219,6 @@ fig5.show()
 
 # %%
 fig6, _, widgets6 = show_vol_cuts(
-    to_numpy_array(ones_back_tof), fig_title="TOF back projection of ones"
+    ones_back_tof, fig_title="TOF back projection of ones"
 )
 fig6.show()

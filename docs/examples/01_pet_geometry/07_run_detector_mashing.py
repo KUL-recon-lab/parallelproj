@@ -233,7 +233,7 @@ fine_sino = proj_fine(img)
 mashed_sino = mash(fine_sino)
 
 # show the image used to simulated the sinograms
-_, _, _ = show_vol_cuts(to_numpy_array(img), fig_title="simulated image")
+_, _, _ = show_vol_cuts(img, fig_title="simulated image")
 
 # The sinograms are 3D arrays.  ``show_vol_cuts`` shows orthogonal cuts with a
 # slider per axis, so you can scroll through radial, view and plane.

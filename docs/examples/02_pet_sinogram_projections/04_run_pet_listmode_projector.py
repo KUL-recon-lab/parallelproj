@@ -22,7 +22,6 @@ import parallelproj.pet_scanners
 import parallelproj.projectors
 import parallelproj.operators
 import parallelproj.tof
-from parallelproj import to_numpy_array
 
 # %%
 from example_utils import suggest_array_backend_and_device
@@ -111,7 +110,7 @@ y_back = lm_proj.adjoint(ones_list)
 # -------------------------------------------
 
 fig2, _, widgets2 = show_vol_cuts(
-    to_numpy_array(y_back), fig_title="non-TOF back projection of ones"
+    y_back, fig_title="non-TOF back projection of ones"
 )
 fig2.show()
 
@@ -150,7 +149,7 @@ y_back_tof = lm_proj.adjoint(ones_list)
 # ---------------------------------------
 
 fig3, _, widgets3 = show_vol_cuts(
-    to_numpy_array(y_back_tof), fig_title="TOF back projection of ones"
+    y_back_tof, fig_title="TOF back projection of ones"
 )
 fig3.show()
 
@@ -181,7 +180,7 @@ y_back2 = lm_proj_with_res_model_and_att.adjoint(ones_list)
 # -------------------------------------------------------------------------
 
 fig4, _, widgets4 = show_vol_cuts(
-    to_numpy_array(y_back2),
+    y_back2,
     fig_title="TOF back projection with resolution and attenuation model",
 )
 fig4.show()

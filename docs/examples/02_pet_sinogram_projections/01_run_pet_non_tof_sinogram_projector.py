@@ -21,7 +21,6 @@ import parallelproj.pet_scanners
 import parallelproj.pet_lors
 import parallelproj.projectors
 import parallelproj.operators
-from parallelproj import to_numpy_array
 
 # %%
 from example_utils import suggest_array_backend_and_device
@@ -114,12 +113,12 @@ x_fwd = proj(x)
 
 # visualize the forward projection
 fig, _, widgets = show_vol_cuts(
-    to_numpy_array(x_fwd), axis_labels=("r", "v", "p"), fig_title="sinogram"
+    x_fwd, axis_labels=("r", "v", "p"), fig_title="sinogram"
 )
 fig.show()
 
 # visualize the image
-fig2, _, widgets2 = show_vol_cuts(to_numpy_array(x), fig_title="image")
+fig2, _, widgets2 = show_vol_cuts(x, fig_title="image")
 fig2.show()
 
 
@@ -160,7 +159,7 @@ x_fwd2_back = proj_with_res_model.adjoint(x_fwd2)
 
 # visualize the forward projection including the resolution model
 fig, _, widgets = show_vol_cuts(
-    to_numpy_array(x_fwd2),
+    x_fwd2,
     axis_labels=("r", "v", "p"),
     fig_title="sinogram with resolution model",
 )
@@ -204,7 +203,7 @@ x_fwd3_back = proj_with_att_and_res_model.adjoint(x_fwd3)
 # %%
 # visualize the forward projection including the attenuation and resolution model
 fig, _, widgets = show_vol_cuts(
-    to_numpy_array(x_fwd3),
+    x_fwd3,
     axis_labels=("r", "v", "p"),
     fig_title="sinogram with attenuation and resolution model",
 )
@@ -213,6 +212,6 @@ fig.show()
 # %%
 # visualize the back projection including the attenuation and resolution model
 fig2, _, widgets2 = show_vol_cuts(
-    to_numpy_array(x_fwd3_back), fig_title="back projection"
+    x_fwd3_back, fig_title="back projection"
 )
 fig2.show()

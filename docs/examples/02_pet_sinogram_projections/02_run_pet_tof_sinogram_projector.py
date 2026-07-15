@@ -178,7 +178,7 @@ fig.show()
 # %%
 # visualize the back projection
 fig2, _, widgets2 = show_vol_cuts(
-    to_numpy_array(x_fwd_back), fig_title="back projection"
+    x_fwd_back, fig_title="back projection"
 )
 fig2.show()
 

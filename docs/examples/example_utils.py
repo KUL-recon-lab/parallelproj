@@ -26,7 +26,7 @@ from types import ModuleType
 from typing import Any
 
 import parallelproj_core as ppc
-from parallelproj import Array
+from parallelproj import Array, to_numpy_array
 
 # ---------------------------------------------------------------------------
 # array_utils
@@ -229,7 +229,7 @@ def elliptic_cylinder_phantom(
 
 
 def show_vol_cuts(
-    vol: np.ndarray,
+    vol: "np.ndarray | Array",
     voxel_size: tuple[float, float, float] = (1.0, 1.0, 1.0),
     axis_labels: tuple[str, ...] | None = None,
     fig_title: str | None = None,
@@ -248,8 +248,10 @@ def show_vol_cuts(
 
     Parameters
     ----------
-    vol : np.ndarray, shape (nx, ny, nz) or (n0, nx, ny, nz)
-        3-D or 4-D array to visualise.
+    vol : array, shape (nx, ny, nz) or (n0, nx, ny, nz)
+        3-D or 4-D array to visualise.  May be a NumPy array or any array-API
+        array (NumPy, CuPy, PyTorch, ...), including one on a GPU -- it is
+        converted to a host NumPy array via ``parallelproj.to_numpy_array``.
     voxel_size : tuple of three floats, optional
         Physical size ``(dx, dy, dz)`` of one voxel along the last three axes.
         Default ``(1, 1, 1)``.
@@ -280,6 +282,12 @@ def show_vol_cuts(
         All interactive widgets keyed by name.  Keep a reference to prevent
         garbage collection of the callbacks.
     """
+    # accept any array-API array (numpy / cupy / torch, incl. on GPU): move it
+    # to a host numpy array once, up front, so all downstream slicing / imshow
+    # works regardless of the input backend or device.
+    if not isinstance(vol, np.ndarray):
+        vol = np.asarray(to_numpy_array(vol))
+
     if vol.ndim not in (3, 4):
         raise ValueError("vol must be a 3-D or 4-D array")
 
