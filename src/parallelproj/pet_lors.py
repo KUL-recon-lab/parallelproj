@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import abc
 import enum
+from collections.abc import Sequence
 from types import ModuleType
 
 import numpy as np
@@ -387,6 +388,9 @@ class Michelogram:
         self._plane_end_rings = plane_end_rings
         self._plane_mask = plane_mask
         self._plane_for_ring_pair_table = plane_for_ring_pair_table
+        # ``None`` on a normally-constructed Michelogram; set to the parent's
+        # plane indices only on the result of :meth:`select_segments`.
+        self._parent_plane_indices: np.ndarray | None = None
 
     # ------------------------------------------------------------------
     # Read-only properties
@@ -507,6 +511,109 @@ class Michelogram:
                 f"max_ring_difference={self._max_ring_difference}"
             )
         return pi
+
+    @property
+    def parent_plane_indices(self) -> np.ndarray | None:
+        """Plane indices of this michelogram's planes in the parent it was
+        derived from, shape ``(num_planes,)``, dtype ``int64`` -- or ``None``
+        for a normally-constructed :class:`Michelogram`.
+
+        Set only by :meth:`select_segments`: entry ``k`` is the plane index that
+        restricted plane ``k`` had in the full michelogram, so a full sinogram
+        can be reduced to the restricted one with
+        ``full_sino[..., parent_plane_indices, ...]`` along the plane axis.
+        """
+        return self._parent_plane_indices
+
+    def select_segments(self, segments: Sequence[int]) -> "Michelogram":
+        """Return a new :class:`Michelogram` keeping only the given segments.
+
+        ``max_ring_difference`` / ``span`` / ``layout`` still define the
+        segmentation; ``segments`` selects which of the resulting signed
+        segments to keep.  The selection is treated as a *set* -- plane
+        ordering remains governed by :attr:`segment_order`, so the restricted
+        michelogram is the order-preserving subsequence of this one, with plane
+        indices renumbered ``0 .. K-1``.  Segment *labels* are unchanged (e.g.
+        ``select_segments([1])`` yields planes whose ``plane_segment`` is still
+        ``1``, not ``0``).
+
+        The result exposes :attr:`parent_plane_indices` (the plane index each
+        kept plane had here), enabling gather/scatter between the full and
+        restricted sinograms (see :class:`SinogramSegmentSelectionOperator`).
+
+        Parameters
+        ----------
+        segments : Sequence[int]
+            Signed segment numbers to keep.  Order and duplicates are ignored.
+
+        Raises
+        ------
+        TypeError
+            If ``segments`` is not a sequence of ints (e.g. a bare ``int``).
+        ValueError
+            If ``segments`` is empty or contains a segment that does not exist
+            for this michelogram.
+        """
+        if isinstance(segments, (int, np.integer, str)):
+            raise TypeError("segments must be a sequence of ints, not a scalar")
+        try:
+            seg_list = [int(s) for s in segments]
+        except TypeError as exc:  # not iterable
+            raise TypeError("segments must be a sequence of ints") from exc
+
+        if len(seg_list) == 0:
+            raise ValueError("segments must be a non-empty sequence of ints")
+
+        seg_set = set(seg_list)
+        available = {int(s) for s in np.unique(self._plane_segment)}
+        missing = sorted(seg_set - available)
+        if missing:
+            raise ValueError(
+                f"requested segment(s) {missing} are not present in this "
+                f"michelogram; available segments are {sorted(available)}"
+            )
+
+        keep_segments = np.asarray(sorted(seg_set), dtype=self._plane_segment.dtype)
+        parent_idx = np.nonzero(np.isin(self._plane_segment, keep_segments))[0].astype(
+            np.int64
+        )
+
+        new = object.__new__(type(self))
+        # scalar configuration is inherited unchanged
+        new._layout = self._layout
+        new._segment_order = self._segment_order
+        new._span = self._span
+        new._half_span = self._half_span
+        new._num_rings = self._num_rings
+        new._max_ring_difference = self._max_ring_difference
+
+        # plane arrays are the order-preserving subsequence of this michelogram
+        new._plane_segment = self._plane_segment[parent_idx].copy()
+        new._plane_axial_midpoint_int = self._plane_axial_midpoint_int[parent_idx].copy()
+        new._plane_multiplicity = self._plane_multiplicity[parent_idx].copy()
+        new._num_planes = int(parent_idx.shape[0])
+        # every kept segment has >= 1 plane and the selection is non-empty, so
+        # num_planes >= 1 and .max() is always well defined.
+        new._max_multiplicity = int(new._plane_multiplicity.max())
+
+        # trim the padded ring columns to the restricted max multiplicity (the
+        # first ``max_multiplicity`` columns always hold every valid entry)
+        mm = new._max_multiplicity
+        new._plane_start_rings = self._plane_start_rings[parent_idx, :mm].copy()
+        new._plane_end_rings = self._plane_end_rings[parent_idx, :mm].copy()
+        new._plane_mask = self._plane_mask[parent_idx, :mm].copy()
+
+        # rebuild the (num_rings, num_rings) lookup table with the new indices
+        table = np.full((self._num_rings, self._num_rings), -1, dtype=np.int32)
+        for new_pi in range(new._num_planes):
+            for k in range(int(new._plane_multiplicity[new_pi])):
+                s = int(new._plane_start_rings[new_pi, k])
+                e = int(new._plane_end_rings[new_pi, k])
+                table[s, e] = new_pi
+        new._plane_for_ring_pair_table = table
+
+        new._parent_plane_indices = parent_idx
+        return new
 
     # ------------------------------------------------------------------
     # Geometry helpers
@@ -2537,6 +2644,222 @@ def _scatter(xp, arr, target_clamped, valid_mask, axis):
     vshape = [1] * out.ndim
     vshape[axis] = target_clamped.shape[0]
     return out * xp.reshape(valid_mask, tuple(vshape))
+
+
+class SinogramSegmentSelectionOperator(LinearOperator):
+    r"""Select a subset of Michelogram segments from a sinogram.
+
+    Given a (full) :class:`RegularPolygonPETLORDescriptor` and a list of
+    ``segments`` to keep, this operator
+
+    * builds a companion :attr:`restricted_lor_descriptor` -- identical to the
+      input descriptor but with the segment-restricted Michelogram
+      (:meth:`Michelogram.select_segments`) -- which you use to build the
+      projector that produces/consumes the *restricted* sinogram directly;
+    * as a :class:`.LinearOperator`, **forward**-gathers the selected planes of
+      a full sinogram into the restricted one, and its **adjoint** scatters a
+      restricted sinogram back into a zero-filled full sinogram.
+
+    The mapping only touches the plane axis (``lor_descriptor.plane_axis_num``),
+    so both non-TOF ``(..., plane, ...)`` and TOF
+    ``(..., plane, ..., tof)`` sinograms are supported (pass ``num_tof_bins``).
+    Because it is a pure plane selection (each kept plane maps to exactly one
+    distinct output plane), forward and adjoint are exact transposes and
+    :math:`\|G\|_2 = 1`.
+
+    Parameters
+    ----------
+    lor_descriptor : RegularPolygonPETLORDescriptor
+        the full LOR descriptor whose sinogram is the operator input.
+    segments : Sequence[int]
+        signed segment numbers to keep (order/duplicates ignored; ordering of
+        the restricted planes follows the michelogram's ``segment_order``).
+    num_tof_bins : int, optional
+        if given, the sinograms carry a trailing TOF axis of this length;
+        ``None`` (default) for non-TOF sinograms.
+
+    Example
+    -------
+    >>> import array_api_compat.numpy as xp
+    >>> import parallelproj.pet_scanners as pps
+    >>> import parallelproj.pet_lors as ppl
+    >>> scanner = pps.RegularPolygonPETScannerGeometry(
+    ...     xp, "cpu", radius=65.0, num_sides=4, num_lor_endpoints_per_side=2,
+    ...     lor_spacing=4.0, ring_positions=xp.asarray([0.0, 1.0, 2.0]),
+    ...     symmetry_axis=2)
+    >>> full = ppl.RegularPolygonPETLORDescriptor(
+    ...     scanner, ppl.Michelogram(scanner.num_rings, 2, span=1))
+    >>> sel = ppl.SinogramSegmentSelectionOperator(full, segments=[0, -1, 1])
+    >>> sel.restricted_lor_descriptor.num_planes <= full.num_planes
+    True
+    """
+
+    def __init__(
+        self,
+        lor_descriptor: RegularPolygonPETLORDescriptor,
+        segments: Sequence[int],
+        num_tof_bins: int | None = None,
+    ) -> None:
+        if not isinstance(lor_descriptor, RegularPolygonPETLORDescriptor):
+            raise TypeError("lor_descriptor must be a RegularPolygonPETLORDescriptor")
+        if num_tof_bins is not None and (
+            not isinstance(num_tof_bins, int) or num_tof_bins < 1
+        ):
+            raise ValueError("num_tof_bins must be a positive integer or None")
+
+        super().__init__()
+
+        self._lor_descriptor = lor_descriptor
+        self._num_tof_bins = num_tof_bins
+        self._xp = lor_descriptor.xp
+        self._dev = lor_descriptor.dev
+        self._plane_axis = lor_descriptor.plane_axis_num
+
+        # ``select_segments`` validates ``segments`` (TypeError / ValueError).
+        restricted_michelogram = lor_descriptor.michelogram.select_segments(segments)
+
+        self._restricted_lor_descriptor = RegularPolygonPETLORDescriptor(
+            scanner=lor_descriptor.scanner,
+            michelogram=restricted_michelogram,
+            radial_trim=lor_descriptor.radial_trim,
+            sinogram_order=lor_descriptor.sinogram_order,
+            zig_zag_order=lor_descriptor.zig_zag_order,
+            view_direction=lor_descriptor.view_direction,
+            radial_direction=lor_descriptor.radial_direction,
+            lor_endpoint_order=lor_descriptor.lor_endpoint_order,
+            view0_shift=lor_descriptor.view0_shift,
+        )
+
+        # effective segments, in the michelogram's segment_order
+        seg_np = np.asarray(to_numpy_array(restricted_michelogram.plane_segment))
+        _, first = np.unique(seg_np, return_index=True)
+        self._segments: tuple[int, ...] = tuple(
+            int(s) for s in seg_np[np.sort(first)]
+        )
+
+        # gather / scatter index structures (plane axis only)
+        parent = np.asarray(restricted_michelogram.parent_plane_indices, dtype=np.int64)
+        num_full = int(lor_descriptor.num_planes)
+        num_sel = int(parent.shape[0])
+        self._num_planes_in = num_full
+        self._num_planes_out = num_sel
+
+        # forward gather: restricted_plane k <- full_plane parent[k]
+        # adjoint scatter: full_plane p <- restricted_plane src[p] iff kept
+        src = np.zeros(num_full, dtype=np.int64)
+        keep = np.zeros(num_full, dtype=np.float32)
+        src[parent] = np.arange(num_sel, dtype=np.int64)
+        keep[parent] = 1.0
+
+        xp = self._xp
+        dev = self._dev
+        self._gather_idx = xp.asarray(parent, device=dev)
+        self._scatter_src = xp.asarray(src, device=dev)
+        self._keep_mask = xp.asarray(keep, device=dev)
+
+        # in/out shapes honour sinogram_order's plane_axis_num and optional TOF.
+        spatial_in = tuple(lor_descriptor.spatial_sinogram_shape)
+        spatial_out = tuple(self._restricted_lor_descriptor.spatial_sinogram_shape)
+        if num_tof_bins is None:
+            self._in_shape = spatial_in
+            self._out_shape = spatial_out
+        else:
+            self._in_shape = spatial_in + (int(num_tof_bins),)
+            self._out_shape = spatial_out + (int(num_tof_bins),)
+
+    # ------------------------------------------------------------------
+    # LinearOperator interface
+    # ------------------------------------------------------------------
+
+    @property
+    def in_shape(self) -> tuple[int, ...]:
+        """Spatial sinogram shape of the full input, optionally with a trailing TOF axis."""
+        return self._in_shape
+
+    @property
+    def out_shape(self) -> tuple[int, ...]:
+        """Spatial sinogram shape of the segment-restricted output, optionally with a trailing TOF axis."""
+        return self._out_shape
+
+    def _apply(self, x: Array) -> Array:
+        """Gather the selected planes: ``y_k = x_{parent(k)}``."""
+        return self._xp.take(x, self._gather_idx, axis=self._plane_axis)
+
+    def _adjoint(self, y: Array) -> Array:
+        """Scatter back into a zero-filled full sinogram.
+
+        ``x_p = y_{src(p)}`` for kept planes and ``0`` otherwise.  Implemented
+        as a (portable) 1-D gather followed by masking of the non-selected
+        planes -- the exact transpose of :meth:`_apply`.
+        """
+        xp = self._xp
+        ax = self._plane_axis
+        gathered = xp.take(y, self._scatter_src, axis=ax)
+        mask_shape = [1] * gathered.ndim
+        mask_shape[ax] = self._num_planes_in
+        return gathered * xp.reshape(self._keep_mask, tuple(mask_shape))
+
+    def norm(
+        self,
+        xp: ModuleType,
+        dev: str,
+        num_iter: int = 30,
+        iscomplex: bool = False,
+        verbose: bool = False,
+    ) -> float:
+        r"""Operator 2-norm in closed form.
+
+        Each kept plane maps to exactly one distinct output plane, so the rows
+        of the selection matrix are orthonormal, :math:`G G^T = I` and
+        :math:`\|G\|_2 = 1`.  The inherited signature is kept for API
+        compatibility; its arguments are ignored.
+        """
+        return 1.0
+
+    # ------------------------------------------------------------------
+    # Public read-only properties
+    # ------------------------------------------------------------------
+
+    @property
+    def lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
+        """The full (input) LOR descriptor."""
+        return self._lor_descriptor
+
+    @property
+    def restricted_lor_descriptor(self) -> RegularPolygonPETLORDescriptor:
+        """Companion descriptor with the segment-restricted Michelogram; use it
+        to build the projector for the restricted sinogram."""
+        return self._restricted_lor_descriptor
+
+    @property
+    def segments(self) -> tuple[int, ...]:
+        """Kept segments, in the michelogram's ``segment_order``."""
+        return self._segments
+
+    @property
+    def num_tof_bins(self) -> int | None:
+        """Number of TOF bins, or ``None`` for non-TOF sinograms."""
+        return self._num_tof_bins
+
+    @property
+    def num_planes_in(self) -> int:
+        """Number of planes in the full input sinogram."""
+        return self._num_planes_in
+
+    @property
+    def num_planes_out(self) -> int:
+        """Number of planes in the segment-restricted output sinogram."""
+        return self._num_planes_out
+
+    def __str__(self) -> str:
+        tof_str = (
+            f", {self._num_tof_bins} TOF bins" if self._num_tof_bins is not None else ""
+        )
+        return (
+            f"{self.__class__.__name__}("
+            f"segments={list(self._segments)}, "
+            f"num_planes: {self._num_planes_in} -> {self._num_planes_out}{tof_str})"
+        )
 
 
 class SinogramMashingOperator(LinearOperator):

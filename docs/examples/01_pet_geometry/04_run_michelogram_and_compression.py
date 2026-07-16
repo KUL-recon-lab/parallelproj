@@ -30,7 +30,7 @@ from parallelproj import to_numpy_array
 
 # %%
 
-from parallelproj._examples_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device, show_vol_cuts
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
@@ -519,3 +519,70 @@ _show_segment_order_pair(
     ),
     "Same GE-layout Michelogram, two SegmentOrder conventions",
 )
+
+# %%
+# Projecting only a subset of segments with ``SinogramSegmentSelectionOperator``
+# -----------------------------------------------------------------------------
+#
+# You may want the *full* michelogram geometry but only need to project /
+# reconstruct a few segments -- e.g. the direct segment and the first oblique
+# ones -- to reduce the number of planes.
+# :class:`.SinogramSegmentSelectionOperator` takes the full (span-1 here)
+# descriptor and a list of ``segments`` to keep.  It builds a matching
+# :attr:`~.SinogramSegmentSelectionOperator.restricted_lor_descriptor` (use it
+# to construct the projector for the restricted sinogram) and, as a linear
+# operator, **gathers** the selected planes out of a full sinogram (forward) and
+# **scatters** them back into a zero-filled full sinogram (adjoint).
+#
+# We reuse the span-1 descriptor ``lor_s1``, its projector ``proj_s1`` and the
+# full sinogram ``sino_s1`` built further above.
+
+# (1) full descriptor + projector + full sinogram already exist:
+#     lor_s1, proj_s1, sino_s1 = proj_s1(phantom)
+
+# (2) selection operator keeping segments 0, -1 and +1
+selected_segments = [0, -1, 1]
+seg_sel = parallelproj.pet_lors.SinogramSegmentSelectionOperator(
+    lor_s1, segments=selected_segments
+)
+print(seg_sel)
+print(f"full sinogram planes:       {seg_sel.num_planes_in}")
+print(f"restricted sinogram planes: {seg_sel.num_planes_out}")
+
+# (3) build the projector for the restricted geometry straight from the operator
+proj_restricted = parallelproj.projectors.RegularPolygonPETProjector(
+    seg_sel.restricted_lor_descriptor, img_shape=img_shape, voxel_size=voxel_size
+)
+
+# the restricted version of the full sinogram from step (1)
+sino_restricted = seg_sel(sino_s1)
+
+# (4) back-project the restricted sinogram with the restricted projector,
+#     and -- for reference -- the full sinogram with the full projector
+back_restricted = proj_restricted.adjoint(sino_restricted)
+back_full = proj_s1.adjoint(sino_s1)
+
+# %%
+# Consistency check: projecting the phantom directly with the restricted
+# projector must equal gathering the selected planes out of the full forward
+# projection (same geometry, same plane ordering -- just fewer planes).
+
+sino_restricted_direct = proj_restricted(phantom)
+max_abs_diff = float(xp.max(xp.abs(sino_restricted_direct - sino_restricted)))
+print(f"max |restricted_direct - gather(full)| = {max_abs_diff:.3e}")
+
+# %%
+# Visualise the two back-projections.  The restricted back projection uses only
+# the selected segments' LORs, so it is a (blurrier, fewer-plane-contribution)
+# approximation of the full back projection.
+
+fig_bp_full, _, _ = show_vol_cuts(
+    back_full, fig_title="back projection -- all segments"
+)
+fig_bp_full.show()
+
+fig_bp_restr, _, _ = show_vol_cuts(
+    back_restricted,
+    fig_title=f"back projection -- segments {seg_sel.segments}",
+)
+fig_bp_restr.show()
