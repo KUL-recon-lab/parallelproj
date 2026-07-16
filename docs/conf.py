@@ -4,14 +4,15 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import os
-import sys
 import tomllib
 from pathlib import Path
 
 from sphinx_gallery.sorting import FileNameSortKey
 
-# make shared example utilities (vis.py) importable from all example subdirectories
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples"))
+# The shared example helpers now live in ``parallelproj._examples_utils`` (a
+# private, examples-only module shipped inside the package), so the gallery
+# examples import them straight from ``parallelproj`` -- no sys.path setup, no
+# PYTHONPATH and no separate ``example_utils.py`` download are needed.
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -70,17 +71,14 @@ sphinx_gallery_conf = {
     "plot_gallery": not _build_no_examples,
     "within_subsection_order": FileNameSortKey,
     "parallel": os.cpu_count(),
-    # Inject a setup note at the top of every generated Jupyter notebook so
-    # that users who download a notebook know how to obtain the helper modules.
+    # Inject a setup note at the top of every generated Jupyter notebook.  The
+    # example helpers ship inside parallelproj (parallelproj._examples_utils),
+    # so installing parallelproj is all that is required to run a notebook.
     "first_notebook_cell": (
-        "# To run this notebook you need parallelproj and the example_utils helper.\n"
+        "# To run this notebook, install parallelproj (which bundles the\n"
+        "# example helpers used below in ``parallelproj._examples_utils``):\n"
         "#\n"
-        "# 1. Install parallelproj (if not already):\n"
-        "#      conda install -c conda-forge parallelproj\n"
-        "#\n"
-        "# 2. Download example_utils.py into the same folder as this notebook:\n"
-        "#    https://raw.githubusercontent.com/KUL-recon-lab/"
-        "parallelproj/main/docs/examples/example_utils.py"
+        "#      conda install -c conda-forge parallelproj"
     ),
 }
 

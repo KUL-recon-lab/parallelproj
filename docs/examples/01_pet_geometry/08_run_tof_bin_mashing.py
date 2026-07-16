@@ -23,11 +23,6 @@ The matching coarse TOF parameters (``num_tofbins`` divided by :math:`G`,
 ``tofbin_width`` multiplied by it) are exposed as ``.coarse_tof_parameters`` so
 a projector can be pointed straight at the mashed grid.
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -42,7 +37,8 @@ from parallelproj.operators import CompositeLinearOperator
 from parallelproj import to_numpy_array
 
 # %%
-from example_utils import suggest_array_backend_and_device, show_vol_cuts
+
+from parallelproj._examples_utils import suggest_array_backend_and_device, show_vol_cuts
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")

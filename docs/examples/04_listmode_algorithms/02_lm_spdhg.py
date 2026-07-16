@@ -23,18 +23,14 @@ using the linear forward model
     Running this example using GPU arrays (e.g. using cupy as array backend)
     is highly recommended due to "longer" execution times with CPU arrays
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
 from __future__ import annotations
 import matplotlib.pyplot as plt
-from example_utils import show_vol_cuts
-from example_utils import elliptic_cylinder_phantom
+
+from parallelproj._examples_utils import show_vol_cuts
+from parallelproj._examples_utils import elliptic_cylinder_phantom
 import numpy as np
 import math
 from array_api_compat import size
@@ -48,7 +44,7 @@ from parallelproj import to_numpy_array
 from parallelproj.data import count_event_multiplicity
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

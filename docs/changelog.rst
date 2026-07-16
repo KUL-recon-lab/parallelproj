@@ -223,6 +223,13 @@ New examples and documentation
   interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
   forward projection as the transmission blank scan), NAC warm-start, support-constrained
   attenuation update, and a known-water region to fix the TOF scale ambiguity.
+- **Example helpers now ship inside the package** as the private
+  ``parallelproj._examples_utils`` module (interactive slice viewer
+  ``show_vol_cuts``, ``suggest_array_backend_and_device``, analytic phantoms and
+  demo priors). Examples and downloaded scripts/notebooks now import them
+  straight from ``parallelproj`` — no ``PYTHONPATH`` setup and no separate
+  ``example_utils.py`` download are required. The module is private and
+  examples-only (not part of the public API) and may change without notice.
 
 Breaking Changes
 ~~~~~~~~~~~~~~~~

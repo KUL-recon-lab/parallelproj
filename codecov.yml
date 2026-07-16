@@ -6,6 +6,12 @@ coverage:
         base: auto
         threshold: 0%
 
+# ``_examples_utils.py`` is a private, examples-only helper module that backs
+# the documentation gallery; it is smoke-tested for importability but excluded
+# from the coverage target (mirrors [tool.coverage.run] omit in pyproject.toml).
+ignore:
+  - "src/parallelproj/_examples_utils.py"
+
 comment:
   layout: "diff, flags, files"
   behavior: default

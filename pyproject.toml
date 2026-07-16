@@ -52,6 +52,14 @@ packages = ["src/parallelproj"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+# ``parallelproj._examples_utils`` is a private, examples-only helper module
+# (interactive matplotlib viewer, analytic phantoms, demo priors) that backs
+# the documentation gallery.  It is smoke-tested for importability but is
+# intentionally kept out of the coverage target, so it does not drag the
+# project coverage number (see the matching ``ignore`` in codecov.yml).
+omit = ["*/parallelproj/_examples_utils.py"]
+
 # ---------------------------------------------------------------------------
 # Pixi configuration -- everything below this point is consumed by Pixi,
 # not by hatchling / PEP 517.
@@ -62,7 +70,7 @@ testpaths = ["tests"]
 #
 # Quick start:
 #   pixi install                 # default env (runtime-only + IPython, Python 3.12)
-#   pixi run ipython-examples    # IPython with docs/examples/ on PYTHONPATH
+#   pixi run ipython-examples    # IPython for interactive example exploration
 #   pixi run -e cuda12 ipython-examples
 #                                # same, but with the CUDA 12 stack
 #   pixi run test                # run the test suite (Python 3.12)
@@ -252,10 +260,10 @@ docs-gpu = { cmd = "sphinx-build -b html docs docs/_build/html", env = { BUILD_A
 # ---- examples feature ----
 #
 # Adds IPython and a convenience task for running the docs/examples
-# interactively.  The task pre-sets PYTHONPATH so that the shared helpers
-# in docs/examples/ (example_utils.py) are importable.
-# This feature is included in every environment so that
-# ``pixi run ipython-examples`` and
+# interactively.  No PYTHONPATH or download is needed: the shared example
+# helpers ship inside the package as ``parallelproj._examples_utils``, so the
+# examples import them straight from ``parallelproj``.  This feature is included
+# in every environment so that ``pixi run ipython-examples`` and
 # ``pixi run -e cuda12 ipython-examples`` both work out of the box.
 
 [tool.pixi.feature.examples.dependencies]
@@ -263,7 +271,7 @@ ipython = "*"
 h5py = ">=3.0"
 
 [tool.pixi.feature.examples.tasks]
-ipython-examples = { cmd = "ipython", env = { PYTHONPATH = "docs/examples" }, description = "Start IPython with docs/examples/ on PYTHONPATH for interactive example exploration." }
+ipython-examples = { cmd = "ipython", description = "Start IPython for interactive example exploration (run examples with %run; helpers come from parallelproj._examples_utils)." }
 
 # ---- CPU pytorch ----
 #

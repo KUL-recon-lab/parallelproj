@@ -97,11 +97,6 @@ comparable to one MLTR / SPS iteration.
     simplicity, guaranteed positivity without a constrained solver, trivial
     parallelism, and natural extension to ordered subsets. 
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -116,10 +111,11 @@ import parallelproj.pet_scanners
 import parallelproj.projectors
 from parallelproj import Array, to_numpy_array
 
-from example_utils import elliptic_cylinder_phantom, show_vol_cuts
+
+from parallelproj._examples_utils import elliptic_cylinder_phantom, show_vol_cuts
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")
