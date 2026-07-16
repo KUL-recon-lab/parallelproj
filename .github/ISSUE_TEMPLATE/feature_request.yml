@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a new feature or improvement for the pure-Python parallelproj package
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement!
+
+        Note: this repository is the pure-Python front end. Requests concerning
+        the compiled C/CUDA kernels belong in
+        [`libparallelproj`](https://github.com/KUL-recon-lab/libparallelproj).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do, and what is missing or hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the API or behavior you'd like. A small usage sketch helps.
+      render: python
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you've thought about.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else (references, related issues, screenshots).
+    validations:
+      required: false
