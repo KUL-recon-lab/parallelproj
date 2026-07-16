@@ -522,7 +522,7 @@ _show_segment_order_pair(
 
 # %%
 # Projecting only a subset of segments with ``SinogramSegmentSelectionOperator``
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 #
 # You may want the *full* michelogram geometry but only need to project /
 # reconstruct a few segments -- e.g. the direct segment and the first oblique
