@@ -14,11 +14,8 @@ import parallelproj.tof as tof
 
 from parallelproj import to_numpy_array, Array
 
-import sys
 
-sys.path.append("../docs/examples/")
-
-from example_utils import show_vol_cuts
+from parallelproj._examples_utils import show_vol_cuts
 
 import array_api_compat.torch as xp
 

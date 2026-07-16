@@ -5,11 +5,6 @@
 This example demonstrates the run 2D filtered back projection (FBP)
 on pre-corrected Poisson emission data.
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -18,11 +13,12 @@ import numpy as np
 
 import parallelproj.projectors
 from parallelproj import to_numpy_array
-from utils import RadonDisk, RadonObjectSequence
+
+from parallelproj._examples_utils import RadonDisk, RadonObjectSequence
 from scipy.ndimage import gaussian_filter
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

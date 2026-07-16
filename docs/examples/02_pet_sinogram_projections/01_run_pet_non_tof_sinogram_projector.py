@@ -6,16 +6,12 @@ In this example we will show how to setup and use a PET sinogram projector
 consisting of a geometrical forward projector (Joseph's method),
 a resolution model and the modeling of attenuation.
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
 import matplotlib.pyplot as plt
-from example_utils import show_vol_cuts
+
+from parallelproj._examples_utils import show_vol_cuts
 
 import parallelproj.pet_scanners
 import parallelproj.pet_lors
@@ -23,7 +19,7 @@ import parallelproj.projectors
 import parallelproj.operators
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually

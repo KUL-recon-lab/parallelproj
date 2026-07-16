@@ -62,11 +62,6 @@ subset projectors :math:`P_k`.  Three accelerations are compared against
     roughly 1.5 (anchor + subset sweep), so the epoch axis understates
     SVRG's computation cost by about a factor of 1.5.
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -83,14 +78,15 @@ import parallelproj.pet_scanners
 import parallelproj.projectors
 from parallelproj import Array, to_numpy_array
 
-from example_utils import (
+
+from parallelproj._examples_utils import (
     elliptic_cylinder_phantom,
     poisson_transmission_terms,
     show_vol_cuts,
 )
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")

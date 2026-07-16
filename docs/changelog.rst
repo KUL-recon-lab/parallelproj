@@ -70,6 +70,17 @@ Major new capabilities
   span-1 sinogram to the **GE layout**; its ``mode="average"`` adjoint distributes a
   GE sinogram back onto the span-1 grid while preserving counts (e.g. to convert GE
   data to span-1 before detector mashing).
+- **Segment selection**: new ``Michelogram.select_segments([...])`` returns a
+  restricted ``Michelogram`` keeping only the requested signed segments (the
+  order-preserving subsequence, with plane indices renumbered but segment labels
+  unchanged), exposing ``parent_plane_indices`` for gather/scatter against the
+  full sinogram.  The companion ``SinogramSegmentSelectionOperator``
+  (``parallelproj.pet_lors``) is a ``LinearOperator`` built from a full LOR
+  descriptor and a list of ``segments``: it provides a
+  ``restricted_lor_descriptor`` (for building the matching projector), gathers
+  the selected planes out of a full sinogram (forward) and scatters them back
+  into a zero-filled full sinogram (adjoint).  It is a pure plane selection, so
+  it supports non-TOF and TOF sinograms and has operator 2-norm 1.
 - **``SinogramMashingOperator``** (``parallelproj.pet_lors``): detector mashing for a
   span-1 regular-polygon sinogram.  Groups ``transaxial_factor`` within-side crystals
   and ``axial_factor`` rings into larger virtual detectors at the averaged endpoint
@@ -192,8 +203,10 @@ New examples and documentation
 - **New example: Michelograms and axial sinogram compression** — how the
   ``Michelogram`` maps ring pairs to sinogram planes/segments, using
   ``SinogramAxialCompressionOperator`` to compress a span-1 sinogram to a higher odd
-  span (and to/from the GE layout), and a ``SegmentOrder`` comparison
-  (positive-first vs negative-first) for both the STANDARD and GE layouts.
+  span (and to/from the GE layout), a ``SegmentOrder`` comparison
+  (positive-first vs negative-first) for both the STANDARD and GE layouts, and a
+  ``SinogramSegmentSelectionOperator`` section that projects/back-projects only a
+  chosen subset of segments.
 - **New example: zig-zag LOR sampling in a sinogram view** — visualises the
   ``SinogramZigZagOrder`` crystal/LOR endpoint pairing within a view.
 - **New example: sinogram symmetries** — partitioning ring pairs into symmetry
@@ -223,6 +236,13 @@ New examples and documentation
   interleaved penalised OS-MLEM (activity) and OS-MLTR (attenuation, with the activity
   forward projection as the transmission blank scan), NAC warm-start, support-constrained
   attenuation update, and a known-water region to fix the TOF scale ambiguity.
+- **Example helpers now ship inside the package** as the private
+  ``parallelproj._examples_utils`` module (interactive slice viewer
+  ``show_vol_cuts``, ``suggest_array_backend_and_device``, analytic phantoms and
+  demo priors). Examples and downloaded scripts/notebooks now import them
+  straight from ``parallelproj`` — no ``PYTHONPATH`` setup and no separate
+  ``example_utils.py`` download are required. The module is private and
+  examples-only (not part of the public API) and may change without notice.
 
 Breaking Changes
 ~~~~~~~~~~~~~~~~

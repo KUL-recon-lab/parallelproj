@@ -29,11 +29,6 @@ So there are two ways to model the mashed data:
 ``mode="average"`` averages and matches the fast coarse projector (use it for
 multiplicative factors such as attenuation or normalisation).
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -47,7 +42,8 @@ from parallelproj.operators import CompositeLinearOperator
 from parallelproj import to_numpy_array
 
 # %%
-from example_utils import suggest_array_backend_and_device, show_vol_cuts
+
+from parallelproj._examples_utils import suggest_array_backend_and_device, show_vol_cuts
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")

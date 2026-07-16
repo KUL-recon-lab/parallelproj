@@ -224,11 +224,6 @@ crosstalk = each image shows only its own structure).
     while omitting attenuation -- is a deliberate idealisation that keeps the
     example focused on the joint activity/attenuation update itself.
 
-.. note::
-
-   To run this example locally, download
-   `example_utils.py <https://raw.githubusercontent.com/KUL-recon-lab/parallelproj/main/docs/examples/example_utils.py>`_
-   into the **same folder** as this script. Make sure ``parallelproj`` is installed.
 """
 
 # %%
@@ -249,14 +244,15 @@ import parallelproj.tof
 from parallelproj import Array, to_numpy_array
 from parallelproj.functions import C2AffineObjective, LogCosh
 
-from example_utils import (
+
+from parallelproj._examples_utils import (
     elliptic_cylinder_phantom,
     poisson_transmission_terms,
     show_vol_cuts,
 )
 
 # %%
-from example_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")

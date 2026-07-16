@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://parallelproj.readthedocs.io
+    about: Installation, quickstart, examples and full API reference.
+  - name: Contributing guide
+    url: https://github.com/KUL-recon-lab/parallelproj/blob/main/CONTRIBUTING.md
+    about: Development setup, coding conventions and the pull-request workflow.
+  - name: Compiled C/CUDA kernels (libparallelproj)
+    url: https://github.com/KUL-recon-lab/libparallelproj/issues
+    about: Report issues with the projection backend (parallelproj-core) here.

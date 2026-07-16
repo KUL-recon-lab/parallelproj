@@ -2239,3 +2239,151 @@ def test_view0_shift(xp: ModuleType, dev: str) -> None:
         make(-1)
     with pytest.raises(ValueError, match="view0_shift"):
         make(2.5)  # type: ignore[arg-type]
+
+
+def test_michelogram_select_segments(xp: ModuleType, dev: str) -> None:
+    """Tests for :meth:`Michelogram.select_segments` and ``parent_plane_indices``.
+
+    Covers: order-preserving subsequence numbering, preserved segment labels,
+    ``parent_plane_indices``, ordering governed by ``segment_order`` (not the
+    argument order), ``plane_for_ring_pair`` consistency, and validation.
+    """
+    import numpy as _np
+
+    # segments present for (5 rings, span 1, max_ring_difference 2): 0, +/-1, +/-2
+    m = ppl.Michelogram(5, 2, span=1)  # POSITIVE_FIRST default
+    full_seg = _np.asarray(to_numpy_array(m.plane_segment))
+
+    # a normally-constructed michelogram has no parent
+    assert m.parent_plane_indices is None
+
+    # selection is a *set*; argument order is ignored, segment_order governs
+    r = m.select_segments([-2, 2, 1])
+    r_seg = _np.asarray(to_numpy_array(r.plane_segment))
+    parent = _np.asarray(to_numpy_array(r.parent_plane_indices))
+
+    # only requested segments, labels unchanged (not renumbered to 0)
+    assert set(r_seg.tolist()) == {1, 2, -2}
+    # order-preserving subsequence of the full michelogram
+    assert _np.array_equal(full_seg[parent], r_seg)
+    assert r.num_planes == int((_np.isin(full_seg, [1, 2, -2])).sum())
+    # first-appearance order is +1, +2, -2 (POSITIVE_FIRST), regardless of arg order
+    order: list[int] = []
+    for s in r_seg.tolist():
+        if s not in order:
+            order.append(s)
+    assert order == [1, 2, -2]
+
+    # parent_plane_indices lets us reduce a full "sinogram" (here a plane-indexed
+    # vector) to the restricted one by plain indexing
+    vals = _np.arange(m.num_planes)
+    assert _np.array_equal(vals[parent], _np.asarray([vals[i] for i in parent]))
+
+    # plane_for_ring_pair consistency: a kept (segment 1) pair resolves, a
+    # dropped (segment 0) pair raises
+    assert r.plane_for_ring_pair(0, 1) >= 0  # e - s = 1 -> segment +1
+    with pytest.raises(ValueError):
+        r.plane_for_ring_pair(0, 0)  # segment 0 was not selected
+
+    # selecting all segments reproduces the full plane layout
+    r_all = m.select_segments([0, 1, -1, 2, -2])
+    assert r_all.num_planes == m.num_planes
+    assert _np.array_equal(
+        _np.asarray(to_numpy_array(r_all.plane_segment)), full_seg
+    )
+
+    # validation
+    with pytest.raises(TypeError):
+        m.select_segments(1)  # type: ignore[arg-type]  # bare int
+    with pytest.raises(TypeError):
+        m.select_segments(2.5)  # type: ignore[arg-type]  # non-iterable, non-int
+    with pytest.raises(ValueError):
+        m.select_segments([])  # empty
+    with pytest.raises(ValueError, match="not present"):
+        m.select_segments([99])  # nonexistent segment
+
+
+def test_sinogram_segment_selection_operator(xp: ModuleType, dev: str) -> None:
+    """Tests for :class:`SinogramSegmentSelectionOperator`.
+
+    Covers constructor validation, shape / restricted-descriptor consistency,
+    forward gather vs. manual slice, adjoint zero-fill scatter, adjointness and
+    closed-form norm (== 1), and TOF pass-through.
+    """
+    import numpy as _np
+
+    scanner = pps.RegularPolygonPETScannerGeometry(
+        xp,
+        dev,
+        radius=65.0,
+        num_sides=4,
+        num_lor_endpoints_per_side=2,
+        lor_spacing=4.0,
+        ring_positions=xp.asarray([0.0, 1.0, 2.0], device=dev),
+        symmetry_axis=2,
+    )
+
+    full = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, 2, span=1),
+        radial_trim=2,
+        sinogram_order=ppl.SinogramSpatialAxisOrder.RVP,
+    )
+
+    # ---- constructor validation ----
+    with pytest.raises(TypeError):
+        ppl.SinogramSegmentSelectionOperator("nope", [0])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="num_tof_bins"):
+        ppl.SinogramSegmentSelectionOperator(full, [0], num_tof_bins=0)
+    with pytest.raises(ValueError, match="not present"):
+        ppl.SinogramSegmentSelectionOperator(full, [99])
+
+    # ---- build + shapes / restricted descriptor ----
+    sel = ppl.SinogramSegmentSelectionOperator(full, segments=[0, -1, 1])
+    assert sel.lor_descriptor is full
+    assert sel.in_shape == full.spatial_sinogram_shape
+    assert sel.out_shape == sel.restricted_lor_descriptor.spatial_sinogram_shape
+    assert sel.num_planes_in == full.num_planes
+    assert sel.num_planes_out == sel.restricted_lor_descriptor.num_planes
+    assert sel.num_planes_out < sel.num_planes_in  # +/-2 dropped
+    assert sel.segments == (0, 1, -1)  # POSITIVE_FIRST order
+    assert sel.num_tof_bins is None
+    assert "num_planes" in str(sel)
+
+    pa = full.plane_axis_num
+    parent = _np.asarray(
+        to_numpy_array(sel.restricted_lor_descriptor.michelogram.parent_plane_indices)
+    )
+
+    # ---- forward == manual plane slice ----
+    x = xp.asarray(
+        _np.random.rand(*sel.in_shape).astype(_np.float32), device=dev
+    )
+    y = sel(x)
+    manual = _np.take(_np.asarray(to_numpy_array(x)), parent, axis=pa)
+    assert _np.allclose(_np.asarray(to_numpy_array(y)), manual)
+
+    # ---- adjoint == zero-filled scatter ----
+    yv = xp.asarray(
+        _np.random.rand(*sel.out_shape).astype(_np.float32), device=dev
+    )
+    xb = _np.asarray(to_numpy_array(sel.adjoint(yv)))
+    expected = _np.zeros(sel.in_shape, dtype=_np.float32)
+    em = _np.moveaxis(expected, pa, 0)
+    em[parent] = _np.moveaxis(_np.asarray(to_numpy_array(yv)), pa, 0)
+    expected = _np.moveaxis(em, 0, pa)
+    assert _np.allclose(xb, expected)
+
+    # ---- adjointness + closed-form norm ----
+    assert sel.adjointness_test(xp, dev)
+    assert abs(sel.norm(xp, dev) - 1.0) < 1e-6
+
+    # ---- TOF pass-through ----
+    sel_tof = ppl.SinogramSegmentSelectionOperator(
+        full, segments=[0, -1, 1], num_tof_bins=5
+    )
+    assert sel_tof.in_shape == full.spatial_sinogram_shape + (5,)
+    assert sel_tof.out_shape == sel.out_shape + (5,)
+    assert sel_tof.num_tof_bins == 5
+    assert "TOF" in str(sel_tof)
+    assert sel_tof.adjointness_test(xp, dev)

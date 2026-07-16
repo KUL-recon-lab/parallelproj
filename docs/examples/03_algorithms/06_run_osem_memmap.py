@@ -67,7 +67,8 @@ from parallelproj import Array, to_numpy_array
 from parallelproj.functions import C1Function, C2AffineObjective, NegPoissonLogL
 from parallelproj.data import to_subset_mmap
 
-from example_utils import (
+
+from parallelproj._examples_utils import (
     elliptic_cylinder_phantom,
     show_vol_cuts,
 )
