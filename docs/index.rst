@@ -1,6 +1,9 @@
 parallelproj documentation
 ==========================
 
+:octicon:`mark-github;1em;sd-mr-1` `Source code on GitHub <https://github.com/KUL-recon-lab/parallelproj>`_ 
+:octicon:`issue-opened;1em;sd-mr-1` `Report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_
+
 **parallelproj** provides simple and fast high-level python routines for tomographic reconstruction
 that are `python array API <https://data-apis.org/array-api/latest/>`_ 
 compatible meaning that they can be used with a variety of python
@@ -39,8 +42,6 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
         On `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
         (one-command install) and released under the **Apache-2.0** license.
 
-:octicon:`mark-github;1em;sd-mr-1` `Source code on GitHub <https://github.com/KUL-recon-lab/parallelproj>`_ • :octicon:`issue-opened;1em;sd-mr-1` `Report an issue <https://github.com/KUL-recon-lab/parallelproj/issues>`_
-
 .. hint::
   *If you are using parallelproj, we highly recommend to read and cite our publication:*
   
@@ -49,50 +50,51 @@ array libraries (e.g. numpy, cupy, pytorch) and devices (CPU and CUDA GPUs).
 
 .. rubric:: parallelproj vs other frameworks -- which to use when
 
-.. grid:: 1 1 3 3
+.. grid:: 1 2 3 3
     :gutter: 3
 
-    .. grid-item-card:: Aims of parallelproj
+    .. grid-item-card:: :octicon:`goal;1.5em;sd-mr-1` Aims of parallelproj
 
-        **parallelproj** is a fast, GPU-native,
+        A fast, GPU-native
         `python array API <https://data-apis.org/array-api/latest/>`_
-        projection library -- a *toolbox*, not a full pipeline. Reach for it
-        when you want to **prototype your own reconstruction algorithms** in
-        Python, or build **differentiable, deep-learning-integrated**
-        reconstruction (PyTorch autograd) with the same code on CPU and GPU.
+        projection library -- a *toolbox*, not a full pipeline. Use it to
+        **prototype reconstruction algorithms** or build **differentiable,
+        DL-integrated** recon (PyTorch autograd) on CPU and GPU.
 
-        **Easy to install and get started.** parallelproj is available on
-        `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
-        (single-command install) and ships with many examples, so you can go
-        from install to a running prototype reconstruction quickly.
-
-    .. grid-item-card:: Other open source frameworks
+    .. grid-item-card:: :octicon:`git-compare;1.5em;sd-mr-1` Compared to STIR and CASToR
 
         `STIR <https://stir.sourceforge.net>`_ and
         `CASToR <https://castor-project.org>`_ are mature, full
         reconstruction *frameworks* with built-in scanner models,
-        established algorithms, data I/O and corrections. Reach for them
-        when you want a **complete, validated end-to-end reconstruction**
-        out of the box across many scanners and modalities.
+        algorithms, data I/O and corrections -- for **complete, validated
+        end-to-end reconstruction** across many scanners and modalities.
 
-        Moreover, have a look at the 
+    .. grid-item-card:: :octicon:`heart;1.5em;sd-mr-1` Complementary, not competing
+
+        parallelproj focuses on algorithm prototyping, not on replacing
+        STIR or CASToR -- and can even serve as their **GPU projection
+        backend**.
+
+    .. grid-item-card:: :octicon:`download;1.5em;sd-mr-1` Easy to install
+
+        Available on
+        `conda-forge <https://github.com/conda-forge/parallelproj-feedstock>`_
+        (one-command install) with many examples -- from install to a
+        running prototype reconstruction, quickly.
+
+    .. grid-item-card:: :octicon:`link-external;1.5em;sd-mr-1` More frameworks
+
+        Also see the
         `Yale Reconstruction Toolbox <https://yrt-pet.readthedocs.io/en/latest/>`_
-        or `PyTomography <https://pytomography.readthedocs.io/en/latest/>`_ 
-        (that uses
-        the libparallelproj projectors).
+        and `PyTomography <https://pytomography.readthedocs.io/en/latest/>`_,
+        built on the libparallelproj projectors.
 
-    .. grid-item-card:: Complementary, not competing
+    .. grid-item-card:: :octicon:`no-entry;1.5em;sd-mr-1` Out of scope (by design)
 
-        **They are complementary, not competing.** parallelproj deliberately
-        focuses on algorithm prototyping; it does not aim to replace STIR or
-        CASToR -- and can even serve as a GPU projection backend for
-        higher-level frameworks.
-
-        **Out of scope for parallelproj (by design).** No vendor-specific
-        raw data format readers, and currently no built-in randoms or
-        scatter estimation. If your workflow needs these, use a full
-        framework -- optionally with parallelproj as the projection
-        backend.
+        No vendor-specific raw data readers, and no built-in randoms or
+        scatter estimation. Need those? Use a full framework -- optionally
+        with parallelproj as the projection backend, or get them from vendor
+        toolboxes.
 
 .. toctree::
     :maxdepth: 1
