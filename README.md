@@ -41,43 +41,14 @@ or start from the minimal [quickstart example](./docs/quickstart_minimal.py).
 
 <br/>
 
-## Developer Setup
+## Contributing & development
 
-For development we use [pixi](https://pixi.sh), which builds a fully reproducible
-environment from the lock file. The local clone is registered as a path dependency, so
-`import parallelproj` resolves to your working tree (no manual environment setup or
-`PYTHONPATH` needed).
-
-```bash
-git clone https://github.com/KUL-recon-lab/parallelproj.git
-cd parallelproj
-```
-
-Use `pixi shell` to drop into a terminal that has all dependencies (and the local
-`parallelproj`) available, picking the environment that matches your hardware:
-
-```bash
-pixi shell                 # default env (CPU)
-pixi shell -e cuda12       # CUDA 12 stack
-pixi shell -e cuda13       # CUDA 13 stack
-```
-
-Inside that shell you can run scripts, tests, or the examples directly (e.g.
-`python <script>`, `ipython`, `pytest`). The environment is built automatically on first
-use. Exit with `exit` or `Ctrl+D`.
-
-Common tasks can also be run without an explicit shell via `pixi run`:
-
-```bash
-pixi run test        # run the test suite (GPU tests self-skip when no CUDA device is present)
-pixi run docs        # build the HTML documentation
-```
-
-The first `pixi run` also activates the repo-tracked git hooks (a pre-push version/tag
-check). Contributions are welcome via pull request.
+Contributions are welcome! Development uses [pixi](https://pixi.sh) (`pixi shell`,
+`pixi run test`, `pixi run docs`). See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for the
+full development setup, coding conventions, testing/coverage and the pull-request
+workflow.
 
 > **Note:** this repository is the pure-Python front end. The compiled projection kernels
 > live in the separate [`libparallelproj`](https://github.com/KUL-recon-lab/libparallelproj)
-> project (distributed as `parallelproj-core` on conda-forge): pure-Python features go here,
-> but changes to the C/CUDA Joseph projectors must be made there — editing this clone does
-> not rebuild the backend.
+> project (distributed as `parallelproj-core` on conda-forge), so changes to the C/CUDA
+> Joseph projectors must be made there — editing this clone does not rebuild the backend.
