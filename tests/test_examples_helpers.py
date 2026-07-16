@@ -6,15 +6,15 @@ from the coverage target (see ``[tool.coverage.run]`` in ``pyproject.toml`` and
 module stays importable and that its main entry points run headlessly, so a
 broken helper is caught in CI instead of shipping to users.
 
-The tests run on numpy/CPU only and force the non-interactive ``Agg`` backend;
-they are deliberately not parametrized over array backends/devices.
+The tests run on numpy/CPU only and are deliberately not parametrized over
+array backends/devices.  They create figures but never call ``show()`` (each
+figure is closed immediately), so they are headless-safe and -- importantly --
+do not switch the global matplotlib backend, which would make the rest of the
+suite's ``fig.show()`` calls warn under a non-interactive backend.
 """
 
 from __future__ import annotations
 
-import matplotlib
-
-matplotlib.use("Agg")  # headless: no GUI event loop, safe in CI
 import matplotlib.pyplot as plt
 
 import array_api_compat.numpy as np

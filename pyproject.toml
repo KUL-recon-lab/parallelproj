@@ -51,6 +51,13 @@ packages = ["src/parallelproj"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Several tests call ``fig.show()`` for visual/manual runs.  Under a
+# non-interactive backend (e.g. Agg, auto-selected on headless CI) this is a
+# harmless no-op but emits a UserWarning; silence just that one message so the
+# test output stays clean.
+filterwarnings = [
+    "ignore:FigureCanvasAgg is non-interactive:UserWarning",
+]
 
 [tool.coverage.run]
 # ``parallelproj._examples_utils`` is a private, examples-only helper module
