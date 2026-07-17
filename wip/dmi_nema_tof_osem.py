@@ -1,3 +1,4 @@
+import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import h5py
@@ -31,7 +32,23 @@ def _load_sino_mat(sino_path: Path, arr_mod, device, verbose=True):
 
 
 # %%
-dev = "cuda"
+# data_path = Path()
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "data_path", type=Path, default="data", help="Path to the data folder"
+)
+args = parser.parse_args()
+
+data_path = args.data_path
+
+# %%
+if (xp.cuda.memory.mem_get_info()[1] / 1e9) >= 32:
+    dev = "cuda"
+else:
+    dev = "cpu"
+
+print(f"Using device: {dev}")
+
 img_shape = (200, 200, 71)
 vox_size = (2.0, 2.0, 2.78)
 
@@ -40,7 +57,6 @@ num_subsets = 34
 
 res_model_fwhm_mm = 3.5
 
-data_path = Path("dmi_nema")
 
 # %%
 print("Setting up lor descriptor and projector")
@@ -58,17 +74,17 @@ prompts_npy_path = data_path / "tofPrompts_f1b1.npy"
 if prompts_npy_path.exists():
     prompts_np = np.load(prompts_npy_path)
 else:
-    prompts_np = np.zeros(proj.out_shape, dtype = np.int8)
-    
+    prompts_np = np.zeros(proj.out_shape, dtype=np.int8)
+
     # load TOF prompts from HDF file
     with h5py.File(data_path / "tofPrompts_f1b1.mat", "r") as prompts_h5_data:
         for i in range(lor_desc.num_views):
-            prompts_np[:,i,:,:] = prompts_h5_data[f"view{i+1}"][:].T
-    
+            prompts_np[:, i, :, :] = prompts_h5_data[f"view{i+1}"][:].T
+
     np.save(prompts_npy_path, prompts_np)
 
 
-prompts = xp.asarray(prompts_np, device = dev)
+prompts = xp.asarray(prompts_np, device=dev)
 del prompts_np
 
 
@@ -85,32 +101,40 @@ else:
     mult_corrections = acfs * dtPuc / norm
     np.save(mult_corr_file, to_numpy_array(mult_corrections))
 
-## %%
-## read all additive corrections for the fwd model (contaminations)
-#
-#contam_file = data_path / "contaminations.npy"
-#
-#if contam_file.exists():
-#    contamination = xp.asarray(np.load(contam_file), device=dev)
-#else:
-#    scatter = _load_sino_mat(data_path / "scatter_f1b1.mat", xp, dev)
-#    randoms = _load_sino_mat(data_path / "randoms_f1b1.mat", xp, dev)
-#    contamination = scatter + randoms
-#    np.save(contam_file, to_numpy_array(contamination))
+# %%
+# read all additive corrections for the fwd model (contaminations)
 
-################################################################################
-################################################################################
-################################################################################
-## HACK - needs inclusion of TOF scatter as well
+contam_file = data_path / "contaminations_tof.npy"
 
-# read the randoms, and distribute across tof bins
-tmp = _load_sino_mat(data_path / "randoms_f1b1.mat", xp, dev) / proj.tof_parameters.num_tofbins
-contamination =  xp.broadcast_to(xp.expand_dims(tmp , axis=-1), proj.out_shape)
+if contam_file.exists():
+    print("read contamination")
+    contamination = xp.asarray(np.load(contam_file), device=dev)
+else:
+    # scatter = _load_sino_mat(data_path / "scatter_f1b1.mat", xp, dev)
+    # randoms = _load_sino_mat(data_path / "randoms_f1b1.mat", xp, dev)
 
-################################################################################
-################################################################################
-################################################################################
+    print("read TOF randoms")
+    # read the randoms, and distribute across tof bins
+    tmp = (
+        _load_sino_mat(data_path / "randoms_f1b1.mat", xp, dev)
+        / proj.tof_parameters.num_tofbins
+    )
+    tof_randoms = xp.broadcast_to(xp.expand_dims(tmp, axis=-1), proj.out_shape)
 
+    print("read TOF scatter")
+
+    with h5py.File(data_path / "tofScatter_f1b1.mat", "r") as x:
+        tof_scatter = xp.asarray(
+            np.moveaxis(x["data"], [0, 1, 2, 3], [1, 3, 2, 0]),
+            device=dev,
+            dtype=xp.float32,
+        )
+
+    contamination = tof_scatter + tof_randoms
+    np.save(contam_file, to_numpy_array(contamination))
+
+    del tof_scatter
+    del tof_randoms
 
 # %%
 # setup the complete fwd model
@@ -149,10 +173,9 @@ for i in range(num_subsets):
 
     subset_mult_op = operators.ElementwiseMultiplicationOperator(
         xp.broadcast_to(
-        xp.expand_dims(mult_corrections[subset_slices_non_tof[i]], axis=-1),
-        subset_proj.out_shape,
+            xp.expand_dims(mult_corrections[subset_slices_non_tof[i]], axis=-1),
+            subset_proj.out_shape,
         )
-
     )
 
     # add the resolution model and multiplication with a subset of the attenuation sinogram
@@ -196,7 +219,7 @@ def em_update(
         d = x_cur / adj_ones
     else:
         d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
-    return x_cur - d * data_fidelity.gradient(x_cur)
+    return xp.clip(x_cur - d * data_fidelity.gradient(x_cur), 0, None)
 
 
 # %%
@@ -219,6 +242,7 @@ del cyl_mask
 
 x_osem = xp.asarray(x_init, copy=True)
 
+x_intermed = np.zeros((num_epochs_osem,) + img_shape, dtype=np.float32)
 
 for i in range(num_epochs_osem):
     for k in range(len(subset_slices)):
@@ -229,10 +253,14 @@ for i in range(num_epochs_osem):
         x_osem = em_update(
             x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], fov_mask
         )
+    x_intermed[i, ...] = to_numpy_array(x_osem)
+
+np.save(data_path / "tof_osem.npy", x_intermed)
+
 print()
 
 
 # %%
-_, _, _ = show_vol_cuts(to_numpy_array(x_osem), voxel_size=vox_size)
+_, _, _ = show_vol_cuts(x_intermed, voxel_size=vox_size)
 
 plt.show()
