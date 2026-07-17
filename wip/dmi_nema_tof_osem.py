@@ -1,3 +1,4 @@
+import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import h5py
@@ -31,7 +32,23 @@ def _load_sino_mat(sino_path: Path, arr_mod, device, verbose=True):
 
 
 # %%
-dev = "cpu"
+# data_path = Path()
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "data_path", type=Path, default="data", help="Path to the data folder"
+)
+args = parser.parse_args()
+
+data_path = args.data_path
+
+# %%
+if (xp.cuda.memory.mem_get_info()[1] / 1e9) >= 32:
+    dev = "cuda"
+else:
+    dev = "cpu"
+
+print(f"Using device: {dev}")
+
 img_shape = (200, 200, 71)
 vox_size = (2.0, 2.0, 2.78)
 
@@ -40,7 +57,6 @@ num_subsets = 34
 
 res_model_fwhm_mm = 3.5
 
-data_path = Path("dmi_nema")
 
 # %%
 print("Setting up lor descriptor and projector")
