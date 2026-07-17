@@ -203,7 +203,7 @@ def em_update(
         d = x_cur / adj_ones
     else:
         d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
-    return x_cur - d * data_fidelity.gradient(x_cur)
+    return xp.clip(x_cur - d * data_fidelity.gradient(x_cur), 0, None)
 
 
 # %%
@@ -226,6 +226,7 @@ del cyl_mask
 
 x_osem = xp.asarray(x_init, copy=True)
 
+x_intermed = np.zeros((num_epochs_osem,) + img_shape, dtype=np.float32)
 
 for i in range(num_epochs_osem):
     for k in range(len(subset_slices)):
@@ -236,10 +237,14 @@ for i in range(num_epochs_osem):
         x_osem = em_update(
             x_osem, subset_data_fidelities[k], subset_adjoint_ones[k], fov_mask
         )
+    x_intermed[i, ...] = to_numpy_array(x_osem)
+
+np.save(data_path / "tof_osem.npy", x_intermed)
+
 print()
 
 
 # %%
-_, _, _ = show_vol_cuts(to_numpy_array(x_osem), voxel_size=vox_size)
+_, _, _ = show_vol_cuts(x_intermed, voxel_size=vox_size)
 
 plt.show()
