@@ -16,7 +16,7 @@ build-backend = "hatchling.build"
 [project]
 name = "parallelproj"
 # IMPORTANT: bumping a release requires editing this one line.
-version = "2.0.0dev0"
+version = "2.0.0"
 description = "Python tools for PET projection and reconstruction workflows."
 readme = "README.md"
 requires-python = ">=3.12"
