@@ -4,7 +4,7 @@ Changelog
 2.x
 ---
 
-2.0.0 (TBD)
+2.0.0 (Jul 17, 2026)
 ^^^^^^^^^^^
 
 New Features
