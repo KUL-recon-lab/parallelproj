@@ -3,21 +3,27 @@
 PET scanner geometries ``parallelproj.pet_scanners``
 ----------------------------------------------------
 
-Scanner geometries describe the positions of line-of-response (LOR) endpoints.
-The geometry determines which projector route to use (see :doc:`api_projectors`):
+Scanner geometries describe the positions of line-of-response endpoints.
+See :doc:`api_projectors` for the compatible projectors.
 
-* :class:`.RegularPolygonPETScannerGeometry` describes rings of endpoints on
-  the sides of a regular polygon. It supports both evenly spaced cylindrical
-  endpoints and flat detector blocks. Use it with :class:`.Michelogram` and
-  :class:`.RegularPolygonPETLORDescriptor`. All named scanner models below use
-  this route.
-* :class:`.ModularizedPETScannerGeometry` describes a general arrangement of
-  scanner modules. Geometries made from :class:`.BlockPETScannerModule` objects
-  with the same number of endpoints per module can be used with
-  :class:`.EqualBlockPETLORDescriptor`.
+.. _pet-scanner-conventions:
 
-:class:`.DemoPETScannerGeometry` provides a configurable example of a
-regular-polygon scanner.
+Geometry conventions
+~~~~~~~~~~~~~~~~~~~~
+
+Distances are in millimetres.
+Use the same units for scanner coordinates, image origin and voxel size.
+For :class:`.RegularPolygonPETScannerGeometry`, ``radius`` is the shortest distance from the scanner centre to a flat side of endpoints.
+When starting from the inner crystal face, add the chosen depth of interaction, which may be an average, to obtain ``radius``.
+Each endpoint has one fixed position.
+
+With the default axis, side 0 is centred on the negative y-axis.
+Endpoint indices increase clockwise when looking from negative z towards positive z, with positive x to the right and positive y down.
+Rings follow the order of ``ring_positions``.
+Named scanners use these conventions and centre their rings on zero.
+The depths of interaction can differ between scanner models.
+
+The cylindrical models for mMR, Vision 600, Discovery MI and Discovery 690 use the effective radii and detector counts from STIR.
 
 Ready-made scanner models
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1049,7 +1049,12 @@ class RegularPolygonPETScannerGeometry(ModularizedPETScannerGeometry):
 
 
 class DemoPETScannerGeometry(RegularPolygonPETScannerGeometry):
-    """Demo PET scanner geometry consisting of a 34-ogon with 16 LOR endpoints per side and 36 rings"""
+    """Demo PET scanner geometry with 34 sides, 16 line of response endpoints per side and 36 rings.
+
+    The default radius is 372.05 + 8.51 = 380.56 mm;
+    ``radius`` can be overridden. Rings have 5.32 mm spacing and an
+    additional 2.8 mm gap after each group of nine rings.
+    """
 
     def __init__(
         self,
@@ -1107,6 +1112,11 @@ class SiemensMMRPETScannerGeometry(RegularPolygonPETScannerGeometry):
     Geometry parameters follow `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_)
     and the `published scanner description <https://doi.org/10.1088/1361-6560/ad1cf9>`_.
+
+    Both models use a 335 mm endpoint radius (STIR's 328 mm inner radius
+    plus 7 mm average depth of interaction). The default has 56 flat sides
+    with 8 endpoints at 4 mm spacing; the cylindrical model has 504 positions
+    including virtual positions. Both have 64 rings at 4.0625 mm spacing.
     """
 
     def __init__(
@@ -1156,6 +1166,12 @@ class SiemensVision600PETScannerGeometry(RegularPolygonPETScannerGeometry):
     Geometry parameters follow `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_)
     and the `published scanner description <https://pmc.ncbi.nlm.nih.gov/articles/PMC12664451/>`_.
+
+    Both models use a 417 mm endpoint radius (STIR's 410 mm inner radius
+    plus 7 mm average depth of interaction).
+    The default has 38 flat sides with 20 endpoints at 3.2 mm spacing. The
+    cylindrical model has 798 positions including virtual positions. Both
+    have 80 rings at 3.29114 mm spacing.
     """
 
     def __init__(
@@ -1205,6 +1221,11 @@ class GEDiscoveryMIPETScannerGeometry(RegularPolygonPETScannerGeometry):
     Geometry parameters follow `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_)
     and `PETRIC2 <https://github.com/SyneRBI/PETRIC2>`_ acquisition geometries.
+
+    The cylindrical approximation has 544 endpoints per ring and 27, 36,
+    45 or 54 rings at 5.52296 mm spacing. Its 380.5 mm endpoint radius is
+    STIR's effective radius (371.1 mm inner radius plus 9.4 mm average
+    depth of interaction).
     """
 
     def __init__(
@@ -1251,7 +1272,14 @@ class GEDiscovery690PETScannerGeometry(RegularPolygonPETScannerGeometry):
     The cylindrical model follows `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_)
     and `PETRIC2 <https://github.com/SyneRBI/PETRIC2>`_.
-    The block model follows a `CASToR <https://gitlab.com/castor-collaboration/castor>`_ GATE geometry.
+    The block model follows a `GATE geometry <https://github.com/UCL/STIR-GATE-Connection/blob/master/ExampleScanners/D690/geometry_D690.mac>`_.
+
+    The default cylindrical approximation has 576 endpoints per ring,
+    24 rings at 6.54 mm spacing, and a 414.5 mm endpoint radius (STIR's
+    405.1 mm inner radius plus 9.4 mm depth of interaction). ``castor_blocks``
+    has 32 flat sides with 18 endpoints at 4.2 mm spacing, 24 rings at
+    6.3 mm spacing, and a 417.6 mm endpoint radius (405.1 mm inner radius
+    plus 12.5 mm, half the crystal depth).
     """
 
     def __init__(
@@ -1302,6 +1330,12 @@ class MedisoAnyScanPETScannerGeometry(RegularPolygonPETScannerGeometry):
 
     See the `Mediso scanner brochure <https://5.imimg.com/data5/SELLER/Doc/2023/1/AN/DD/JD/142955078/mediso-spect-ct-pet-triple-modality.pdf>`_
     and the `manufacturer's product page <https://mediso.com/global/en/product/integrated-spectctpet-systems/anyscan-duo-spectctpet>`_.
+
+    The parameters follow the sinogram header in the `PETRIC AnyScan dataset
+    <https://zenodo.org/records/13946493>`_.
+    This cylindrical approximation has 648 endpoints per ring and 38 rings
+    at 3.9 mm spacing. Its endpoint radius is 424.2 mm (424 mm inner radius
+    plus 0.2 mm average depth of interaction).
     """
 
     def __init__(self, xp: ModuleType, dev: str, symmetry_axis: int = 2) -> None:
@@ -1319,7 +1353,7 @@ class MedisoAnyScanPETScannerGeometry(RegularPolygonPETScannerGeometry):
         super().__init__(
             xp,
             dev,
-            radius=430.0,
+            radius=424.2,
             num_sides=648,
             num_lor_endpoints_per_side=1,
             lor_spacing=0.0,
@@ -1336,6 +1370,14 @@ class SiemensMCTPETScannerGeometry(RegularPolygonPETScannerGeometry):
     The block model follows `OpenGATE <https://github.com/OpenGATE/opengate>`_
     (`scanner model <https://github.com/OpenGATE/opengate/blob/master/opengate/contrib/pet/siemensbiograph.py>`_)
     and its `validation study <https://pubmed.ncbi.nlm.nih.gov/36215081/>`_.
+
+    The default block model has 48 flat sides with 13 endpoints at 4 mm
+    spacing and 52 rings in four groups (4 mm crystal spacing, 56 mm between
+    group centres). Its endpoint radius is 438 mm (428 mm inner radius plus
+    10 mm, half the crystal depth). The cylindrical approximation has
+    672 positions per ring and 55 rings at 4.054 mm spacing, including virtual
+    positions, with a 428 mm radius (STIR's 421 mm inner radius plus 7 mm
+    average depth of interaction). The source models use different radii.
     """
 
     def __init__(
@@ -1390,6 +1432,14 @@ class SiemensVisionQuadraPETScannerGeometry(RegularPolygonPETScannerGeometry):
     Geometry parameters follow `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_)
     and the `published scanner description <https://pmc.ncbi.nlm.nih.gov/articles/PMC12664451/>`_.
+
+    Both models use a 417 mm endpoint radius (STIR's 410 mm inner radius
+    plus 7 mm average depth of interaction).
+    The default has 38 flat sides with 20 endpoints at 3.2 mm spacing and
+    320 physical rings.
+    The cylindrical approximation has 798 positions per ring and 323 rings,
+    including virtual positions. The spacing between consecutive ring
+    positions, including virtual positions, is 3.29114 mm.
     """
 
     def __init__(
@@ -1439,6 +1489,10 @@ class GESignaPETMRScannerGeometry(RegularPolygonPETScannerGeometry):
 
     Geometry parameters follow `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_).
+
+    The cylindrical approximation has 448 endpoints per ring and 45 rings
+    at 5.56 mm spacing. Its endpoint radius is 320.3 mm (STIR's 311.8 mm
+    inner radius plus 8.5 mm average depth of interaction).
     """
 
     def __init__(self, xp: ModuleType, dev: str, symmetry_axis: int = 2) -> None:
@@ -1470,6 +1524,11 @@ class PhilipsVereosPETScannerGeometry(RegularPolygonPETScannerGeometry):
 
     Geometry parameters follow `OpenGATE <https://github.com/OpenGATE/opengate>`_
     (`scanner model <https://github.com/OpenGATE/opengate/blob/master/opengate/contrib/pet/philipsvereos.py>`_).
+
+    The model has 18 flat sides with 32 endpoints each and 40 axial rings.
+    Both directions group endpoints in eights, at 4 mm spacing within a group
+    and 32.85 mm between group centres. Its endpoint radius is 391.5 mm
+    (382 mm inner radius plus 9.5 mm, half the crystal depth).
     """
 
     def __init__(self, xp: ModuleType, dev: str, symmetry_axis: int = 2) -> None:
@@ -1507,6 +1566,11 @@ class SiemensHRRTPETScannerGeometry(RegularPolygonPETScannerGeometry):
 
     Geometry parameters follow `STIR <https://github.com/UCL/STIR>`_
     (`scanner definitions <https://github.com/UCL/STIR/blob/rel_6.4.0/src/buildblock/Scanner.cxx>`_).
+
+    This cylindrical approximation has 576 endpoints per ring and 104 rings
+    at 2.4375 mm spacing. Its endpoint radius is 241.765 mm (STIR's 234.765 mm
+    inner radius plus 7 mm average depth of interaction). The two physical
+    detector layers are represented by one endpoint layer.
     """
 
     def __init__(self, xp: ModuleType, dev: str, symmetry_axis: int = 2) -> None:
@@ -1538,6 +1602,12 @@ class UnitedImagingUExplorerPETScannerGeometry(RegularPolygonPETScannerGeometry)
 
     Based on published `performance <https://pmc.ncbi.nlm.nih.gov/articles/PMC8729871/>`_
     and `scanner <https://pmc.ncbi.nlm.nih.gov/articles/PMC6424228/>`_ descriptions.
+
+    The model has 24 flat sides with 35 endpoints at 2.85 mm spacing and 672
+    rings in eight axial units. Within a unit there are 14 blocks of six
+    crystals, with 2.85 mm between crystals, 240.2/14 mm between blocks and
+    242.8 mm between units. Its endpoint radius is 402.05 mm (393 mm inner
+    radius plus 9.05 mm, half the crystal depth).
     """
 
     def __init__(self, xp: ModuleType, dev: str, symmetry_axis: int = 2) -> None:
