@@ -4,6 +4,31 @@ Changelog
 2.x
 ---
 
+2.1.0 (unreleased)
+^^^^^^^^^^^^^^^^^^
+
+Changes
+~~~~~~~
+
+- **``NegPoissonLogL`` returns the Poisson deviance, summed in float64.** The
+  function value is now :math:`\sum_i \bar{y}_i - y_i - y_i \log(\bar{y}_i /
+  y_i)` (terms with :math:`y_i = 0`: :math:`\bar{y}_i`), i.e. the textbook
+  form :math:`\sum_i \bar{y}_i - y_i \log \bar{y}_i` plus the constant
+  :math:`\sum_i y_i \log y_i - y_i`. Gradient, Hessian, proximal operators and
+  minimisers are unchanged; **function values differ from 2.0 by that
+  constant.** Every term is :math:`\geq 0` and :math:`0` at the fit, and the
+  sum is accumulated in float64 (where the backend supports it), so the value
+  is now usable for convergence monitoring and line searches with float32 data
+  and :math:`10^7`--:math:`10^9` bins. Previously, the float32 sum lost all
+  significant digits of the change between late iterations. (`#167
+  <https://github.com/KUL-recon-lab/parallelproj/issues/167>`_)
+- **``NegPoissonLogLListmode``: consistent constant and float64 sums.** The
+  value now subtracts the number of events :math:`N_\text{ev}`, so it equals the
+  sinogram deviance of ``NegPoissonLogL`` minus :math:`\sum_i y_i \log y_i`
+  (:math:`0` if no sinogram bin contains more than one event), and all sums are
+  accumulated in float64. Gradient and Hessian are unchanged; function values
+  differ from 2.0 by :math:`-N_\text{ev}`.
+
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^
 

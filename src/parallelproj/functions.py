@@ -18,6 +18,44 @@ from ._backend import Array
 from .operators import LinearOperator
 
 
+def _sum_float64(x: Array) -> float:
+    """Sum of all elements, accumulated in float64 where the backend supports it.
+
+    Objective values of large data sets (10^7 - 10^9 bins / events) are sums of
+    many terms.  Accumulated in float32, their rounding error is larger than
+    the change of the objective between late iterations (see
+    :class:`NegPoissonLogL`).  The terms themselves stay in the input precision
+    (no float64 copy of the data), only the accumulation is done in float64.
+    Backends / devices without float64 (e.g. torch on Apple MPS) fall back to
+    a sum in the input precision.
+    """
+    xp = get_namespace(x)
+    try:
+        return float(xp.sum(x, dtype=xp.float64))
+    except (TypeError, ValueError, RuntimeError):
+        return float(xp.sum(x))
+
+
+def _log_ratio(x: Array, y: Array) -> Array:
+    """Accurate :math:`\\log(x / y)` for :math:`y > 0`, :math:`x \\geq 0`.
+
+    Near :math:`x = y` it uses ``log1p((x - y) / y)`` (the difference of nearby
+    floats is exact, so small residuals keep their precision); elsewhere
+    ``log(x / y)``, which stays accurate also for :math:`x \\ll y`, where
+    ``(x - y) / y`` would round to -1.  ``x = 0`` gives ``-inf``.
+    """
+    xp = get_namespace(x, y)
+    r = (x - y) / y
+    near = xp.abs(r) < 0.5
+    # mask the inputs of the branch that is not used, so that it can not
+    # produce (and warn about) -inf / nan
+    return xp.where(
+        near,
+        xp.log1p(xp.where(near, r, xp.zeros_like(r))),
+        xp.log(xp.where(near, xp.ones_like(r), x / y)),
+    )
+
+
 class FunctionWithConjProx(ABC):
     """Abstract base class for functions with a closed-form proximal operator
     of their convex conjugate.
@@ -471,17 +509,34 @@ class C2FunctionWithConjProx(C2Function, C1FunctionWithConjProx):
 class NegPoissonLogL(C2FunctionWithConjProx):
     """Negative Poisson log-likelihood as a function of expected counts.
 
-    Implements
+    Implements the negative Poisson log-likelihood in its **deviance**
+    (generalised Kullback-Leibler divergence) form
 
     .. math::
 
-        f(\\bar{y}) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i
+        f(\\bar{y}) = \\sum_i \\bar{y}_i - y_i
+            - y_i \\log \\frac{\\bar{y}_i}{y_i}
+        \\qquad (\\text{terms with } y_i = 0: \\ \\bar{y}_i)
 
     and its gradient w.r.t. the expected counts :math:`\\bar{y}`:
 
     .. math::
 
         \\nabla_{\\bar{y}} f = 1 - \\frac{y}{\\bar{y}}.
+
+    **Deviance form.**  :math:`f` differs from the textbook form
+    :math:`\\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i` only by the constant
+    :math:`\\sum_i y_i \\log y_i - y_i` (deviance = textbook form + this
+    constant), which does not depend on :math:`\\bar{y}`: gradient, Hessian, proximal operators and minimisers are
+    identical.  Every term is :math:`\\geq 0` and :math:`0` at
+    :math:`\\bar{y}_i = y_i`, so :math:`f \\geq 0` and the terms stay small
+    near the fit.  The value is accumulated in float64 (where the backend
+    supports it).  Both together make the value usable for convergence
+    monitoring and line searches also for float32 data with 10^7 - 10^9 bins,
+    where the textbook form summed in float32 loses all significant digits
+    of the change between iterations.  *Changed in 2.1:* earlier versions
+    returned the textbook form, so values differ from those of 2.0 by the
+    constant above.
 
     This class operates directly on the predicted counts :math:`\\bar{y}`
     (passed as the argument ``x`` to the callable interface),
@@ -495,10 +550,12 @@ class NegPoissonLogL(C2FunctionWithConjProx):
 
         .. math::
 
-            f_\\varepsilon(\\bar{y}) = \\sum_i (\\bar{y}_i + \\varepsilon)
-                - (y_i + \\varepsilon) \\log(\\bar{y}_i + \\varepsilon)
+            f_\\varepsilon(\\bar{y}) = \\sum_i \\bar{y}_i - y_i
+                - (y_i + \\varepsilon)
+                  \\log \\frac{\\bar{y}_i + \\varepsilon}{y_i + \\varepsilon}
 
-        i.e. exactly the Poisson log-likelihood of the shifted data
+        (deviance form, see above), i.e. exactly the Poisson log-likelihood
+        of the shifted data
         evaluated at the shifted expectation, with gradient
         :math:`(\\bar{y} - y)/(\\bar{y} + \\varepsilon)` and
         Hessian diagonal :math:`(y + \\varepsilon)/(\\bar{y} + \\varepsilon)^2`,
@@ -651,13 +708,27 @@ class NegPoissonLogL(C2FunctionWithConjProx):
     def _call(self, x: Array) -> float:
         xp = get_namespace(x)
         self._check_x(x)
+        # deviance form: per bin  (x - y) - y * log(x / y)  >= 0, with an
+        # accurate log ratio (see _log_ratio); the sum is accumulated in
+        # float64 (see _sum_float64)
         if self._exact:
-            safe_x = xp.where(self._data_is_zero, xp.ones_like(x), x)
-            return float(xp.sum(x - self._data * xp.log(safe_x)))
-        # including the constant n * eps in the linear term makes the value
-        # exactly the Poisson log-likelihood of the shifted data/expectation
-        x_shift = x + self._eps
-        return float(xp.sum(x_shift - (self._data + self._eps) * xp.log(x_shift)))
+            # bins with y = 0 contribute x; there, x and y are replaced by 1
+            # inside the (discarded) log term to avoid 0/0 and log(0).  x = 0
+            # at a bin with y > 0 gives log(0) = -inf, i.e. a value of +inf
+            # (model violation), as in the textbook form.
+            safe_y = xp.where(self._data_is_zero, xp.ones_like(x), self._data)
+            safe_x = xp.where(self._data_is_zero, safe_y, x)
+            terms = xp.where(
+                self._data_is_zero,
+                x,
+                (x - self._data) - safe_y * _log_ratio(safe_x, safe_y),
+            )
+            return _sum_float64(terms)
+        # shifted Poisson: data and expectation both shifted by eps
+        # ((x + eps) - (y + eps) = x - y); y + eps > 0 everywhere
+        y_shift = self._data + self._eps
+        terms = (x - self._data) - y_shift * _log_ratio(x + self._eps, y_shift)
+        return _sum_float64(terms)
 
     def _gradient(self, x: Array) -> Array:
         xp = get_namespace(x)
@@ -1048,6 +1119,7 @@ class NegPoissonLogLListmode(C2Function):
     .. math::
 
         f(x) = \\langle \\text{sens},\\, x \\rangle + c_{\\text{sino}}
+                - N_{\\text{ev}}
                 - \\sum_{e=1}^{N_{\\text{ev}}} \\log\\bigl((A_{\\text{LM}}\\,x)_e + s_e\\bigr)
 
     where
@@ -1062,6 +1134,18 @@ class NegPoissonLogLListmode(C2Function):
     because :math:`\\sum_e \\log \\bar{y}_{j_e} = \\sum_i y_i \\log \\bar{y}_i`
     (each event from bin :math:`i` contributes :math:`\\log \\bar{y}_i` and
     there are :math:`y_i` such events).
+
+    **Relation to the deviance form of** :class:`NegPoissonLogL`.  With the
+    constant :math:`-N_{\\text{ev}}`, the value equals the sinogram deviance
+    :math:`\\sum_i \\bar{y}_i - y_i - y_i \\log(\\bar{y}_i / y_i)` minus the
+    constant :math:`\\sum_i y_i \\log y_i`.  That constant is :math:`0`
+    when no sinogram bin contains more than one event (the usual case for
+    TOF listmode data); otherwise it cannot be computed from the event list
+    alone.  All sums are accumulated in float64 (where the backend
+    supports it), so that the value is usable for convergence monitoring
+    also for 10^8 - 10^9 events in float32.  *Changed in 2.1:* earlier
+    versions did not subtract :math:`N_{\\text{ev}}` and summed in the input
+    precision.
 
     The gradient with respect to the image :math:`x` is
 
@@ -1202,26 +1286,28 @@ class NegPoissonLogLListmode(C2Function):
             raise ValueError("Per-event predicted counts must be non-negative.")
         return pred + self._eps
 
-    def _call(self, x: Array) -> float:
-        xp = get_namespace(x)
-        pred = self._pred(x)
+    def _value(self, x: Array, pred: Array) -> float:
+        """Function value for the per-event predicted counts ``pred``."""
+        xp = get_namespace(pred)
+        # sensitivity term + contamination - N_ev: the expected number of
+        # counts minus the number of events (~0 near the fit), then minus the
+        # sum of the per-event log predictions; all sums in float64
         norm = (
-            float(xp.sum(self._sensitivity_image * x))
+            _sum_float64(self._sensitivity_image * x)
             + self._contamination_sinogram_sum
+            - pred.shape[0]
         )
-        return norm - float(xp.sum(xp.log(pred)))
+        return norm - _sum_float64(xp.log(pred))
+
+    def _call(self, x: Array) -> float:
+        return self._value(x, self._pred(x))
 
     def _gradient(self, x: Array) -> Array:
         return self._sensitivity_image - self._lm_op.adjoint(1.0 / self._pred(x))
 
     def _call_and_gradient(self, x: Array) -> tuple[float, Array]:
         pred = self._pred(x)
-        xp = get_namespace(x)
-        norm = (
-            float(xp.sum(self._sensitivity_image * x))
-            + self._contamination_sinogram_sum
-        )
-        value = norm - float(xp.sum(xp.log(pred)))
+        value = self._value(x, pred)
         grad = self._sensitivity_image - self._lm_op.adjoint(1.0 / pred)
         return value, grad
 
