@@ -338,6 +338,11 @@ platforms = ["linux-64-cuda12", "win-64-cuda12"]
 
 [tool.pixi.feature.cuda12.dependencies]
 cuda-version = "12.*"
+# The CUDA build of libparallelproj (the backend of parallelproj-core).
+# Without the build constraint, the solver may pick the CPU build when that
+# avoids changing other locked packages (e.g. CUDA 13.3 libraries locked
+# before, while the libparallelproj CUDA builds pin cuda-cudart).
+libparallelproj = { version = ">=3", build = "cuda*" }
 cupy = "*"
 # CUDA build of pytorch (selected via the cuda-tagged platform above).
 pytorch = "*"
@@ -354,6 +359,11 @@ platforms = ["linux-64-cuda13", "win-64-cuda13"]
 
 [tool.pixi.feature.cuda13.dependencies]
 cuda-version = "13.*"
+# The CUDA build of libparallelproj (the backend of parallelproj-core).
+# Without the build constraint, the solver may pick the CPU build when that
+# avoids changing other locked packages (e.g. CUDA 13.3 libraries locked
+# before, while the libparallelproj CUDA 13 build needs cuda-cudart >= 13.4).
+libparallelproj = { version = ">=3", build = "cuda*" }
 cupy = "*"
 # CUDA build of pytorch (selected via the cuda-tagged platform above).
 pytorch = "*"
