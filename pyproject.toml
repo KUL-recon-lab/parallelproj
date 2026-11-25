@@ -102,6 +102,12 @@ omit = ["*/parallelproj/_examples_utils.py"]
 # / URLs are auto-derived from [project] above when the manifest is in
 # pyproject.toml form, so only the pixi-specific bits need to live here.
 channels = ["conda-forge"]
+# pixi 0.84 is the first version that supports the pixi-build-python 0.8
+# backend pinned below (pixi-build-api-version 7) and writes the CUDA
+# platform names (``linux-64-cuda12``, ...) into pixi.lock.  Keep in sync
+# with the pixi version pinned in CI (.github/workflows/test.yml) and on Read
+# the Docs (.readthedocs.yaml).
+requires-pixi = ">=0.84.2"
 # Rich platforms (pixi >= 0.71): besides the plain OS/arch platforms used by
 # the CPU environments, we declare CUDA-tagged ``linux-64`` and ``win-64``
 # platforms for the GPU environments.  These are *distinct platform identities*
@@ -130,11 +136,14 @@ preview = ["pixi-build"]
 # from [project] above, so we don't repeat them here.
 
 [tool.pixi.package.build]
-# Pin to a minor for stability across pixi-build-python's own preview
-# iteration.  Bump when you've validated a new backend release.
+# Pin to a minor for stability across pixi-build-python's own iteration.
+# Bump when you've validated a new backend release; the backend's
+# ``pixi-build-api-version`` must be supported by the pixi version pinned in
+# ``requires-pixi`` (0.6.* needs api version 5, which pixi 0.84 no longer
+# supports; 0.8.* needs api version 7).
 # ``channels`` is omitted so pixi uses its built-in defaults for resolving
 # the build backend and build-time conda deps.
-backend = { name = "pixi-build-python", version = "0.6.*" }
+backend = { name = "pixi-build-python", version = "0.8.*" }
 
 [tool.pixi.package.host-dependencies]
 # Build-time deps: what hatchling needs to produce the wheel.
