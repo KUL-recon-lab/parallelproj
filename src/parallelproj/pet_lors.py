@@ -12,6 +12,8 @@ symmetry.
 
 from __future__ import annotations
 
+import dataclasses
+
 import abc
 import enum
 from collections.abc import Sequence
@@ -32,7 +34,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from ._backend import Array, to_numpy_array
 
 from .operators import LinearOperator
-from .tof import TOFParameters
+from .tof import TOFParameters, _is_scalar, _scalar_value
 from .pet_scanners import (
     ModularizedPETScannerGeometry,
     RegularPolygonPETScannerGeometry,
@@ -1934,7 +1936,11 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
         """
         num_tof_bins = tof_parameters.num_tofbins
         tofbin_width = tof_parameters.tofbin_width
-        tofcenter_off = tof_parameters.tofcenter_offset
+        if not _is_scalar(tof_parameters.tofcenter_offset):
+            raise NotImplementedError(
+                "show_tof_bins supports only a scalar tofcenter_offset"
+            )
+        tofcenter_off = _scalar_value(tof_parameters.tofcenter_offset)
 
         fig = ax.get_figure()
 
@@ -3548,15 +3554,14 @@ class TOFBinMashingOperator(LinearOperator):
         """TOF parameters of the mashed grid.
 
         ``num_tofbins`` is divided by ``mashing_factor`` and ``tofbin_width`` is
-        multiplied by it; ``sigma_tof`` (the physical timing resolution),
-        ``num_sigmas`` and ``tofcenter_offset`` are unchanged.
+        multiplied by it; the TOF kernel (``sigma_tof`` / ``kernel`` and
+        ``kernel_scale``, the physical timing resolution), ``num_sigmas`` and
+        ``tofcenter_offset`` are unchanged.
         """
-        return TOFParameters(
+        return dataclasses.replace(
+            self._tof_parameters,
             num_tofbins=self._num_out,
             tofbin_width=self._tof_parameters.tofbin_width * self._mashing_factor,
-            sigma_tof=self._tof_parameters.sigma_tof,
-            num_sigmas=self._tof_parameters.num_sigmas,
-            tofcenter_offset=self._tof_parameters.tofcenter_offset,
         )
 
     @property

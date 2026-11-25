@@ -79,3 +79,124 @@ def test_demo_tof_parameters_g_family() -> None:
     assert get_tof_parameters_G1(sigma_tof=20.0).sigma_tof == 20.0
     assert get_tof_parameters_G2(tofbin_width=30.0).tofbin_width == 30.0
     assert get_tof_parameters_G2(tofcenter_offset=-3.0).tofcenter_offset == -3.0
+
+
+# ---------------------------------------------------------------------------
+# TOFKernel
+# ---------------------------------------------------------------------------
+
+import numpy as np
+import scipy.special
+
+from parallelproj.tof import TOFKernel
+
+
+def test_tofkernel_gaussian() -> None:
+    """The Gaussian table is the standard normal CDF on +/- num_sigmas, cached."""
+    k = TOFKernel.gaussian(num_sigmas=2.5, num_points=101)
+    assert k.num_points == 101
+    assert (k.u_min, k.u_max) == (-2.5, 2.5)
+    np.testing.assert_allclose(k.cdf, scipy.special.ndtr(np.linspace(-2.5, 2.5, 101)))
+    assert TOFKernel.gaussian(2.5, 101) is k  # cached
+    assert TOFKernel.gaussian().num_points == 2001
+    assert not k.cdf.flags.writeable
+
+
+def test_tofkernel_weights_truncated_gaussian() -> None:
+    """weights() integrates the truncated, normalised kernel over intervals."""
+    k = TOFKernel.gaussian(num_sigmas=3.0)
+    sigma, w = 2.0, 0.7
+    edges = np.arange(-8.4, 8.41, w)
+    wts = k.weights(edges[:-1], edges[1:], scale=sigma)
+    assert math.isclose(wts.sum(), 1.0, rel_tol=1e-12)
+    phi = scipy.special.ndtr
+    lo = np.clip(edges[:-1], -3 * sigma, 3 * sigma)
+    hi = np.clip(edges[1:], -3 * sigma, 3 * sigma)
+    ref = (phi(hi / sigma) - phi(lo / sigma)) / (phi(3.0) - phi(-3.0))
+    np.testing.assert_allclose(wts, ref, atol=1e-6)  # linear interpolation of the 2001-point table
+
+
+def test_tofkernel_from_pdf_and_cdf() -> None:
+    """from_pdf (unnormalised, non-equidistant samples) and from_cdf build the
+    same kernel as the analytic Gaussian table (up to the quadrature error)."""
+    u = np.unique(np.concatenate([np.linspace(-3, 3, 3001), [0.1234, -1.7071]]))
+    k_pdf = TOFKernel.from_pdf(u, 5.0 * np.exp(-0.5 * u**2))
+    k_ref = TOFKernel.gaussian(3.0)
+    assert k_pdf.num_points == 2001 and (k_pdf.u_min, k_pdf.u_max) == (-3.0, 3.0)
+    e = np.linspace(-3, 3, 13)
+    np.testing.assert_allclose(k_pdf.weights(e[:-1], e[1:]), k_ref.weights(e[:-1], e[1:]), atol=1e-6)
+
+    # equidistant CDF samples are used as they are, others are resampled
+    ue = np.linspace(-1.0, 2.0, 7)
+    assert TOFKernel.from_cdf(ue, np.linspace(0, 1, 7)).num_points == 7
+    assert TOFKernel.from_cdf(ue, np.linspace(0, 1, 7), num_points=11).num_points == 11
+    un = np.array([-1.0, 0.0, 0.5, 2.0])
+    assert TOFKernel.from_cdf(un, np.array([0.0, 0.3, 0.6, 1.0])).num_points == 2001
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        (np.array([0.0, 1.0, 0.5]), -1.0, 1.0),  # decreasing
+        (np.array([0.5, 0.5, 0.5]), -1.0, 1.0),  # constant
+        (np.array([0.0, 1.0]), 1.0, 1.0),  # u_min == u_max
+        (np.array([0.0, np.nan]), -1.0, 1.0),  # nan
+        (np.array([0.0]), -1.0, 1.0),  # one point
+    ],
+)
+def test_tofkernel_invalid(args) -> None:
+    with pytest.raises(ValueError):
+        TOFKernel(*args)
+
+
+def test_tofkernel_from_pdf_invalid() -> None:
+    with pytest.raises(ValueError):
+        TOFKernel.from_pdf(np.array([0.0, 1.0, 2.0]), np.array([1.0, -1.0, 1.0]))
+    with pytest.raises(ValueError):
+        TOFKernel.from_pdf(np.array([0.0, 2.0, 1.0]), np.array([1.0, 1.0, 1.0]))
+
+
+# ---------------------------------------------------------------------------
+# TOFParameters: kernel, kernel_scale, per-LOR values
+# ---------------------------------------------------------------------------
+
+
+def test_tofparameters_kernel_and_scale() -> None:
+    """Gaussian default vs. tabulated kernel: tof_kernel / scale / is_lor_dependent."""
+    p = TOFParameters(num_tofbins=5, tofbin_width=2.0, sigma_tof=3.0, num_sigmas=4.0)
+    assert p.tof_kernel is TOFKernel.gaussian(4.0)
+    assert p.scale == 3.0
+    assert not p.is_lor_dependent
+
+    k = TOFKernel.from_cdf(np.linspace(-1, 2, 4), np.array([0.0, 0.5, 0.9, 1.0]))
+    p2 = TOFParameters(num_tofbins=5, tofbin_width=2.0, kernel=k, kernel_scale=1.5)
+    assert p2.tof_kernel is k and p2.scale == 1.5
+
+    p3 = TOFParameters(
+        num_tofbins=5, tofbin_width=2.0, sigma_tof=np.array([1.0, 2.0]), tofcenter_offset=np.zeros(2)
+    )
+    assert p3.is_lor_dependent
+    # 1-element arrays count as scalars
+    assert not TOFParameters(num_tofbins=5, tofbin_width=2.0, sigma_tof=np.array([2.0])).is_lor_dependent
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        dict(),  # neither sigma_tof nor kernel
+        dict(sigma_tof=2.0, kernel=TOFKernel.gaussian()),  # both
+        dict(kernel=TOFKernel.gaussian(), kernel_scale=0.0),
+        dict(kernel=TOFKernel.gaussian(), kernel_scale=np.array([1.0, -1.0])),
+        dict(sigma_tof=np.array([1.0, np.nan])),
+        dict(sigma_tof=np.array([1.0, 0.0])),
+        dict(sigma_tof=2.0, tofcenter_offset=np.array([0.0, np.inf])),
+    ],
+)
+def test_tofparameters_kernel_invalid(kwargs: dict) -> None:
+    with pytest.raises(ValueError):
+        TOFParameters(num_tofbins=5, tofbin_width=2.0, **kwargs)
+
+
+def test_tofparameters_kernel_type() -> None:
+    with pytest.raises(TypeError):
+        TOFParameters(num_tofbins=5, tofbin_width=2.0, kernel="gauss")
