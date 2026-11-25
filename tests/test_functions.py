@@ -50,6 +50,19 @@ def finite_diff_gradient(f, x_np, xp, dev, eps: float = 1e-4):
     return xp.asarray(grad, device=dev)
 
 
+def _deviance_np(ybar, y) -> float:
+    """float64 reference of the Poisson deviance sum(ybar - y - y log(ybar / y))
+    (terms with y = 0: ybar), the value returned by NegPoissonLogL."""
+    ybar = _np.asarray(ybar, dtype=_np.float64)
+    y = _np.asarray(y, dtype=_np.float64)
+    pos = y > 0
+    safe_y = _np.where(pos, y, 1.0)
+    safe_ybar = _np.where(pos, ybar, 1.0)
+    return float(
+        _np.sum(_np.where(pos, ybar - y - y * _np.log(safe_ybar / safe_y), ybar))
+    )
+
+
 # ---------------------------------------------------------------------------
 # Abstract classes
 # ---------------------------------------------------------------------------
@@ -87,16 +100,55 @@ def test_neg_poisson_logl_call(xp: ModuleType, dev: str):
     ybar = xp.asarray(_YBAR_NP, device=dev)
 
     f = ppf.NegPoissonLogL(y, exact=True)
-    expected = float(_np.sum(_YBAR_NP - _Y_NP * _np.log(_YBAR_NP)))
+    expected = _deviance_np(_YBAR_NP, _Y_NP)
     assert abs(f(ybar) - expected) < 1e-5
+
+    # deviance = textbook form sum(ybar - y log ybar) + sum(y log y - y)
+    textbook = float(_np.sum(_YBAR_NP - _Y_NP * _np.log(_YBAR_NP)))
+    const = float(_np.sum(_Y_NP * _np.log(_Y_NP) - _Y_NP))
+    assert abs(f(ybar) - (textbook + const)) < 1e-5
 
     # default (eps) mode evaluates the shifted-Poisson surrogate
     f_eps = ppf.NegPoissonLogL(y)
     e = f_eps.eps
-    expected_eps = float(
-        _np.sum((_YBAR_NP + e) - (_Y_NP + e) * _np.log(_YBAR_NP + e))
-    )
+    expected_eps = _deviance_np(_YBAR_NP + e, _Y_NP + e)
     assert abs(f_eps(ybar) - expected_eps) < 1e-5
+
+
+def test_neg_poisson_logl_deviance_properties(xp: ModuleType, dev: str):
+    """The value is >= 0, exactly 0 at ybar = y (both modes), and finite for
+    ybar << y (where log1p((ybar - y) / y) would round to log(0))."""
+    y = xp.asarray(_Y_NP, device=dev)
+    for f in (ppf.NegPoissonLogL(y, exact=True), ppf.NegPoissonLogL(y)):
+        assert f(y) == 0.0
+        assert f(xp.asarray(_YBAR_NP, device=dev)) > 0.0
+
+    y1 = xp.asarray(_np.asarray([1e8]), device=dev, dtype=xp.float32)
+    ybar1 = xp.asarray(_np.asarray([1.0]), device=dev, dtype=xp.float32)
+    val = ppf.NegPoissonLogL(y1, exact=True)(ybar1)
+    assert math.isfinite(val)
+    assert abs(val - _deviance_np([1.0], [1e8])) < 1e-6 * abs(_deviance_np([1.0], [1e8]))
+
+
+def test_neg_poisson_logl_float32_precision(xp: ModuleType, dev: str):
+    """float32 data with many bins and counts of ~100 per bin: the change of
+    the value under a small perturbation of ybar is resolved (float64
+    accumulation + deviance terms).  The textbook form summed in float32
+    loses it completely."""
+    rng = _np.random.default_rng(0)
+    n = 200_000
+    ybar_np = rng.uniform(50.0, 500.0, n)
+    y_np = rng.poisson(ybar_np).astype(_np.float64)
+    ybar2_np = ybar_np * (1.0 + 1e-4 * rng.standard_normal(n))
+
+    y32 = y_np.astype(_np.float32)
+    a32 = ybar_np.astype(_np.float32)
+    b32 = ybar2_np.astype(_np.float32)
+    ref = _deviance_np(b32, y32) - _deviance_np(a32, y32)  # float64 reference
+
+    f = ppf.NegPoissonLogL(xp.asarray(y32, device=dev), exact=True)
+    change = f(xp.asarray(b32, device=dev)) - f(xp.asarray(a32, device=dev))
+    assert abs(change - ref) < 0.01 * abs(ref)
 
 
 def test_neg_poisson_logl_gradient(xp: ModuleType, dev: str):
@@ -168,9 +220,7 @@ def test_neg_poisson_logl_exact_call_zero_bins(xp: ModuleType, dev: str):
     assert f.exact and f.eps == 0.0
     val = f(ybar)
 
-    expected = float(
-        _np.sum(_YBAR_SAFE_NP[:2] - _Y_SAFE_NP[:2] * _np.log(_YBAR_SAFE_NP[:2]))
-    )
+    expected = _deviance_np(_YBAR_SAFE_NP[:2], _Y_SAFE_NP[:2])
     assert abs(val - expected) < 1e-5
 
 
@@ -390,12 +440,12 @@ def test_neg_poisson_logl_extra_checks_off_by_default(xp: ModuleType, dev: str):
 # A is invertible, so the ML solution saturates the likelihood (ybar = y):
 #   x_ml = inv(A) y, with inv(A) = [[0, 1], [1, -1]]  ->  x_ml = [2, 0]
 #   ybar(x_ml) = y = [2, 2] > 0 everywhere -> exact mode is valid
-#   f(x_ml)    = sum(ybar - y log(ybar)) = 4 - 4 log(2)
+#   f(x_ml)    = deviance at the saturated fit ybar = y = 0
 #   grad(x_ml) = A^T (1 - y / ybar) = A^T 0 = 0
 _A_ML_NP = _np.asarray([[1.0, 1.0], [1.0, 0.0]])
 _Y_ML_NP = _np.asarray([2.0, 2.0])
 _X_ML_NP = _np.asarray([2.0, 0.0])
-_F_ML = 4.0 - 4.0 * math.log(2.0)
+_F_ML = 0.0
 
 # same model with an extra all-zero row (third, virtual detector) measuring 0:
 #   ybar(x_ml) = [2, 2, 0] -> bin 3 has y = 0 and ybar = 0
@@ -407,7 +457,7 @@ _Y_ML3_NP = _np.asarray([2.0, 2.0, 0.0])
 
 def test_neg_poisson_logl_affine_ml_solution_exact(xp: ModuleType, dev: str):
     """Function value and gradient at the analytic ML solution (no virtual
-    bins, exact mode): f(x_ml) = 4 - 4 log(2), grad(x_ml) = 0."""
+    bins, exact mode): f(x_ml) = 0 (deviance), grad(x_ml) = 0."""
     A = xp.asarray(_A_ML_NP, device=dev)
     y = xp.asarray(_Y_ML_NP, device=dev)
     x_ml = xp.asarray(_X_ML_NP, device=dev)
@@ -466,8 +516,8 @@ def test_neg_poisson_logl_affine_ml_solution_default_virtual_bin(
     assert bool(xp.all(xp.isfinite(grad)))
     # ybar(x_ml) = y -> surrogate gradient is exactly 0 (minimiser preserved)
     assert allclose(grad, xp.zeros_like(grad), atol=1e-12)
-    # value deviates from the exact one only by O(eps * |log eps|)
-    assert abs(val - _F_ML) < 100 * loss.eps * abs(math.log(loss.eps))
+    # ybar = y: the shifted deviance is exactly 0, like the exact one
+    assert abs(val - _F_ML) < 1e-12
 
 
 # ---------------------------------------------------------------------------
@@ -852,7 +902,7 @@ def test_c1_affine_objective_call(xp: ModuleType, dev: str):
     obj = ppf.C1AffineObjective(loss, op, s)
 
     pred_np = _A_NP @ _X2_NP + _S_NP
-    expected = float(_np.sum(pred_np - _Y3_NP * _np.log(pred_np)))
+    expected = _deviance_np(pred_np, _Y3_NP)
     assert abs(obj(x) - expected) < 1e-5
 
 
@@ -896,7 +946,7 @@ def test_c1_affine_objective_no_contamination(xp: ModuleType, dev: str):
     obj = ppf.C1AffineObjective(loss, op)  # no s
 
     pred_np = _A_NP @ _X2_NP
-    expected = float(_np.sum(pred_np - _Y3_NP * _np.log(pred_np)))
+    expected = _deviance_np(pred_np, _Y3_NP)
     assert abs(obj(x) - expected) < 1e-5
 
 
@@ -1045,6 +1095,7 @@ def test_neg_poisson_logl_lm_call(xp: ModuleType, dev: str):
     expected = float(
         _np.dot(_SENS_LM_NP, _X_LM_NP)
         + _CONT_SINO_SUM
+        - _np.sum(_Y_LM_SINO_NP)  # - N_events
         - _np.sum(_Y_LM_SINO_NP * _np.log(pred_sino))
     )
     assert abs(f(x) - expected) < 1e-4
@@ -1096,7 +1147,8 @@ def test_neg_poisson_logl_lm_hessian_diag_vec_prod(xp: ModuleType, dev: str):
 
 
 def test_neg_poisson_logl_lm_matches_sinogram_value(xp: ModuleType, dev: str):
-    """NegPoissonLogLListmode and C2AffineObjective(NegPoissonLogL) must agree in value."""
+    """NegPoissonLogLListmode = sinogram deviance - sum(y log y), where the
+    constant is 0 if no bin contains more than one event."""
     x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
 
     f_lm = _make_lm_obj(xp, dev)
@@ -1108,7 +1160,8 @@ def test_neg_poisson_logl_lm_matches_sinogram_value(xp: ModuleType, dev: str):
         ppf.NegPoissonLogL(y_sino, exact=True), ppo.MatrixOperator(A_sino), s_sino
     )
 
-    assert abs(f_lm(x) - f_sino(x)) < 1e-4
+    const = float(_np.sum(_Y_LM_SINO_NP * _np.log(_Y_LM_SINO_NP)))
+    assert abs(f_lm(x) - (f_sino(x) - const)) < 1e-4
 
 
 def test_neg_poisson_logl_lm_matches_sinogram_gradient(xp: ModuleType, dev: str):
@@ -1156,7 +1209,7 @@ def test_neg_poisson_logl_lm_matches_sinogram_hessian(xp: ModuleType, dev: str):
 
 def test_neg_poisson_logl_lm_eps_matches_manual_surrogate(xp: ModuleType, dev: str):
     """With eps > 0 the LM objective equals the expectation-only-shift
-    surrogate sum(ybar) - sum(y * log(ybar + eps)) in sinogram space, and
+    surrogate sum(ybar) - N_ev - sum(y * log(ybar + eps)) in sinogram space, and
     value / gradient stay mutually consistent (finite differences)."""
     e = 0.25
     x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
@@ -1173,6 +1226,7 @@ def test_neg_poisson_logl_lm_eps_matches_manual_surrogate(xp: ModuleType, dev: s
     expected = float(
         _np.dot(_SENS_LM_NP, _X_LM_NP)
         + _CONT_SINO_SUM
+        - _np.sum(_Y_LM_SINO_NP)  # - N_events
         - _np.sum(_Y_LM_SINO_NP * _np.log(pred_sino + e))
     )
     assert abs(f(x) - expected) < 1e-4
@@ -1209,8 +1263,9 @@ def test_neg_poisson_logl_lm_eps_finite_on_zero_pred(xp: ModuleType, dev: str):
     hv = f_eps.hessian_diag_vec_prod(x0, v)
     assert math.isfinite(val)
     assert bool(xp.all(xp.isfinite(grad))) and bool(xp.all(xp.isfinite(hv)))
-    # n_events * (-log(eps)) is the exact value at x = 0
-    assert abs(val - (-_A_LM_NP.shape[0] * math.log(e))) < 1e-5
+    # -n_events - n_events * log(eps) is the exact value at x = 0
+    n_ev = _A_LM_NP.shape[0]
+    assert abs(val - (-n_ev - n_ev * math.log(e))) < 1e-5
 
 
 def test_neg_poisson_logl_lm_eps_validation(xp: ModuleType, dev: str):
