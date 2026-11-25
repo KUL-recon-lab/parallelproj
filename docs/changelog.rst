@@ -10,6 +10,24 @@ Changelog
 Changes
 ~~~~~~~
 
+- **Requires parallelproj-core >= 3.0.** (`#164
+  <https://github.com/KUL-recon-lab/parallelproj/issues/164>`_) Numerical
+  results of the TOF projectors change slightly, through the libparallelproj
+  3.0 TOF kernel:
+
+  - the Gaussian TOF kernel is truncated at ``num_sigmas`` sigma **inside** a
+    TOF bin (only the part of a bin within the window counts) and normalised to
+    unit total weight. Bins entirely outside the window get exactly zero weight,
+    and the TOF projections summed over the TOF bins equal the non-TOF
+    projection. Previously the full Gaussian integrals of the bins overlapping
+    the window were used, and listmode weights were normalised differently, so
+    single bin weights change by up to ~1e-3 (of a total of 1) near the window
+    edges;
+  - a listmode event now gets exactly the value of its TOF sinogram bin.
+
+  See the libparallelproj 3.0 changelog for all changes of the backend
+  (CUDA streams, tabulated TOF kernels, event sorting, ...).
+
 - **``NegPoissonLogL`` returns the Poisson deviance, summed in float64.** The
   function value is now :math:`\sum_i \bar{y}_i - y_i - y_i \log(\bar{y}_i /
   y_i)` (terms with :math:`y_i = 0`: :math:`\bar{y}_i`), i.e. the textbook
