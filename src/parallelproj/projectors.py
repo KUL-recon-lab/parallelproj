@@ -226,6 +226,11 @@ class ParallelViewProjector2D(LinearOperator):
         """device used for storage of LOR endpoints"""
         return self._device
 
+    @property
+    def nonnegative(self) -> bool:
+        """The system matrix is non-negative (:math:`|A| = A`)."""
+        return True
+
     def _apply(self, x: Array) -> Array:
         y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
         parallelproj_core.joseph3d_fwd(
@@ -529,6 +534,11 @@ class ParallelViewProjector3D(LinearOperator):
         """coordinates of LOR end points"""
         return self._xend
 
+    @property
+    def nonnegative(self) -> bool:
+        """The system matrix is non-negative (:math:`|A| = A`)."""
+        return True
+
     def _apply(self, x: Array) -> Array:
         y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
         parallelproj_core.joseph3d_fwd(
@@ -816,6 +826,11 @@ class RegularPolygonPETProjector(LinearOperator):
             tuple(self._lor_descriptor.spatial_sinogram_shape),
             lambda a: self.xp.take(a, self._views, axis=ax),
         )
+
+    @property
+    def nonnegative(self) -> bool:
+        """The system matrix is non-negative (:math:`|A| = A`)."""
+        return True
 
     def _apply(self, x: Array) -> Array:
         """Forward projection of input image x (non-TOF and TOF), including image-based resolution model."""
@@ -1311,6 +1326,11 @@ class ListmodePETProjector(LinearOperator):
         """(expected shape, selection) of per-event TOF values."""
         return ((self.num_events,), lambda a: a)
 
+    @property
+    def nonnegative(self) -> bool:
+        """The system matrix is non-negative (:math:`|A| = A`)."""
+        return True
+
     def _apply(self, x: Array) -> Array:
         dev = array_api_compat.device(x)
 
@@ -1554,6 +1574,11 @@ class EqualBlockPETProjector(LinearOperator):
             ),
             lambda a: self.xp.reshape(a[chunk_start:chunk_end, ...], (-1,)),
         )
+
+    @property
+    def nonnegative(self) -> bool:
+        """The system matrix is non-negative (:math:`|A| = A`)."""
+        return True
 
     def _apply(self, x: Array) -> Array:
         """forward projection of input image x"""

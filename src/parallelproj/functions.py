@@ -525,6 +525,53 @@ class C2Function(C1Function):
         h = self._hessian_diag(x)
         return h if self._beta == 1.0 else self._beta * h
 
+    def _separable_majorizer_curvature(self, x: Array) -> Array:
+        """Unscaled separable majorizer curvature (implemented by subclasses)."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement separable_majorizer_curvature"
+        )
+
+    def separable_majorizer_curvature(self, x: Array) -> Array:
+        """Curvature of a separable quadratic majorizer of :math:`f` at
+        :math:`x`.
+
+        Returns :math:`c(x) \\geq 0` (scaled by :math:`\\beta`) such that for
+        all :math:`z`
+
+        .. math::
+
+            f(z) \\leq f(x) + \\nabla f(x)^T (z - x)
+            + \\tfrac{1}{2} \\sum_j c_j(x)\\, (z_j - x_j)^2 .
+
+        Unlike the Hessian diagonal (:meth:`hessian_diag`), this is an upper
+        bound everywhere, so e.g. :math:`z = x - \\nabla f(x) / c(x)` never
+        increases :math:`f` (a majorize-minimize step) and :math:`x / c(x)`
+        is a safe diagonal preconditioner.
+
+        - separable functions: Huber's optimal curvature
+          :math:`\\omega(t) = \\psi'(t) / t` for even convex :math:`\\psi`
+          with non-increasing :math:`\\psi'(t)/t` (:class:`LogCosh`), the
+          exact curvature for quadratics (:class:`HalfSquaredL2Deviation`),
+        - :class:`C2AffineObjective` :math:`f(x) = g(Ax + s)`: De Pierro's
+          separable surrogate :math:`|A|^T (c_g(Ax + s) \\odot |A| 1)`,
+        - :class:`SumC2Function`: the sum of the curvatures of the terms.
+
+        Other functions (e.g. :class:`NegPoissonLogL`) raise
+        :exc:`NotImplementedError`.
+
+        Parameters
+        ----------
+        x : Array
+            Point of expansion.
+
+        Returns
+        -------
+        Array
+            Curvature :math:`c(x)`, same shape as x, non-negative.
+        """
+        c = self._separable_majorizer_curvature(x)
+        return c if self._beta == 1.0 else self._beta * c
+
     def hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
         """Deprecated alias of :meth:`hessian_vec_prod`.
 
@@ -953,6 +1000,10 @@ class HalfSquaredL2Deviation(C2FunctionWithConjProx):
             return v
         return self._weights * v
 
+    def _separable_majorizer_curvature(self, x: Array) -> Array:
+        # a separable quadratic is its own majorizer
+        return self._hessian_diag(x)
+
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of the half squared L2 deviation.
 
@@ -1100,6 +1151,16 @@ class LogCosh(C2Function):
         # separable: the Hessian is diagonal
         return self._hessian_diag(x) * v
 
+    def _separable_majorizer_curvature(self, x: Array) -> Array:
+        # Huber's optimal curvature omega(t) = psi'(t) / t = tanh(t/d) / t
+        # (>= psi''(t)); tanh(u)/u -> 1 - u^2/3 for u -> 0
+        xp = get_namespace(x)
+        u = x if self._delta is None else x / self._delta
+        small = xp.abs(u) < 1e-4
+        safe_u = xp.where(small, xp.ones_like(u), u)
+        w = xp.where(small, 1 - u**2 / 3, xp.tanh(safe_u) / safe_u)
+        return w if self._delta is None else w / self._delta
+
 
 class SumC1Function(C1Function):
     """Sum of an arbitrary number of :class:`C1Function` objects.
@@ -1196,6 +1257,12 @@ class SumC2Function(C2Function, SumC1Function):
         result = self._functions[0].hessian_diag(x)
         for f in self._functions[1:]:
             result = result + f.hessian_diag(x)
+        return result
+
+    def _separable_majorizer_curvature(self, x: Array) -> Array:
+        result = self._functions[0].separable_majorizer_curvature(x)
+        for f in self._functions[1:]:
+            result = result + f.separable_majorizer_curvature(x)
         return result
 
 
@@ -1580,6 +1647,16 @@ class C2AffineObjective(C2Function, C1AffineObjective):
 
     def _hessian_diag(self, x: Array) -> Array:
         return self._op.abs_sq_adjoint(self._loss.hessian_diag(self._pred(x)))
+
+    def _separable_majorizer_curvature(self, x: Array) -> Array:
+        # De Pierro: (a_i^T dz)^2 <= (sum_k |a_ik|) sum_j |a_ij| dz_j^2, so the
+        # separable curvature is |A|^T (c_g(Ax + s) * |A| 1)
+        xp = get_namespace(x)
+        if getattr(self, "_abs_row_sums", None) is None:
+            # |A| 1 without the operator scale (cached)
+            self._abs_row_sums = self._op._abs_apply(xp.ones_like(x))
+        c_g = self._loss.separable_majorizer_curvature(self._pred(x))
+        return self._op.abs_adjoint(c_g * (abs(self._op.scale) * self._abs_row_sums))
 
 
 class NonNegativeIndicator(FunctionWithProx):
