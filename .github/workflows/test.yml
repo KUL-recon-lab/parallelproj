@@ -42,9 +42,7 @@ jobs:
         # windows-latest -> win-64
         # macos-latest   -> osx-arm64 (Apple Silicon).
         # Add ``macos-13`` if you specifically need Intel-mac coverage.
-        # TEMPORARY (#164): macos-latest removed until parallelproj-core 3.0
-        # is on conda-forge for macOS; add it back before merging.
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         # Pixi environments defined in pyproject.toml's [tool.pixi.environments].
         # ``test`` -> Python 3.12;  ``test-py-latest`` -> newest Python.
         env: [test, test-py-latest]
