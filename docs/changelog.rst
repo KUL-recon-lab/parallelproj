@@ -120,6 +120,13 @@ Documentation
   the symmetry and mashing examples).  The examples that are not executed on
   Read the Docs get static thumbnails, and configuration comments
   (``# sphinx_gallery_thumbnail_number``) are no longer shown.
+- **Example gallery look (part 3): projector gallery.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All projector
+  examples follow the example template.  Figures that showed empty central
+  cuts (sinograms, back projections of a few LORs) now show the informative
+  planes, the TOF axis of TOF sinograms is shown, and text that did not match
+  the code is fixed (e.g. image size and TOF field of view in the TOF
+  projector example, the tail onset of the TOF kernel example).
 
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^
