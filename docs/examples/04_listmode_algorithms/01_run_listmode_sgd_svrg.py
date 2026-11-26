@@ -512,7 +512,7 @@ x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 if fov_mask is not None:
     x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
 
-_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
+_denom = adjoint_ones + reg.hessian_diag(x_init) * x_init
 if fov_mask is None:
     init_precond = x_init / _denom
 else:
@@ -522,7 +522,7 @@ num_init_updates = 4
 
 for k in range(num_init_updates):
     print(f"warm-start LM-SGD subset {(k+1):03} / {num_init_updates:03}", end="\r")
-    _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_init, x_init)
+    _denom = adjoint_ones + reg.hessian_diag(x_init) * x_init
     if fov_mask is None:
         init_precond = x_init / _denom
     else:
@@ -550,16 +550,22 @@ print()
 # .. math::
 #     x^+ = \left(x - D\, m\,\nabla f_k(x)\right)_+
 #
-# The preconditioner is updated infrequently to amortise its cost.
-# For the sinogram variant, :math:`D^k = (A^k)^T\mathbf{1} + 2\,\text{diag}(H_R)`,
-# using the exact subset sensitivity.  For the listmode variant,
-# :math:`D = (A^T\mathbf{1}/m) + 2\,\text{diag}(H_R)`, using the scaled
-# full sensitivity.
+# The preconditioner is updated infrequently to amortise its cost.  It is
+#
+# .. math::
+#     D = \operatorname{diag}\left(\frac{x}{S + \operatorname{diag}(H_R(x))\, x}
+#     \right),
+#
+# with the non-negative Hessian diagonal of the prior,
+# :math:`\operatorname{diag}(H_R(x))` (``reg.hessian_diag(x)``), and the
+# sensitivity :math:`S = (A^k)^T\mathbf{1}` (exact subset sensitivity) for
+# the sinogram variant or :math:`S = A^T\mathbf{1}/m` (scaled full
+# sensitivity) for the listmode variant.
 
 # --- sinogram SGD ---
 df_sgd_sino: list[float] = []
 x_sgd_sino = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_sino, x_sgd_sino)
+_denom = adjoint_ones + reg.hessian_diag(x_sgd_sino) * x_sgd_sino
 if fov_mask is None:
     sgd_precond_sino = x_sgd_sino / _denom
 else:
@@ -570,7 +576,7 @@ else:
 for i in range(num_epochs):
     if i % 2 == 0 and i <= 4:
         # Use mean subset sensitivity as a single shared preconditioner
-        _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_sino, x_sgd_sino)
+        _denom = adjoint_ones + reg.hessian_diag(x_sgd_sino) * x_sgd_sino
         if fov_mask is None:
             sgd_precond_sino = x_sgd_sino / _denom
         else:
@@ -593,7 +599,7 @@ print()
 # --- listmode SGD ---
 df_sgd_lm: list[float] = []
 x_sgd_lm = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_lm, x_sgd_lm)
+_denom = adjoint_ones + reg.hessian_diag(x_sgd_lm) * x_sgd_lm
 if fov_mask is None:
     sgd_precond_lm = x_sgd_lm / _denom
 else:
@@ -601,7 +607,7 @@ else:
 
 for i in range(num_epochs):
     if i % 2 == 0 and i <= 4:
-        _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_sgd_lm, x_sgd_lm)
+        _denom = adjoint_ones + reg.hessian_diag(x_sgd_lm) * x_sgd_lm
         if fov_mask is None:
             sgd_precond_lm = x_sgd_lm / _denom
         else:
@@ -644,7 +650,7 @@ print()
 # --- sinogram SVRG ---
 df_svrg_sino: list[float] = []
 x_svrg_sino = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_sino, x_svrg_sino)
+_denom = adjoint_ones + reg.hessian_diag(x_svrg_sino) * x_svrg_sino
 if fov_mask is None:
     svrg_precond_sino = x_svrg_sino / _denom
 else:
@@ -657,9 +663,7 @@ full_grad_sino: Array
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(
-                x_svrg_sino, x_svrg_sino
-            )
+            _denom = adjoint_ones + reg.hessian_diag(x_svrg_sino) * x_svrg_sino
             if fov_mask is None:
                 svrg_precond_sino = x_svrg_sino / _denom
             else:
@@ -693,7 +697,7 @@ print()
 # --- listmode SVRG ---
 df_svrg_lm: list[float] = []
 x_svrg_lm = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_lm, x_svrg_lm)
+_denom = adjoint_ones + reg.hessian_diag(x_svrg_lm) * x_svrg_lm
 if fov_mask is None:
     svrg_precond_lm = x_svrg_lm / _denom
 else:
@@ -704,7 +708,7 @@ full_grad_lm: Array
 for epoch in range(num_epochs):
     if epoch % 2 == 0:
         if epoch <= 4:
-            _denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x_svrg_lm, x_svrg_lm)
+            _denom = adjoint_ones + reg.hessian_diag(x_svrg_lm) * x_svrg_lm
             if fov_mask is None:
                 svrg_precond_lm = x_svrg_lm / _denom
             else:

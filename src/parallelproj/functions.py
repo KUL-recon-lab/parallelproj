@@ -2,8 +2,8 @@
 
 Provides a hierarchy of differentiable and non-differentiable scalar functions
 -- including the negative Poisson log-likelihood, quadratic penalties, and the
-mixed L2-L1 norm -- together with their gradients, Hessian-diagonal-vector
-products, and closed-form proximal operators where available.  All classes are
+mixed L2-L1 norm -- together with their gradients, Hessian-vector products,
+Hessian diagonals, and closed-form proximal operators where available.  All classes are
 array-API compatible and work with NumPy, CuPy, and PyTorch.
 """
 
@@ -446,36 +446,103 @@ class C2Function(C1Function):
     """Abstract base class for twice continuously differentiable (C2) scalar
     functions with an optional scalar scale factor :math:`\\beta`.
 
-    Extends :class:`C1Function` with curvature information.  The public
-    :meth:`hessian_diag_vec_prod` returns
-    :math:`\\beta \\operatorname{diag}(H_f(x))\\, v`.
-    Subclasses implement the unscaled :meth:`_hessian_diag_vec_prod`.
+    Extends :class:`C1Function` with curvature information:
+
+    - :meth:`hessian_vec_prod` returns the Hessian-vector product
+      :math:`\\beta H_f(x)\\, v`,
+    - :meth:`hessian_diag` returns the Hessian diagonal
+      :math:`\\beta \\operatorname{diag}(H_f(x))`.
+
+    For separable functions (:math:`H_f(x)` diagonal) both coincide in the
+    sense :math:`H_f(x)\\, v = \\operatorname{diag}(H_f(x)) \\odot v`; for
+    non-separable functions (e.g. :class:`C2AffineObjective`) they do not.
+    Subclasses implement the unscaled :meth:`_hessian_vec_prod` and
+    :meth:`_hessian_diag`.
     """
 
-    @abstractmethod
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        """Unscaled diagonal Hessian-vector product (implemented by subclasses)."""
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
+        """Unscaled Hessian-vector product (implemented by subclasses)."""
+        legacy = getattr(type(self), "_hessian_diag_vec_prod", None)
+        if legacy is not None:
+            warnings.warn(
+                f"{type(self).__name__} implements the deprecated "
+                "_hessian_diag_vec_prod; implement _hessian_vec_prod (and "
+                "_hessian_diag) instead",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return legacy(self, x, v)
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement _hessian_vec_prod"
+        )
 
-    def hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        """Scaled diagonal Hessian-vector product:
-        :math:`\\beta \\operatorname{diag}(H_f(x))\\, v`.
+    def _hessian_diag(self, x: Array) -> Array:
+        """Unscaled Hessian diagonal (implemented by subclasses)."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement _hessian_diag"
+        )
+
+    def hessian_vec_prod(self, x: Array, v: Array) -> Array:
+        """Scaled Hessian-vector product :math:`\\beta H_f(x)\\, v`.
 
         Parameters
         ----------
         x : Array
-            Point at which to evaluate the Hessian diagonal.
+            Point at which the Hessian is evaluated.
         v : Array
-            Vector to multiply with the Hessian diagonal, same shape as x.
+            Vector multiplied with the Hessian, same shape as x.
 
         Returns
         -------
         Array
-            Array of the same shape as x containing
-            :math:`\\beta \\operatorname{diag}(H_f(x)) \\odot v`
-            (elementwise).
+            :math:`\\beta H_f(x)\\, v`, same shape as x.
         """
-        h = self._hessian_diag_vec_prod(x, v)
+        h = self._hessian_vec_prod(x, v)
         return h if self._beta == 1.0 else self._beta * h
+
+    def hessian_diag(self, x: Array) -> Array:
+        """Scaled Hessian diagonal :math:`\\beta \\operatorname{diag}(H_f(x))`.
+
+        For a convex function all diagonal elements are non-negative.
+
+        Parameters
+        ----------
+        x : Array
+            Point at which the Hessian is evaluated.
+
+        Returns
+        -------
+        Array
+            :math:`\\beta \\operatorname{diag}(H_f(x))`, same shape as x.
+
+        Raises
+        ------
+        NotImplementedError
+            If the diagonal is not available, e.g. for a
+            :class:`C2AffineObjective` whose operator does not implement
+            :meth:`.LinearOperator.abs_sq_adjoint`.
+        """
+        h = self._hessian_diag(x)
+        return h if self._beta == 1.0 else self._beta * h
+
+    def hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+        """Deprecated alias of :meth:`hessian_vec_prod`.
+
+        .. deprecated:: 2.1
+            The name suggested :math:`\\operatorname{diag}(H_f(x)) \\odot v`,
+            but for non-separable functions (e.g. :class:`C2AffineObjective`)
+            the full Hessian-vector product :math:`\\beta H_f(x)\\, v` was and
+            is returned.  Use :meth:`hessian_vec_prod`, or
+            ``hessian_diag(x) * v`` for the diagonal product.
+        """
+        warnings.warn(
+            "hessian_diag_vec_prod is deprecated and returns the Hessian-vector "
+            "product H(x) v; use hessian_vec_prod(x, v), or hessian_diag(x) * v "
+            "for the diagonal product",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.hessian_vec_prod(x, v)
 
 
 class C1FunctionWithConjProx(C1Function, FunctionWithConjProx):
@@ -497,10 +564,11 @@ class C2FunctionWithConjProx(C2Function, C1FunctionWithConjProx):
     """Abstract base class for C2 functions that also admit a closed-form
     proximal operator of their convex conjugate.
 
-    Combines :class:`C2Function` (Hessian diagonal) with
+    Combines :class:`C2Function` (Hessian-vector product and diagonal) with
     :class:`C1FunctionWithConjProx` (gradient, call, dual prox).
     Subclasses must implement :meth:`_call`, :meth:`_gradient`,
-    :meth:`_hessian_diag_vec_prod`, and :meth:`_prox_convex_conj`.
+    :meth:`_hessian_vec_prod`, :meth:`_hessian_diag` and
+    :meth:`_prox_convex_conj`.
 
     MRO: ``C2FunctionWithConjProx -> C2Function -> C1FunctionWithConjProx -> C1Function -> FunctionWithConjProx -> ABC``
     """
@@ -743,13 +811,17 @@ class NegPoissonLogL(C2FunctionWithConjProx):
             )
         return (x - self._data) / (x + self._eps)
 
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+    def _hessian_diag(self, x: Array) -> Array:
         xp = get_namespace(x)
         self._check_x(x)
         if self._exact:
             safe_x = xp.where(self._data_is_zero, xp.ones_like(x), x)
-            return self._data / (safe_x**2) * v
-        return (self._data + self._eps) / ((x + self._eps) ** 2) * v
+            return self._data / (safe_x**2)
+        return (self._data + self._eps) / ((x + self._eps) ** 2)
+
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
+        # separable: the Hessian is diagonal
+        return self._hessian_diag(x) * v
 
     def _prox_convex_conj(self, y: Array, sigma: float | Array) -> Array:
         """Proximal operator of the convex conjugate of the negative Poisson log-likelihood.
@@ -816,11 +888,12 @@ class HalfSquaredL2Deviation(C2FunctionWithConjProx):
 
         \\nabla f(x) = w \\odot (x - d)
 
-    Diagonal Hessian-vector product:
+    Hessian (diagonal, the function is separable) and Hessian-vector
+    product:
 
     .. math::
 
-        \\operatorname{diag}(H_f(x)) \\odot v = w \\odot v
+        \\operatorname{diag}(H_f(x)) = w, \\qquad H_f(x)\\, v = w \\odot v
 
     The :math:`\\tfrac{1}{2}` prefactor is chosen so that the gradient
     contains no factor of 2, keeping expressions clean when :math:`\\beta = 1`.
@@ -870,7 +943,12 @@ class HalfSquaredL2Deviation(C2FunctionWithConjProx):
         wdiff = self._weights * diff
         return float(0.5 * xp.sum(self._weights * diff**2)), wdiff
 
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+    def _hessian_diag(self, x: Array) -> Array:
+        if self._weights is None:
+            return get_namespace(x).ones_like(x)
+        return self._weights * get_namespace(x).ones_like(x)
+
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
         if self._weights is None:
             return v
         return self._weights * v
@@ -941,7 +1019,8 @@ class LogCosh(C2Function):
 
         \\nabla f(x)_i = \\tanh\\!\\left(\\frac{x_i}{\\delta}\\right)
 
-    Diagonal Hessian-vector product:
+    Hessian (diagonal, the function is separable), applied to a vector
+    :math:`v`:
 
     .. math::
 
@@ -1011,12 +1090,15 @@ class LogCosh(C2Function):
         )
         return (raw if self._delta is None else self._delta * raw), xp.tanh(z)
 
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+    def _hessian_diag(self, x: Array) -> Array:
         xp = get_namespace(x)
         z = x if self._delta is None else x / self._delta
-        t = xp.tanh(z)
-        h = 1 - t**2
-        return h * v if self._delta is None else h * v / self._delta
+        h = 1 - xp.tanh(z) ** 2
+        return h if self._delta is None else h / self._delta
+
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
+        # separable: the Hessian is diagonal
+        return self._hessian_diag(x) * v
 
 
 class SumC1Function(C1Function):
@@ -1085,12 +1167,14 @@ class SumC2Function(C2Function, SumC1Function):
     """Sum of an arbitrary number of :class:`C2Function` objects.
 
     Extends :class:`SumC1Function` with second-order information.  The
-    diagonal Hessian-vector product is:
+    Hessian-vector product and the Hessian diagonal are the sums of those of
+    the terms:
 
     .. math::
 
-        \\operatorname{diag}\\!\\left(H_h(x)\\right) \\odot v
-        = \\sum_{k} \\operatorname{diag}\\!\\left(H_{f_k}(x)\\right) \\odot v.
+        H_h(x)\\, v = \\sum_{k} H_{f_k}(x)\\, v, \\qquad
+        \\operatorname{diag}\\!\\left(H_h(x)\\right)
+        = \\sum_{k} \\operatorname{diag}\\!\\left(H_{f_k}(x)\\right).
 
     Parameters
     ----------
@@ -1102,10 +1186,16 @@ class SumC2Function(C2Function, SumC1Function):
         self._functions: Sequence[C2Function]
         super().__init__(functions)
 
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
-        result = self._functions[0].hessian_diag_vec_prod(x, v)
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
+        result = self._functions[0].hessian_vec_prod(x, v)
         for f in self._functions[1:]:
-            result = result + f.hessian_diag_vec_prod(x, v)
+            result = result + f.hessian_vec_prod(x, v)
+        return result
+
+    def _hessian_diag(self, x: Array) -> Array:
+        result = self._functions[0].hessian_diag(x)
+        for f in self._functions[1:]:
+            result = result + f.hessian_diag(x)
         return result
 
 
@@ -1154,14 +1244,22 @@ class NegPoissonLogLListmode(C2Function):
         \\nabla_x f(x) = \\text{sens}
             - A_{\\text{LM}}^T \\!\\left(\\frac{1}{A_{\\text{LM}}\\,x + s_{\\text{LM}}}\\right)
 
-    and the diagonal Hessian-vector product is
+    and the Hessian-vector product and the Hessian diagonal are
 
     .. math::
 
-        \\operatorname{diag}(H_f(x)) \\odot v
+        H_f(x)\\, v
             = A_{\\text{LM}}^T \\!\\left(
                 \\frac{A_{\\text{LM}}\\, v}{(A_{\\text{LM}}\\,x + s_{\\text{LM}})^2}
-              \\right).
+              \\right), \\qquad
+        \\operatorname{diag}(H_f(x))
+            = |A_{\\text{LM}}|^{2\\,T} \\!\\left(
+                \\frac{1}{(A_{\\text{LM}}\\,x + s_{\\text{LM}})^2}
+              \\right),
+
+    where :math:`|A|^2` is the element-wise squared operator
+    (:meth:`.LinearOperator.abs_sq_adjoint`, not available for the listmode
+    projectors).
 
     .. note::
 
@@ -1181,7 +1279,7 @@ class NegPoissonLogLListmode(C2Function):
         :math:`\\bar{y}_i = 0` in sinogram space), which is a genuine model
         violation.  With the default ``eps = 0``, every call to
         :meth:`__call__`, :meth:`gradient`, or
-        :meth:`hessian_diag_vec_prod` therefore requires that all per-event
+        :meth:`hessian_vec_prod` therefore requires that all per-event
         predicted counts :math:`(A_{\\text{LM}}\\,x)_e + s_e` are **strictly
         positive** -- guaranteed by a strictly positive
         ``contamination_list``, which is the normal situation in practice.
@@ -1311,9 +1409,13 @@ class NegPoissonLogLListmode(C2Function):
         grad = self._sensitivity_image - self._lm_op.adjoint(1.0 / pred)
         return value, grad
 
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
         pred = self._pred(x)
         return self._lm_op.adjoint(self._lm_op(v) / pred**2)
+
+    def _hessian_diag(self, x: Array) -> Array:
+        pred = self._pred(x)
+        return self._lm_op.abs_sq_adjoint(1.0 / pred**2)
 
 
 class C1AffineObjective(C1Function):
@@ -1369,11 +1471,20 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     """Composes a prediction-space :class:`C2Function` with an affine forward model.
 
     Extends :class:`C1AffineObjective` with second-order information. For
-    :math:`f(x) = g(A x + s)` the Hessian-vector product is:
+    :math:`f(x) = g(A x + s)` with a separable :math:`g` the Hessian-vector
+    product and the Hessian diagonal are:
 
     .. math::
 
-        H_f(x)\\, v = A^H \\bigl(\\operatorname{diag}(H_g(\\bar{y})) \\odot (A v)\\bigr)
+        H_f(x)\\, v = A^H \\bigl(\\operatorname{diag}(H_g(\\bar{y})) \\odot (A v)\\bigr),
+        \\qquad
+        \\operatorname{diag}(H_f(x)) = |A|^{2\\,T} \\operatorname{diag}(H_g(\\bar{y})),
+
+    where :math:`|A|^{2\\,T}` applies the transpose of the element-wise squared
+    absolute values of :math:`A` (:meth:`.LinearOperator.abs_sq_adjoint`).
+    The diagonal is therefore only available for operators that implement it
+    (e.g. :class:`.MatrixOperator`, :class:`.FiniteForwardDifference`); the
+    Hessian-vector product is available for all operators.
 
     where :math:`\\bar{y} = A x + s` (or :math:`\\bar{y} = A x` when
     :math:`s` is ``None``) and :math:`\\odot` denotes elementwise
@@ -1409,7 +1520,8 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>>
     >>> fx = aff_obj(x)                           # scalar value, scaled by beta=0.5
     >>> grad = aff_obj.gradient(x)                          # shape (4,), scaled by beta=0.5
-    >>> hv   = aff_obj.hessian_diag_vec_prod(x, v)          # shape (4,), scaled by beta=0.5
+    >>> hv   = aff_obj.hessian_vec_prod(x, v)               # shape (4,), scaled by beta=0.5
+    >>> hd   = aff_obj.hessian_diag(x)                      # shape (4,), scaled by beta=0.5
 
     Pure linear forward model with virtual bins (zero rows in :math:`A`),
     handled by :class:`NegPoissonLogL` -- the default ("safe epsilon") mode
@@ -1426,7 +1538,7 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>>
     >>> fx2   = aff_obj2(x)                                 # scalar function value, no nan
     >>> grad2 = aff_obj2.gradient(x)                        # shape (4,), no nan
-    >>> hv2   = aff_obj2.hessian_diag_vec_prod(x, v)        # shape (4,), no nan
+    >>> hv2   = aff_obj2.hessian_vec_prod(x, v)             # shape (4,), no nan
 
     A regularised objective combining a data fidelity term and a roughness
     penalty via :class:`SumC2Function`:
@@ -1449,18 +1561,25 @@ class C2AffineObjective(C2Function, C1AffineObjective):
     >>> obj_fun = data_fidelity + reg                     # SumC2Function
     >>> obj_val = obj_fun(x)                              # scalar function value
     >>> grad = obj_fun.gradient(x)                        # shape (4,)
-    >>> hv   = obj_fun.hessian_diag_vec_prod(x, v)        # shape (4,)
+    >>> hv   = obj_fun.hessian_vec_prod(x, v)             # shape (4,)
+    >>> hd   = obj_fun.hessian_diag(x)                    # shape (4,), >= 0
     """
 
     def __init__(self, loss: C2Function, op: LinearOperator, s: Array | None = None):
         self._loss: C2Function
         super().__init__(loss, op, s)
 
-    def _hessian_diag_vec_prod(self, x: Array, v: Array) -> Array:
+    def _pred(self, x: Array) -> Array:
         pred = self._op(x)
-        if self._s is not None:
-            pred = pred + self._s
-        return self._op.adjoint(self._loss.hessian_diag_vec_prod(pred, self._op(v)))
+        return pred if self._s is None else pred + self._s
+
+    def _hessian_vec_prod(self, x: Array, v: Array) -> Array:
+        return self._op.adjoint(
+            self._loss.hessian_vec_prod(self._pred(x), self._op(v))
+        )
+
+    def _hessian_diag(self, x: Array) -> Array:
+        return self._op.abs_sq_adjoint(self._loss.hessian_diag(self._pred(x)))
 
 
 class NonNegativeIndicator(FunctionWithProx):

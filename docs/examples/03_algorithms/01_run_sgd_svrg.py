@@ -343,20 +343,20 @@ total_objective = full_data_fidelity + reg
 # curvature of the prior,
 #
 # .. math::
-#     D = \operatorname{diag}\left(\frac{x}{A^T 1 + 2 \beta\, G^T
-#         \operatorname{diag}\!\left(\psi''(Gx)\right) G x}\right),
+#     D = \operatorname{diag}\left(\frac{x}{A^T 1 +
+#         \operatorname{diag}\!\left(H_R(x)\right) x}\right),
+#     \qquad H_R(x) = \beta\, G^T \operatorname{diag}\!\left(\psi''(Gx)\right) G,
 #     \qquad \psi(t) = \delta \log\cosh(t / \delta),
 #
-# computed with ``reg.hessian_diag_vec_prod(x, x)``.  The second term of the
-# denominator is the Hessian-vector product :math:`H_R(x)\, x` of the prior
-# (with :math:`v = x`), not the Hessian diagonal.  :math:`G^T
-# \operatorname{diag}(\psi''(Gx)) G` is a weighted graph Laplacian, so
-# :math:`[H_R(x)\, x]_j = \sum_k w_{jk} (x_j - x_k)` is **negative** in voxels
-# that are colder than their neighbours, even for non-negative images.  Here
-# the sensitivity :math:`A^T 1` dominates and the denominator stays positive
-# inside the FOV; with a much stronger prior or cold lesions it should be
-# checked (or replaced by the always non-negative Hessian diagonal
-# :math:`\operatorname{diag}(H_R(x))\, x`).
+# where :math:`\operatorname{diag}(H_R(x))` is the **Hessian diagonal** of the
+# prior, ``reg.hessian_diag(x)``.  For the forward differences :math:`G`
+# (entries :math:`\pm 1`) it is :math:`\beta\, |G|^T \psi''(Gx)`: the sum of
+# the curvatures of all differences a voxel takes part in.  It is
+# non-negative, so the preconditioner is non-negative for non-negative
+# images.  (The Hessian-vector product :math:`H_R(x)\, x`, by contrast, is a
+# weighted graph Laplacian applied to :math:`x` and negative in voxels that
+# are colder than their neighbours, so it is not suited as a curvature
+# estimate.)
 #
 # The scanner's cylindrical field of view (FOV) does not cover every voxel of
 # the image grid.  Voxels outside the FOV are never intersected by any LOR, so
@@ -375,7 +375,7 @@ fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 
 def preconditioner(x: Array) -> Array:
     """Diagonal preconditioner x / (A^T 1 + 2 beta G^T H G x), 0 outside FOV"""
-    denom = adjoint_ones + 2 * reg.hessian_diag_vec_prod(x, x)
+    denom = adjoint_ones + reg.hessian_diag(x) * x
     if fov_mask is None:
         return x / denom
     return xp.where(fov_mask, x / denom, xp.zeros_like(x))
