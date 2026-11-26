@@ -208,20 +208,27 @@ class Gather(torch.autograd.Function):
 
 
 class MultiDeviceProjection(torch.nn.Module):
-    """split a mini batch across devices, project, gather on the input device"""
+    """split a mini batch across devices, project, gather on the input device
 
-    def __init__(self, projectors: dict, adjoint: bool = False) -> None:
+    With ``gather=False``, the results stay on their devices: the layer returns
+    one tensor per device (see section 6).
+    """
+
+    def __init__(self, projectors: dict, adjoint: bool = False, gather: bool = True) -> None:
         super().__init__()
         self.projectors = projectors
         self.adjoint = adjoint
+        self.gather = gather
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor | tuple[torch.Tensor, ...]:
         devices = list(self.projectors)[: x.shape[0]]  # no empty chunks
         chunks = Scatter.apply(x, devices)  # 1. all copies first
         out = [  # 2. queue the projections on all devices (asynchronous)
             ProjectChunk.apply(c, self.projectors[d], self.adjoint)
             for c, d in zip(chunks, devices)
         ]
+        if not self.gather:
+            return tuple(out)  # results stay on their devices
         return Gather.apply(x.device, *out)  # 3. results on the input device
 
 
@@ -352,13 +359,19 @@ def best_time(fn, repeats: int = 5) -> float:
 # - a **training step** (forward projection, loss, and the back projection of
 #   the gradient),
 #
-# each in three configurations:
+# each in four configurations:
 #
 # - on **one** device,
 # - on **all** devices, but waiting for the GPU after every projection, as
 #   with the synchronous projections of parallelproj < 2.1 (emulated with a
 #   ``torch.cuda.synchronize`` after every call),
-# - on **all** devices with asynchronous projections (this example's layer).
+# - on **all** devices with asynchronous projections (this example's layer),
+# - on **all** devices with asynchronous projections, but **without gathering**
+#   the sinograms on one GPU (``gather=False``): every GPU keeps its
+#   sinograms, the data ``y`` of each chunk is stored on the GPU of the chunk,
+#   the loss of each chunk is computed on its GPU, and only the scalar losses
+#   are summed on the first GPU.  No sinograms (and no sinogram gradients) are
+#   copied between GPUs.
 
 
 class SynchronousProjector:
@@ -378,6 +391,19 @@ class SynchronousProjector:
         return x
 
 
+# the data of every chunk, stored once on the device of the chunk
+y_chunks = [c.to(d) for c, d in zip(torch.tensor_split(y, len(devices)), devices)]
+
+
+def loss_of(layer: MultiDeviceProjection, x_in: torch.Tensor) -> torch.Tensor:
+    """least-squares loss, gathered (one big tensor) or per device (gather=False)"""
+    out = layer(x_in)
+    if layer.gather:
+        return ((out - y) ** 2).sum()
+    # one loss per device, only the scalar losses are copied to the first device
+    return sum(((o - yc) ** 2).sum().to(devices[0]) for o, yc in zip(out, y_chunks))
+
+
 def forward_with(layer: MultiDeviceProjection):
     def forward():
         with torch.no_grad():
@@ -389,7 +415,7 @@ def forward_with(layer: MultiDeviceProjection):
 def step_with(layer: MultiDeviceProjection):
     def step():
         x_est.grad = None
-        ((layer(x_est) - y) ** 2).sum().backward()
+        loss_of(layer, x_est).backward()
 
     return step
 
@@ -400,6 +426,16 @@ if len(devices) > 1:
         {d: SynchronousProjector(p) for d, p in projectors.items()}
     )
     configs[f"{len(devices)} GPUs, asynchronous calls"] = fwd_layer
+    configs[f"{len(devices)} GPUs, async., no gather"] = MultiDeviceProjection(
+        projectors, gather=False
+    )
+
+    # same loss and gradient with and without gathering
+    step_with(fwd_layer)()
+    grad_gather = x_est.grad.clone()
+    step_with(configs[f"{len(devices)} GPUs, async., no gather"])()
+    rel_diff = float((x_est.grad - grad_gather).abs().max() / grad_gather.abs().max())
+    print(f"max. rel. difference of the gradients with / without gather: {rel_diff:.1e}")
 
 tasks = {"forward projection": forward_with, "training step": step_with}
 timings = {
@@ -423,7 +459,10 @@ for task, t in timings.items():
 # work one after another in the forward pass.  In the training step, the
 # difference is smaller: the autograd engine runs the backward pass of every
 # GPU in its own thread, so the back projections overlap even with
-# synchronous calls.
+# synchronous calls.  The remaining gap to :math:`N` is mostly the copies of
+# the sinograms between the GPUs (gathering the outputs on one GPU, and
+# copying their gradients back); without gathering, the speed-up comes
+# closest to :math:`N`.
 
 fig, axs = plt.subplots(
     1, 2, figsize=(10, 0.9 + 0.45 * len(configs)), layout="constrained", sharey=True
@@ -453,10 +492,11 @@ fig.show()
 # - **Time** GPU code only with synchronization and a warm-up.
 # - Choose the mini batch size as a **multiple of the number of GPUs**, so that
 #   all GPUs get the same number of samples.
-# - Large outputs (with the GPU scanner here: a sinogram of 58 MB per sample) are copied
-#   between GPUs when they are gathered on one device.  In training, it can
-#   pay off to keep the data of every chunk on its GPU, compute the loss per
-#   GPU, and only sum the (scalar) losses on one device.
+# - Large outputs (with the GPU scanner here: a sinogram of 58 MB per sample)
+#   are copied between GPUs when they are gathered on one device, and their
+#   gradients are copied back.  In training, keep the data of every chunk on
+#   its GPU, compute the loss per GPU, and only sum the scalar losses on one
+#   device (``gather=False``).
 # - **DistributedDataParallel** (one process per GPU, e.g. with ``torchrun``)
 #   is the alternative for multi-node training: each process uses the
 #   single-device layer of
