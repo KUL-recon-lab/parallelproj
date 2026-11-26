@@ -346,9 +346,11 @@ mu_final["OS-MLTR"] = mu
 # at every step.
 #
 # .. note::
-#     Each OS-MLTR epoch is one full data pass; an SVRG epoch is roughly 1.5
-#     (anchor + subset sweep), so the epoch axis understates SVRG's cost by
-#     about a factor of 1.5.
+#     Each OS-MLTR epoch is one full data pass.  An SVRG anchor epoch costs
+#     about three (the subset gradients at the anchor, the full gradient and
+#     curvature for the preconditioner, and the subset sweep), the other
+#     epochs one, i.e. about two on average, so the epoch axis understates
+#     SVRG's cost by about a factor of two.
 
 rng = np.random.default_rng(1)
 mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
@@ -454,7 +456,7 @@ fig.show()
 # decreases it fastest in the first epochs, but then levels off: like OSEM,
 # it does not converge to the minimiser (it approaches a subset-dependent
 # limit cycle).  SVRG overtakes it after about five epochs (keep in mind
-# that an SVRG epoch costs about 1.5 data passes) and ends closer to the
+# that an SVRG epoch costs about two data passes) and ends closer to the
 # L-BFGS-B value.  The differences are tiny compared with the total
 # objective (note the offset of the y axis), and the three profiles are
 # almost identical: they follow the jumps at the inserts (edges of up to

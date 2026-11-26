@@ -153,6 +153,17 @@ Documentation
   :math:`\beta \operatorname{diag}(G^TG) / \delta`, the maximal Hessian
   diagonal, which is not a separable majorizer (it lacks the factor 2 of De
   Pierro's surrogate).  Results are practically unchanged.
+- **Example gallery look (part 5): listmode, transmission and PyTorch
+  galleries.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All remaining
+  examples follow the example template.  Static figures that showed only one
+  volume of a stacked 4D ``show_vol_cuts`` (MLTR/SPS, OS-MLTR/SVRG, MAPTR) are
+  side-by-side image panels on a common scale, the listmode MLEM reference
+  runs whenever the full number of iterations is used, and text that
+  contradicted the code or the results was corrected (e.g. the sinogram and
+  listmode objectives differ by a constant, the listmode examples use TOF,
+  the data passes of an SVRG epoch, the convergence of the transmission
+  algorithms).
 - **New example: preconditioners for SVRG with an edge-preserving prior.**
   (`#187 <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_)
   Compares the Hessian diagonal, twice the Hessian diagonal and the

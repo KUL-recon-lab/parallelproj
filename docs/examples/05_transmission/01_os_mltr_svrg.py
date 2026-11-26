@@ -76,7 +76,7 @@ xp, dev = suggest_array_backend_and_device()
 
 num_epochs = 80  # epochs for MLTR and the subset algorithms
 num_subsets = 28  # number of ordered view subsets (divides the 168 views evenly)
-num_lbfgs = 500  # L-BFGS-B iterations for the reference solution
+num_lbfgs = 500  # max. L-BFGS-B iterations for the reference solution
 blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
@@ -314,11 +314,12 @@ mu_final["OS-MLTR"] = mu
 # convergence proofs.)
 #
 # .. note::
-#     An anchor epoch costs about two data passes (the anchor gradients plus
-#     the :math:`m` subset steps), the other epochs one, i.e. 1.5 data passes
-#     per SVRG epoch on average.  The epoch axis of the convergence plot
-#     below therefore understates the computational cost of SVRG by about a
-#     factor of 1.5 compared to MLTR / OS-MLTR.
+#     An anchor epoch costs about three data passes (the :math:`m` subset
+#     gradients at the anchor, the full gradient and MLTR curvature for the
+#     preconditioner, and the :math:`m` subset steps), the other epochs one,
+#     i.e. about two data passes per SVRG epoch on average.  The epoch axis
+#     of the convergence plot below therefore understates the computational
+#     cost of SVRG by about a factor of two compared to MLTR / OS-MLTR.
 
 rng = np.random.default_rng(1)
 mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
@@ -485,7 +486,7 @@ fig2.show()
 # - OS-MLTR does not converge but approaches a subset-dependent limit cycle.
 # - SVRG with the MLTR diagonal preconditioner at the anchor is as fast per
 #   epoch and keeps approaching the maximum-likelihood solution, at about
-#   1.5 data passes per epoch.
+#   two data passes per epoch.
 # - L-BFGS-B on the full data provides a converged reference solution.
 #
 # .. seealso::

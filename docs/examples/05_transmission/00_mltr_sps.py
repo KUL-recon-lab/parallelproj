@@ -33,9 +33,9 @@ quasi-Newton optimiser **L-BFGS-B** as a reference.
 
 .. note::
 
-    Because of its run time (500 iterations per algorithm), this example is
-    **not executed** in the documentation build: the figures are not
-    rendered on this page.  Download it and run it locally to see the
+    Because of its run time (500 iterations each for MLTR and SPS), this
+    example is **not executed** in the documentation build: the figures are
+    not rendered on this page.  Download it and run it locally to see the
     results.
 """
 
@@ -73,7 +73,7 @@ xp, dev = suggest_array_backend_and_device()
 # ``blank_counts`` sets the noise level of the data (expected counts per LOR
 # without an object), ``scatter_fraction`` the constant scatter background
 # relative to the mean unscattered transmission.  All three algorithms run
-# ``num_iter`` iterations (function evaluations for L-BFGS-B).
+# at most ``num_iter`` iterations (L-BFGS-B stops earlier once converged).
 
 num_iter = 500  # iterations for all algorithms
 blank_counts = 500.0  # blank scan counts per LOR
@@ -392,6 +392,7 @@ print(
 # 50 iterations.  The right panel compares profiles along :math:`x_0`
 # through the centre of the final images with the ground truth.
 
+cost_min = float(min(c.min() for c in cost.values()))
 cost_max = float(cost["MLTR"][50])
 
 sl = img_shape[2] // 2
@@ -425,24 +426,25 @@ ax[1].legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=4)
 fig.show()
 
 # %%
-# All three algorithms approach the same maximum-likelihood solution, and
-# their profiles are almost indistinguishable: they follow the true
-# :math:`\mu` with the noise of the unregularised maximum-likelihood
-# estimate.  Of the two surrogate methods, MLTR decreases :math:`-L`
-# faster; SPS additionally *guarantees* a monotone increase of :math:`L`.
+# L-BFGS-B stops at its default convergence tolerance after about 100
+# function evaluations, while MLTR and SPS are still far from the minimum
+# after 500 iterations.  Its quasi-Newton metric captures the curvature that
+# the separable surrogates approximate with a fixed diagonal.  The L-BFGS-B
+# profile is therefore the noisiest: it shows the noise of the unregularised
+# maximum-likelihood solution, which MLTR and, even more so, SPS have not
+# yet reached.
 #
-# In practice, across the regimes tested for this example -- including
-# low-count, high-attenuation data -- MLTR remained monotone (see the printed
-# number of non-monotone steps) *and* reached a slightly **higher**
-# likelihood than SPS at the same iteration: its Newton-type curvature is
-# never larger than the SPS majorant, so it takes larger steps.
+# Of the two surrogate methods, MLTR decreases :math:`-L` much faster; SPS
+# additionally *guarantees* a monotone increase of :math:`L`.  In practice,
+# across the regimes tested for this example -- including low-count,
+# high-attenuation data -- MLTR remained monotone (see the printed number of
+# non-monotone steps) *and* reached a **higher** likelihood than SPS at the
+# same iteration: its Newton-type curvature is never larger than the SPS
+# majorant, so it takes larger steps.
 #
-# On this unregularised problem L-BFGS-B converges faster than MLTR -- its
-# quasi-Newton metric captures the curvature that the separable surrogates
-# approximate with a fixed diagonal.  MLTR / SPS nevertheless remain
-# attractive for their simplicity, guaranteed non-negativity without a
-# constrained solver, trivial parallelism, and natural extension to ordered
-# subsets (OS-MLTR, next example).
+# MLTR / SPS nevertheless remain attractive for their simplicity, guaranteed
+# non-negativity without a constrained solver, trivial parallelism, and
+# natural extension to ordered subsets (OS-MLTR, next example).
 
 # %%
 # 9. Reconstructed images
@@ -477,9 +479,12 @@ fig2.colorbar(im, ax=ax2, shrink=0.8, label=r"$\mu$ [1/mm]")
 fig2.show()
 
 # %%
-# The three reconstructions look alike and show the elliptic cylinder with
-# its dense and air-like inserts.  Without regularisation they all contain
-# noticeable noise; a prior is added in
+# All reconstructions show the elliptic cylinder with its dense and
+# air-like inserts.  The converged L-BFGS-B image contains strong noise, the
+# MLTR image less and the least converged SPS image the least (but it is
+# also the blurriest).  Without regularisation, the noise increases further
+# as the iterates approach the maximum-likelihood solution; a prior is
+# added in
 # :ref:`sphx_glr_auto_examples_05_transmission_02_run_maptr.py`.
 
 # %%
@@ -495,8 +500,8 @@ fig2.show()
 #   :math:`\bar z^2/\bar y` (MLTR, faster) or the optimal majorising
 #   curvature (SPS, provably monotone).
 # - L-BFGS-B on :math:`-L` with the bound :math:`\mu \geq 0` converges
-#   faster than both on this unregularised problem, but unlike MLTR it does
-#   not extend naturally to ordered subsets.
+#   much faster than both on this unregularised problem, but unlike MLTR it
+#   does not extend naturally to ordered subsets.
 #
 # .. seealso::
 #
