@@ -343,7 +343,6 @@ def set_style() -> None:
             "lines.markersize": 5.0,
             "legend.frameon": False,
             "image.interpolation": "nearest",
-            "savefig.bbox": "tight",
         }
     )
 
