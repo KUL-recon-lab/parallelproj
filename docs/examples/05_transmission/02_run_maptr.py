@@ -41,12 +41,19 @@ diagonal majorant of the data Hessian (the analogue of :math:`A^T\\mathbf 1
 
 .. math::
     D(\\mu) = \\frac{1}{\\;P^T\\!\\left[(P\\mathbf 1)\\,\\bar z^2/\\bar y\\right]
-                       + \\beta\\,\\kappa/\\delta\\;},
+                       + \\beta\\,c_R(\\mu)\\;},
 
-where :math:`\\beta\\,\\kappa/\\delta` (with :math:`\\kappa = \\operatorname{diag}(G^TG)
-\\approx 2\\,n_\\text{dim}`) is the log-cosh prior's maximal curvature -- a
-valid diagonal majorant, since :math:`\\tfrac{d^2}{dz^2}\\delta\\log\\cosh(z/\\delta)
-= \\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`.
+where :math:`\\beta\\,c_R(\\mu)` (``reg.separable_majorizer_curvature(mu)``)
+is the curvature of the separable quadratic majorizer of the log-cosh prior:
+De Pierro's surrogate :math:`c_R = |G|^T(\\omega(G\\mu) \\odot |G|\\mathbf 1)`
+with Huber's curvature :math:`\\omega(t) = \\psi'(t)/t`, see
+:meth:`.C2Function.separable_majorizer_curvature`.  Like the MLTR term for the
+data, it majorizes the prior, and it adapts to the image: it is smaller for
+large differences (edges) than the global bound :math:`2\\operatorname{diag}
+(G^TG)/\\delta`.  (The maximal Hessian diagonal
+:math:`\\operatorname{diag}(G^TG)/\\delta` alone is *not* a separable
+majorizer: it lacks the factor :math:`|G|\\mathbf 1 = 2` of every
+difference.)
 
 The subset algorithms of ``01_os_mltr_svrg.py`` are run, now on the
 penalised objective, with a converged **L-BFGS-B** reference:
@@ -188,16 +195,15 @@ y = xp.asarray(
 #
 # The log-cosh prior is built from the finite-difference operator ``G``.
 # ``reg(mu)`` and ``reg.gradient(mu)`` give :math:`\beta R` and
-# :math:`\beta \nabla R`; ``prior_curv = beta * kappa / delta`` is the
-# diagonal curvature majorant entering the preconditioner.
+# :math:`\beta \nabla R`; ``reg.separable_majorizer_curvature(mu)`` is the
+# curvature :math:`\beta c_R(\mu)` of its separable quadratic majorizer that
+# enters the preconditioner.
 
 ones_img = xp.ones(proj.in_shape, dtype=xp.float32, device=dev)
 P1 = proj(ones_img)
 
 G = parallelproj.operators.FiniteForwardDifference(proj.in_shape)
 reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
-kappa = 2.0 * len(proj.in_shape)  # diag(G^T G) for forward differences
-prior_curv = beta * kappa / delta  # log-cosh max curvature (scalar majorant)
 
 subset_views, subset_slices = lor_desc.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
@@ -268,7 +274,8 @@ for ep in range(num_epochs):
         num = subset_proj[k].adjoint(grad_sino)
         denom = subset_proj[k].adjoint(Pk1[k] * curv_sino)
         g_pen = num - reg.gradient(mu) / num_subsets
-        mu = xp.clip(mu + _safe_ratio(g_pen, denom + prior_curv / num_subsets), 0, None)
+        prior_curv = reg.separable_majorizer_curvature(mu) / num_subsets
+        mu = xp.clip(mu + _safe_ratio(g_pen, denom + prior_curv), 0, None)
     c.append(penalised_cost(mu))
 print()
 cost["OS-MLTR"] = np.asarray(c)
@@ -288,7 +295,9 @@ for ep in range(num_epochs):
         anchor = mu
         g_full, denom_full = full_grad_and_curv(anchor)
         gk_anchor = [subset_grad(anchor, k) for k in range(num_subsets)]
-        precond = _safe_ratio(xp.ones_like(mu), denom_full + prior_curv)
+        precond = _safe_ratio(
+            xp.ones_like(mu), denom_full + reg.separable_majorizer_curvature(anchor)
+        )
 
     for k in rng.permutation(num_subsets):
         # variance-reduced data gradient + full (deterministic) prior gradient
