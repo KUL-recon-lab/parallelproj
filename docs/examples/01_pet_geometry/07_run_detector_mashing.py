@@ -250,9 +250,7 @@ fig.show()
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
 lor_desc.show_michelogram(axes[0])
-axes[0].set_title(
-    f"Fine: {scanner.num_rings} rings, {lor_desc.num_planes} planes"
-)
+axes[0].set_title(f"Fine: {scanner.num_rings} rings, {lor_desc.num_planes} planes")
 coarse_desc.show_michelogram(axes[1])
 axes[1].set_title(
     f"Mashed: {mash.coarse_scanner.num_rings} rings, {coarse_desc.num_planes} planes"
@@ -344,6 +342,11 @@ viewers.append(
         cmap="viridis",
     )
 )
+
+# %%
+# Interior bins combine 64 fine LORs.  The outermost radial bins combine
+# fewer, and the planes with the largest coarse ring difference (highest
+# plane indices) only about 10, because they are only partially filled.
 
 # %%
 # 9. Fast coarse projector vs. the exact mashed model
@@ -585,8 +588,9 @@ viewers.append(
 )
 
 # %%
-# The multiplicity is constant within a plane, so the radial-view cut is
-# uniform and the plane cuts show which planes are cross planes.
+# The multiplicity is constant within a plane, so the radial-view cut of a
+# direct or oblique plane is uniform.  The plane cuts show the cross planes,
+# which alternate with the direct planes in segment 0 (lowest plane indices).
 
 # %%
 # 13. Mashing a simulated GE emission sinogram

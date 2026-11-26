@@ -119,12 +119,14 @@ def draw_panel(ax, B, num_blocks, r1_base, r2_base, class_idx=None, n_edge=0):
     for ra, rb in all_equiv:
         if ra < rb:
             col, ls, lw, alpha = "tab:blue", "-", 2.2, 0.90
-            lbl = rf"$\Delta>0$: k=({ra%B},{rb%B})" if first_pos else "_nolegend_"
+            lbl = rf"$\Delta>0$: k=({ra % B},{rb % B})" if first_pos else "_nolegend_"
             first_pos = False
         else:
             col, ls, lw, alpha = "tab:orange", "--", 2.0, 0.80
             lbl = (
-                rf"$\Delta<0$ (swap): k=({ra%B},{rb%B})" if first_neg else "_nolegend_"
+                rf"$\Delta<0$ (swap): k=({ra % B},{rb % B})"
+                if first_neg
+                else "_nolegend_"
             )
             first_neg = False
         ax.plot(
