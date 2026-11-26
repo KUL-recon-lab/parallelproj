@@ -37,6 +37,7 @@ from __future__ import annotations
 import abc
 import itertools
 import math
+import os
 from collections.abc import Sequence
 from importlib import import_module, util as iutil
 from types import ModuleType
@@ -65,6 +66,9 @@ def iterations_for_device(dev: Any, cpu: int, gpu: int, what: str = "iterations"
     rendered example) that the results are less converged than with the
     full number of iterations used on a GPU.
 
+    Set the environment variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``
+    to run the full (GPU) number of iterations on the CPU as well.
+
     Parameters
     ----------
     dev : device
@@ -79,18 +83,25 @@ def iterations_for_device(dev: Any, cpu: int, gpu: int, what: str = "iterations"
     Returns
     -------
     int
-        ``cpu`` if ``dev`` is a CPU device, else ``gpu``.
+        ``cpu`` if ``dev`` is a CPU device (and the full number of
+        iterations is not requested via the environment), else ``gpu``.
     """
-    if str(dev).split(":")[0] != "cpu":
+    if str(dev).split(":")[0] != "cpu" or _full_iterations_requested():
         return gpu
     if cpu < gpu:
         print(
             f"NOTE: running on the CPU, this example uses {cpu} {what} instead of "
             f"{gpu} to keep the documentation build short.  The results shown are "
-            f"less converged; run it on a GPU or increase the number of {what} "
-            f"for converged results."
+            f"less converged; run it on a GPU, increase the number of {what}, or "
+            f"set PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1 for converged results."
         )
     return cpu
+
+
+def _full_iterations_requested() -> bool:
+    """True if ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS`` is set to a true value."""
+    value = os.environ.get("PARALLELPROJ_EXAMPLES_FULL_ITERATIONS", "")
+    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def suggest_array_backend_and_device(

@@ -16,6 +16,7 @@ suite's ``fig.show()`` calls warn under a non-interactive backend.
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import pytest
 
 import array_api_compat.numpy as np
 
@@ -93,8 +94,9 @@ def test_rdp_prior_construct_and_call() -> None:
     assert np.isfinite(float(val))
 
 
-def test_iterations_for_device(capsys) -> None:
+def test_iterations_for_device(capsys, monkeypatch) -> None:
     """CPU: reduced number + printed note; GPU: full number, no note."""
+    monkeypatch.delenv("PARALLELPROJ_EXAMPLES_FULL_ITERATIONS", raising=False)
     assert ex.iterations_for_device("cpu", cpu=3, gpu=10, what="epochs") == 3
     out = capsys.readouterr().out
     assert "NOTE" in out and "3 epochs instead of 10" in out
@@ -104,3 +106,13 @@ def test_iterations_for_device(capsys) -> None:
     # no note if the CPU number is not reduced
     assert ex.iterations_for_device("cpu", cpu=10, gpu=10) == 10
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "value, expected", [("1", 10), ("true", 10), ("ON", 10), ("0", 3), ("", 3)]
+)
+def test_iterations_for_device_env(capsys, monkeypatch, value, expected) -> None:
+    """PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1 gives the full number on the CPU."""
+    monkeypatch.setenv("PARALLELPROJ_EXAMPLES_FULL_ITERATIONS", value)
+    assert ex.iterations_for_device("cpu", cpu=3, gpu=10) == expected
+    assert ("NOTE" in capsys.readouterr().out) == (expected == 3)

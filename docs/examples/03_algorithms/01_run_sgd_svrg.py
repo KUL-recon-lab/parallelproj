@@ -58,8 +58,9 @@ exploit this splitting:
     To keep the documentation build short, this example runs **fewer
     iterations on the CPU** than on a GPU (see the printed note below).
     The results shown on CPU-only builds (e.g. on Read the Docs) are
-    therefore less converged.  Run the example on a GPU, or increase the
-    number of iterations, for converged results.
+    therefore less converged.  Run the example on a GPU, or set the environment
+    variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
+    results.
 
 """
 
