@@ -72,11 +72,13 @@ def test_show_vol_cuts_headless() -> None:
 
 
 @pytest.mark.parametrize("ndim", [3, 4])
-def test_show_vol_cuts_static(ndim) -> None:
+def test_show_vol_cuts_static(ndim, monkeypatch) -> None:
     """Non-interactive backend (as in the docs build): static cuts, no widgets."""
     shape = (8, 8, 4) if ndim == 3 else (3, 8, 8, 4)
     vol = np.reshape(np.arange(int(np.prod(np.asarray(shape))), dtype=np.float32), shape)
-    assert not ex._interactive_backend()  # tests run with a non-interactive backend
+    # the default backend of the test runner can be interactive (e.g. macosx on
+    # macOS, tkagg on Windows): emulate a non-interactive one for interactive=None
+    monkeypatch.setattr(ex, "_interactive_backend", lambda: False)
     fig, ax_im, widgets = ex.show_vol_cuts(
         vol, voxel_size=(1.0, 1.0, 2.0), fig_title="static", origin="lower"
     )
