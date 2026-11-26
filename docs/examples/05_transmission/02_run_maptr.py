@@ -80,9 +80,10 @@ xp, dev = suggest_array_backend_and_device()
 # An **epoch** of the subset algorithms is one cycle through all
 # ``num_subsets`` view subsets.  ``beta`` is the weight of the prior and
 # ``delta`` its transition scale (see section 4): with
-# :math:`\delta = \mu_{\text{water}}/2`, the jumps at the dense inserts
-# (several times :math:`\mu_{\text{water}}`) lie in the edge-preserving,
-# linear regime of the prior, while the background noise is smoothed.
+# :math:`\delta = \mu_{\text{water}}/2`, the jumps at the inserts (0.5 to
+# 2 :math:`\mu_{\text{water}}` in the central slice, i.e. 1 to 4
+# :math:`\delta`) lie in or close to the edge-preserving, linear regime of
+# the prior, while the smaller background noise is smoothed.
 
 # epochs of the subset algorithms (fewer on the CPU)
 num_epochs = iterations_for_device(dev, cpu=10, gpu=30, what="epochs")
@@ -93,8 +94,8 @@ scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
 mu_water = 0.0096  # 1/mm at 511 keV
 beta = 2e2  # prior weight
-# log-cosh transition scale: edges (dense inserts) >> delta are preserved,
-# background noise << delta is smoothed
+# log-cosh transition scale: edges (inserts, up to 4 delta) are preserved,
+# background noise < delta is smoothed
 delta = mu_water / 2
 
 # %%
@@ -449,7 +450,16 @@ axs[1].legend()
 fig.show()
 
 # %%
-# INTERPRETATION_CONVERGENCE
+# All three algorithms minimise the same objective :math:`\Phi`.  OS-MLTR
+# decreases it fastest in the first epochs, but then levels off: like OSEM,
+# it does not converge to the minimiser (it approaches a subset-dependent
+# limit cycle).  SVRG overtakes it after about five epochs (keep in mind
+# that an SVRG epoch costs about 1.5 data passes) and ends closer to the
+# L-BFGS-B value.  The differences are tiny compared with the total
+# objective (note the offset of the y axis), and the three profiles are
+# almost identical: they follow the jumps at the inserts (edges of up to
+# 4 :math:`\delta`) and fluctuate only mildly in the uniform water
+# background.
 
 # %%
 # 11. Reconstructed images
@@ -474,7 +484,10 @@ fig.colorbar(im, ax=axs, shrink=0.9, label=r"$\mu$ (1/mm)")
 fig.show()
 
 # %%
-# INTERPRETATION_IMAGES
+# The three reconstructions look almost the same.  The prior leaves only a
+# fine-grained residual noise in the uniform background, while the large
+# inserts keep sharp edges.  The smallest inserts are blurred and lose
+# contrast.
 
 # %%
 # Summary

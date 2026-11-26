@@ -209,14 +209,17 @@ A = parallelproj.operators.CompositeLinearOperator([proj, B])
 # (:math:`\mu` = 0.02 / mm) and an air-like insert (:math:`\mu` = 0.002 / mm)
 # on the ``x0`` axis.  Because the two images have different inserts, the
 # reconstructions reveal how well MLAA separates them (little crosstalk =
-# each image shows only its own structure).
+# each image shows only its own structure).  Note that the outline ``cyl``
+# is the region of non-zero activity: the cold activity insert without any
+# activity is therefore also an air-like region (:math:`\mu = 0`) in the
+# attenuation image, the only structure that both images share.
 
 activity_phantom = elliptic_cylinder_phantom(
     xp, dev, image_shape=img_shape, voxel_size=voxel_size
 )
 act_true = count_factor * activity_phantom
 
-cyl = to_numpy_array(activity_phantom) > 0  # body outline (shared support)
+cyl = to_numpy_array(activity_phantom) > 0  # outline with non-zero activity
 nx, ny, _ = img_shape
 i0, i1 = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
 dense = (i0 - int(0.72 * nx)) ** 2 + (i1 - ny // 2) ** 2 < 8**2  # bone-like

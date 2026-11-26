@@ -91,11 +91,13 @@ xp, dev = suggest_array_backend_and_device()
 # scanner, and with it the number of counts.
 
 num_subsets = 24
-num_epochs = iterations_for_device(dev, cpu=2, gpu=96 // num_subsets, what="epochs")
+num_epochs_full = 96 // num_subsets
+num_epochs = iterations_for_device(dev, cpu=2, gpu=num_epochs_full, what="epochs")
 num_epochs_mlem = num_epochs * num_subsets
 
-# run full MLEM only on GPU -- too slow on CPU for the number of iterations used here
-run_mlem = dev != "cpu"
+# the MLEM reference only runs with the full number of iterations: on a GPU,
+# or with PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1
+run_mlem = num_epochs == num_epochs_full
 
 sens_factor = 0.2
 
@@ -574,12 +576,10 @@ fig.show()
 # :math:`A^T \mathbf{1}`.  The sinogram and the listmode loops are identical;
 # only the objective passed to :func:`em_update` changes.  We record the
 # objective at half and at the full number of iterations.  MLEM only runs when
-# ``run_mlem`` is ``True`` (on a GPU).
+# ``run_mlem`` is ``True`` (full number of iterations, e.g. on a GPU).
 
 
-def run_mlem_recon(
-    neg_logL: C1Function, label: str
-) -> tuple[Array, dict[int, float]]:
+def run_mlem_recon(neg_logL: C1Function, label: str) -> tuple[Array, dict[int, float]]:
     """MLEM from x_init; returns the image and the sinogram objective at checkpoints"""
     df: dict[int, float] = {}
     x = xp.asarray(x_init, copy=True)
@@ -762,25 +762,17 @@ epochs = np.arange(1, num_epochs + 1)
 svrg_passes = np.cumsum(np.where(np.arange(num_epochs) % 2 == 0, 2, 1))
 
 df_min = min(df_osem_sino + df_osem_lm + df_svrg_sino + df_svrg_lm)
+if run_mlem:
+    df_min = min([df_min, *df_mlem_sino.values(), *df_mlem_lm.values()])
 df_max = max(df_osem_sino[0], df_osem_lm[0])
 
 fig, axs = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
 
 for ax, svrg_xvals in ((axs[0], epochs), (axs[1], svrg_passes)):
-    ax.plot(epochs, df_osem_sino, marker="o", label=f"OSEM ({num_subsets} subsets)")
-    ax.plot(epochs, df_osem_lm, marker="s", label=f"LM-OSEM ({num_subsets} subsets)")
-    ax.plot(
-        svrg_xvals,
-        df_svrg_sino,
-        marker="^",
-        label=f"SVRG ({num_subsets} subsets, step {svrg_step_size:.1f})",
-    )
-    ax.plot(
-        svrg_xvals,
-        df_svrg_lm,
-        marker="v",
-        label=f"LM-SVRG ({num_subsets} subsets, step {svrg_step_size:.1f})",
-    )
+    ax.plot(epochs, df_osem_sino, marker="o", label="Sino-OSEM")
+    ax.plot(epochs, df_osem_lm, marker="s", label="LM-OSEM")
+    ax.plot(svrg_xvals, df_svrg_sino, marker="^", label="Sino-SVRG")
+    ax.plot(svrg_xvals, df_svrg_lm, marker="v", label="LM-SVRG")
     if run_mlem:
         # MLEM reference values: grey lines, line style by number of iterations
         for n_iter, ls in zip(mlem_checkpoints, ("-.", "--")):
@@ -788,7 +780,7 @@ for ax, svrg_xvals in ((axs[0], epochs), (axs[1], svrg_passes)):
                 df_mlem_sino[n_iter],
                 color="0.3",
                 ls=ls,
-                label=f"MLEM ({n_iter} iterations)",
+                label=f"Sino-MLEM ({n_iter} iterations)",
             )
             ax.axhline(
                 df_mlem_lm[n_iter],
@@ -808,7 +800,8 @@ axs[1].set_title("Convergence per data pass")
 fig.legend(
     *axs[0].get_legend_handles_labels(),
     loc="outside lower center",
-    ncols=2,
+    ncols=4,
+    title=f"{num_subsets} subsets, SVRG step size {svrg_step_size:.1f}",
     fontsize="small",
 )
 fig.show()
