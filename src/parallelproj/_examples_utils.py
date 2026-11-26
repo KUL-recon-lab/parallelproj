@@ -56,6 +56,43 @@ from parallelproj import Array, to_numpy_array
 # ---------------------------------------------------------------------------
 
 
+def iterations_for_device(dev: Any, cpu: int, gpu: int, what: str = "iterations") -> int:
+    """Number of iterations of an example for the compute device ``dev``.
+
+    Iterative examples run fewer iterations on the CPU, so that the
+    documentation (built on CPU-only machines, e.g. on Read the Docs) builds
+    in reasonable time.  On the CPU, a note is printed (and shown in the
+    rendered example) that the results are less converged than with the
+    full number of iterations used on a GPU.
+
+    Parameters
+    ----------
+    dev : device
+        Compute device returned by :func:`suggest_array_backend_and_device`.
+    cpu : int
+        Number of iterations on the CPU (reduced).
+    gpu : int
+        Number of iterations on a GPU (the number the example is meant for).
+    what : str, optional
+        What is counted, e.g. ``"epochs"``, for the note.
+
+    Returns
+    -------
+    int
+        ``cpu`` if ``dev`` is a CPU device, else ``gpu``.
+    """
+    if str(dev).split(":")[0] != "cpu":
+        return gpu
+    if cpu < gpu:
+        print(
+            f"NOTE: running on the CPU, this example uses {cpu} {what} instead of "
+            f"{gpu} to keep the documentation build short.  The results shown are "
+            f"less converged; run it on a GPU or increase the number of {what} "
+            f"for converged results."
+        )
+    return cpu
+
+
 def suggest_array_backend_and_device(
     backend: str | None = None,
     dev: str | None = None,

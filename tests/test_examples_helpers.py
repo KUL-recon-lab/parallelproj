@@ -91,3 +91,16 @@ def test_rdp_prior_construct_and_call() -> None:
     rdp = ex.RDP(in_shape, np, "cpu", voxel_size=np.asarray([1.0, 1.0, 1.0]))
     val = rdp(x)
     assert np.isfinite(float(val))
+
+
+def test_iterations_for_device(capsys) -> None:
+    """CPU: reduced number + printed note; GPU: full number, no note."""
+    assert ex.iterations_for_device("cpu", cpu=3, gpu=10, what="epochs") == 3
+    out = capsys.readouterr().out
+    assert "NOTE" in out and "3 epochs instead of 10" in out
+    assert ex.iterations_for_device("cuda", cpu=3, gpu=10) == 10
+    assert ex.iterations_for_device("cuda:1", cpu=3, gpu=10) == 10
+    assert capsys.readouterr().out == ""
+    # no note if the CPU number is not reduced
+    assert ex.iterations_for_device("cpu", cpu=10, gpu=10) == 10
+    assert capsys.readouterr().out == ""
