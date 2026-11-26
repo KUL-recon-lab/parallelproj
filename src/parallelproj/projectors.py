@@ -21,7 +21,12 @@ from array_api_compat import device, get_namespace
 
 import parallelproj_core
 
-from ._backend import Array, to_numpy_array, empty_cuda_cache
+from ._backend import (
+    Array,
+    _current_cuda_stream,
+    empty_cuda_cache,
+    to_numpy_array,
+)
 from .operators import LinearOperator
 from .pet_lors import (
     Michelogram,
@@ -230,6 +235,7 @@ class ParallelViewProjector2D(LinearOperator):
             self._image_origin,
             self._voxel_size,
             y,
+            stream=_current_cuda_stream(self._xstart),
         )
         return y
 
@@ -245,6 +251,7 @@ class ParallelViewProjector2D(LinearOperator):
             self._image_origin,
             self._voxel_size,
             y,
+            stream=_current_cuda_stream(self._xstart),
         )
         return self.xp.squeeze(x, axis=0)
 
@@ -525,7 +532,13 @@ class ParallelViewProjector3D(LinearOperator):
     def _apply(self, x: Array) -> Array:
         y = self.xp.zeros(self.out_shape, dtype=self.xp.float32, device=self._device)
         parallelproj_core.joseph3d_fwd(
-            self._xstart, self._xend, x, self.image_origin, self.voxel_size, y
+            self._xstart,
+            self._xend,
+            x,
+            self.image_origin,
+            self.voxel_size,
+            y,
+            stream=_current_cuda_stream(self._xstart),
         )
         return y
 
@@ -538,6 +551,7 @@ class ParallelViewProjector3D(LinearOperator):
             self.image_origin,
             self.voxel_size,
             y,
+            stream=_current_cuda_stream(self._xstart),
         )
         return x
 
@@ -828,7 +842,13 @@ class RegularPolygonPETProjector(LinearOperator):
 
         if not self.tof:
             parallelproj_core.joseph3d_fwd(
-                xstart, xend, x, self._img_origin, self._voxel_size, x_fwd
+                xstart,
+                xend,
+                x,
+                self._img_origin,
+                self._voxel_size,
+                x_fwd,
+                stream=_current_cuda_stream(xstart),
             )
         else:
             assert self._tof_parameters is not None
@@ -849,6 +869,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 u_min,
                 u_max,
                 scale,
+                stream=_current_cuda_stream(xstart),
             )
 
         return x_fwd
@@ -883,6 +904,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 self._img_origin,
                 self._voxel_size,
                 y,
+                stream=_current_cuda_stream(xstart),
             )
         else:
             assert self._tof_parameters is not None
@@ -903,6 +925,7 @@ class RegularPolygonPETProjector(LinearOperator):
                 u_min,
                 u_max,
                 scale,
+                stream=_current_cuda_stream(xstart),
             )
 
         return y_back
@@ -1301,6 +1324,7 @@ class ListmodePETProjector(LinearOperator):
                 self._img_origin,
                 self._voxel_size,
                 x_fwd,
+                stream=_current_cuda_stream(self._xstart),
             )
         else:
             assert self._tof_parameters is not None
@@ -1324,6 +1348,7 @@ class ListmodePETProjector(LinearOperator):
                 u_max,
                 scale,
                 threads_per_block=_LM_FWD_THREADS_PER_BLOCK,
+                stream=_current_cuda_stream(self._xstart),
             )
 
         return x_fwd
@@ -1340,6 +1365,7 @@ class ListmodePETProjector(LinearOperator):
                 self._img_origin,
                 self._voxel_size,
                 y,
+                stream=_current_cuda_stream(self._xstart),
             )
         else:
             assert self._tof_parameters is not None
@@ -1362,6 +1388,7 @@ class ListmodePETProjector(LinearOperator):
                 u_min,
                 u_max,
                 scale,
+                stream=_current_cuda_stream(self._xstart),
             )
 
         return y_back
@@ -1551,6 +1578,7 @@ class EqualBlockPETProjector(LinearOperator):
                     self._img_origin,
                     self._voxel_size,
                     self.xp.reshape(x_fwd[chunk_start:chunk_end, ...], (-1,)),
+                    stream=_current_cuda_stream(xstart),
                 )
             else:
                 assert self._tof_parameters is not None
@@ -1574,6 +1602,7 @@ class EqualBlockPETProjector(LinearOperator):
                     u_min,
                     u_max,
                     scale,
+                    stream=_current_cuda_stream(xstart),
                 )
 
         return x_fwd
@@ -1600,6 +1629,7 @@ class EqualBlockPETProjector(LinearOperator):
                     self._img_origin,
                     self._voxel_size,
                     self.xp.reshape(y[chunk_start:chunk_end, ...], (-1,)),
+                    stream=_current_cuda_stream(xstart),
                 )
             else:
                 assert self._tof_parameters is not None
@@ -1623,6 +1653,7 @@ class EqualBlockPETProjector(LinearOperator):
                     u_min,
                     u_max,
                     scale,
+                    stream=_current_cuda_stream(xstart),
                 )
 
         return y_back
