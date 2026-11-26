@@ -692,3 +692,5 @@ plt.show()
 # .. rubric:: References
 #
 # .. footbibliography::
+
+# sphinx_gallery_thumbnail_path = "_static/thumbnails/03_mlaa.png"

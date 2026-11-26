@@ -399,3 +399,5 @@ plt.show()
 # .. rubric:: References
 #
 # .. footbibliography::
+
+# sphinx_gallery_thumbnail_path = "_static/thumbnails/00_mltr_sps.png"

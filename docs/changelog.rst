@@ -111,6 +111,15 @@ Documentation
   backends (documentation, Jupyter inline), shorter gallery section titles, a
   "New here?" start row, and the first example rewritten with the new
   example template (learning goals, numbered sections, summary and next steps).
+- **Example gallery look (part 2): scanner geometry gallery.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All examples
+  of the geometry gallery follow the example template, with figures of at most
+  10 inches width, an interpretation after every figure, and fixes of text
+  that did not match the code (e.g. the detector pairs and the endpoint
+  numbering in the zig-zag example, the number of rings and the class sizes in
+  the symmetry and mashing examples).  The examples that are not executed on
+  Read the Docs get static thumbnails, and configuration comments
+  (``# sphinx_gallery_thumbnail_number``) are no longer shown.
 
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^
