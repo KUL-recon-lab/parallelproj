@@ -291,6 +291,38 @@ def test_tof_gaussian_default_equals_explicit_table(xp: ModuleType, dev: str) ->
     onp.testing.assert_array_equal(s1, s2)
 
 
+def test_tof_one_element_array_is_scalar(xp: ModuleType, dev: str) -> None:
+    """1-element arrays (any namespace) for sigma / offset act as scalars."""
+    nb, w = 11, 1.0
+    s1 = _single_voxel_lm(
+        xp, dev, nb,
+        ppt.TOFParameters(num_tofbins=nb, tofbin_width=w, sigma_tof=1.7, tofcenter_offset=0.4),
+    )
+    s2 = _single_voxel_lm(
+        xp, dev, nb,
+        ppt.TOFParameters(
+            num_tofbins=nb,
+            tofbin_width=w,
+            sigma_tof=xp.asarray([1.7], dtype=xp.float32, device=dev),
+            tofcenter_offset=onp.asarray([0.4], dtype=onp.float32),
+        ),
+    )
+    onp.testing.assert_array_equal(s1, s2)
+
+
+def test_tof_show_tof_bins_per_lor_offset(xp: ModuleType, dev: str) -> None:
+    """show_tof_bins supports only a scalar tofcenter_offset."""
+    proj = _small_polygon_projector(xp, dev)
+    tp = ppt.TOFParameters(
+        num_tofbins=5,
+        tofbin_width=10.0,
+        sigma_tof=8.0,
+        tofcenter_offset=onp.zeros(proj.lor_descriptor.spatial_sinogram_shape, onp.float32),
+    )
+    with pytest.raises(NotImplementedError, match="scalar tofcenter_offset"):
+        proj.lor_descriptor.show_tof_bins(None, tp)
+
+
 def test_tof_listmode_per_event_parameters(xp: ModuleType, dev: str) -> None:
     """Per-event sigma / offset give the same projections (forward and back) as
     projecting each group of events with the corresponding scalar parameters."""

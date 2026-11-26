@@ -200,3 +200,18 @@ def test_tofparameters_kernel_invalid(kwargs: dict) -> None:
 def test_tofparameters_kernel_type() -> None:
     with pytest.raises(TypeError):
         TOFParameters(num_tofbins=5, tofbin_width=2.0, kernel="gauss")
+
+
+def test_tofkernel_more_invalid_and_repr() -> None:
+    """argument checks of from_pdf / from_cdf / gaussian, and the repr"""
+    with pytest.raises(ValueError):
+        TOFKernel.from_pdf(np.zeros(3), np.zeros(4))  # shape mismatch
+    with pytest.raises(ValueError):
+        TOFKernel.from_cdf(np.zeros((2, 2)), np.zeros((2, 2)))  # not 1D
+    with pytest.raises(ValueError):
+        TOFKernel.from_cdf(np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.5, 1.0]))
+    with pytest.raises(ValueError):
+        TOFKernel.gaussian(num_sigmas=0.0)
+    with pytest.raises(ValueError):
+        TOFKernel.gaussian(num_sigmas=3.0, num_points=1)
+    assert repr(TOFKernel.gaussian(2.0, 5)) == "TOFKernel(num_points=5, u_min=-2, u_max=2)"
