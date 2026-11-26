@@ -216,3 +216,269 @@ def test_tof_listmode_fwd_sum_equals_nontof_oblique(
     tof_sum = float(to_numpy_array(proj(img)).sum())
 
     assert math.isclose(tof_sum, nontof, rel_tol=1e-5, abs_tol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# tabulated (non-Gaussian) kernels and per-LOR TOF parameters
+# ---------------------------------------------------------------------------
+
+import numpy as onp
+
+import parallelproj.pet_lors as ppl
+import parallelproj.pet_scanners as pps
+
+
+def _asymmetric_kernel() -> ppt.TOFKernel:
+    """asymmetric kernel: short linear rise for u < 0, long exponential tail for u > 0"""
+    u = onp.linspace(-1.0, 3.0, 401)
+    return ppt.TOFKernel.from_pdf(u, onp.where(u < 0, 1 + u, onp.exp(-u)))
+
+
+def _single_voxel_lm(xp, dev, nb, tof_parameters, voxel_size=(2.2, 2.5, 2.7), nvox=19):
+    """TOF spectrum (one event per TOF bin) of a single central voxel on an
+    axis-aligned LOR from +60 to -60 mm (direction 0), per unit line integral"""
+    shape = (nvox, 1, 1)
+    img = xp.zeros(shape, dtype=xp.float32, device=dev)
+    img[nvox // 2, 0, 0] = 1.0
+    xs = xp.asarray([[60.0, 0.0, 0.0]] * nb, dtype=xp.float32, device=dev)
+    xe = xp.asarray([[-60.0, 0.0, 0.0]] * nb, dtype=xp.float32, device=dev)
+    proj = ppp.ListmodePETProjector(xs, xe, shape, voxel_size)
+    proj.tof_parameters = tof_parameters
+    proj.event_tofbins = xp.arange(nb, dtype=xp.int16, device=dev)
+    proj.tof = True
+    return to_numpy_array(proj(img)) / voxel_size[0]
+
+
+@pytest.mark.parametrize("scale, offset", [(1.5, 0.0), (0.7, 1.1)])
+def test_tof_listmode_asymmetric_kernel_single_voxel(
+    xp: ModuleType, dev: str, scale: float, offset: float
+) -> None:
+    """An asymmetric tabulated kernel gives the TOF spectrum TOFKernel.weights
+    predicts: u = TOF bin position - emission position along xstart -> xend,
+    scaled by kernel_scale, with the bin grid shifted by tofcenter_offset."""
+    nb, w = 21, 0.8
+    k = _asymmetric_kernel()
+    p = ppt.TOFParameters(
+        num_tofbins=nb, tofbin_width=w, kernel=k, kernel_scale=scale, tofcenter_offset=offset
+    )
+    spec = _single_voxel_lm(xp, dev, nb, p)
+    d = (onp.arange(nb) - (nb - 1) / 2) * w + offset
+    ref = k.weights(d - w / 2, d + w / 2, scale)
+    onp.testing.assert_allclose(spec, ref, atol=2e-6)
+    assert math.isclose(float(spec.sum()), 1.0, rel_tol=1e-5)
+
+
+def test_tof_kernel_cdf_normalisation_irrelevant(xp: ModuleType, dev: str) -> None:
+    """The projectors normalise the kernel: a * F + b gives the same projection."""
+    nb, w = 15, 1.0
+    k = _asymmetric_kernel()
+    k2 = ppt.TOFKernel(3.0 * k.cdf + 7.0, k.u_min, k.u_max)
+    s1 = _single_voxel_lm(xp, dev, nb, ppt.TOFParameters(num_tofbins=nb, tofbin_width=w, kernel=k))
+    s2 = _single_voxel_lm(xp, dev, nb, ppt.TOFParameters(num_tofbins=nb, tofbin_width=w, kernel=k2))
+    onp.testing.assert_allclose(s1, s2, atol=1e-6)
+
+
+def test_tof_gaussian_default_equals_explicit_table(xp: ModuleType, dev: str) -> None:
+    """sigma_tof is the Gaussian table scaled by sigma_tof."""
+    nb, w, sig = 17, 0.9, 1.7
+    s1 = _single_voxel_lm(xp, dev, nb, ppt.TOFParameters(num_tofbins=nb, tofbin_width=w, sigma_tof=sig))
+    s2 = _single_voxel_lm(
+        xp, dev, nb,
+        ppt.TOFParameters(
+            num_tofbins=nb, tofbin_width=w, kernel=ppt.TOFKernel.gaussian(3.0), kernel_scale=sig
+        ),
+    )
+    onp.testing.assert_array_equal(s1, s2)
+
+
+def test_tof_one_element_array_is_scalar(xp: ModuleType, dev: str) -> None:
+    """1-element arrays (any namespace) for sigma / offset act as scalars."""
+    nb, w = 11, 1.0
+    s1 = _single_voxel_lm(
+        xp, dev, nb,
+        ppt.TOFParameters(num_tofbins=nb, tofbin_width=w, sigma_tof=1.7, tofcenter_offset=0.4),
+    )
+    s2 = _single_voxel_lm(
+        xp, dev, nb,
+        ppt.TOFParameters(
+            num_tofbins=nb,
+            tofbin_width=w,
+            sigma_tof=xp.asarray([1.7], dtype=xp.float32, device=dev),
+            tofcenter_offset=onp.asarray([0.4], dtype=onp.float32),
+        ),
+    )
+    onp.testing.assert_array_equal(s1, s2)
+
+
+def test_tof_show_tof_bins_per_lor_offset(xp: ModuleType, dev: str) -> None:
+    """show_tof_bins supports only a scalar tofcenter_offset."""
+    proj = _small_polygon_projector(xp, dev)
+    tp = ppt.TOFParameters(
+        num_tofbins=5,
+        tofbin_width=10.0,
+        sigma_tof=8.0,
+        tofcenter_offset=onp.zeros(proj.lor_descriptor.spatial_sinogram_shape, onp.float32),
+    )
+    with pytest.raises(NotImplementedError, match="scalar tofcenter_offset"):
+        proj.lor_descriptor.show_tof_bins(None, tp)
+
+
+def test_tof_listmode_per_event_parameters(xp: ModuleType, dev: str) -> None:
+    """Per-event sigma / offset give the same projections (forward and back) as
+    projecting each group of events with the corresponding scalar parameters."""
+    rng = onp.random.default_rng(1)
+    nb, w = 11, 6.0
+    shape, vs = (12, 13, 5), (4.0, 4.0, 4.0)
+    img_np = rng.uniform(0, 1, shape).astype(onp.float32)
+    n = 40
+    v = rng.normal(size=(n, 3)); v[:, 2] *= 0.1
+    xs_np = (60 * v / onp.linalg.norm(v, axis=1, keepdims=True)).astype(onp.float32)
+    v = rng.normal(size=(n, 3)); v[:, 2] *= 0.1
+    xe_np = (60 * v / onp.linalg.norm(v, axis=1, keepdims=True)).astype(onp.float32)
+    tb_np = rng.integers(0, nb, n).astype(onp.int16)
+    groups = [(slice(0, 15), 5.0, 0.0), (slice(15, 30), 9.0, 2.5), (slice(30, 40), 3.0, -4.0)]
+    sig_np = onp.concatenate([onp.full(g.stop - g.start, s) for g, s, _ in groups]).astype(onp.float32)
+    off_np = onp.concatenate([onp.full(g.stop - g.start, o) for g, _, o in groups]).astype(onp.float32)
+
+    img = xp.asarray(img_np, device=dev)
+    y_np = rng.uniform(0, 1, n).astype(onp.float32)
+
+    proj = ppp.ListmodePETProjector(
+        xp.asarray(xs_np, device=dev), xp.asarray(xe_np, device=dev), shape, vs
+    )
+    proj.tof_parameters = ppt.TOFParameters(
+        num_tofbins=nb,
+        tofbin_width=w,
+        sigma_tof=xp.asarray(sig_np, device=dev),
+        tofcenter_offset=xp.asarray(off_np, device=dev),
+    )
+    proj.event_tofbins = xp.asarray(tb_np, device=dev)
+    proj.tof = True
+    fwd = to_numpy_array(proj(img))
+    back = to_numpy_array(proj.adjoint(xp.asarray(y_np, device=dev)))
+
+    back_ref = onp.zeros(shape, onp.float32)
+    for g, s, o in groups:
+        pg = ppp.ListmodePETProjector(
+            xp.asarray(xs_np[g], device=dev), xp.asarray(xe_np[g], device=dev), shape, vs
+        )
+        pg.tof_parameters = ppt.TOFParameters(
+            num_tofbins=nb, tofbin_width=w, sigma_tof=s, tofcenter_offset=o
+        )
+        pg.event_tofbins = xp.asarray(tb_np[g], device=dev)
+        pg.tof = True
+        onp.testing.assert_allclose(fwd[g], to_numpy_array(pg(img)), rtol=1e-5, atol=1e-6)
+        back_ref += to_numpy_array(pg.adjoint(xp.asarray(y_np[g], device=dev)))
+    onp.testing.assert_allclose(back, back_ref, rtol=1e-5, atol=1e-5)
+
+    # wrong per-event shape
+    proj.tof_parameters = ppt.TOFParameters(
+        num_tofbins=nb, tofbin_width=w, sigma_tof=xp.asarray(sig_np[:-1], device=dev)
+    )
+    proj.tof = True
+    with pytest.raises(ValueError, match="per-LOR"):
+        proj(img)
+
+
+def _small_polygon_projector(xp, dev, views=None):
+    scanner = pps.DemoPETScannerGeometry(xp, dev, num_rings=2, symmetry_axis=2)
+    lor_desc = ppl.RegularPolygonPETLORDescriptor(
+        scanner,
+        ppl.Michelogram(scanner.num_rings, max_ring_difference=1, span=1),
+        radial_trim=260,
+    )
+    return ppp.RegularPolygonPETProjector(
+        lor_desc, img_shape=(20, 20, 2), voxel_size=(4.0, 4.0, 4.0), views=views
+    )
+
+
+def test_tof_sinogram_per_lor_parameters_views(xp: ModuleType, dev: str) -> None:
+    """Per-LOR offset / kernel scale (full spatial sinogram shape) with a views
+    subset: the projector selects its views; the result equals the full
+    projection restricted to those views.  Per-LOR arrays with all values
+    equal give the scalar result, and the TOF projector stays adjoint."""
+    rng = onp.random.default_rng(2)
+    full = _small_polygon_projector(xp, dev)
+    desc = full.lor_descriptor
+    sino_shape = desc.spatial_sinogram_shape
+    nb = 7
+    k = _asymmetric_kernel()
+    scale_np = rng.uniform(4.0, 8.0, sino_shape).astype(onp.float32)
+    off_np = rng.uniform(-5.0, 5.0, sino_shape).astype(onp.float32)
+    p = ppt.TOFParameters(
+        num_tofbins=nb,
+        tofbin_width=12.0,
+        kernel=k,
+        kernel_scale=xp.asarray(scale_np, device=dev),
+        tofcenter_offset=xp.asarray(off_np, device=dev),
+    )
+    full.tof_parameters = p
+    full.tof = True
+    img = xp.asarray(rng.uniform(0, 1, full.in_shape).astype(onp.float32), device=dev)
+    y_full = to_numpy_array(full(img))
+
+    views = xp.asarray([1, 4, 5], device=dev)
+    sub = _small_polygon_projector(xp, dev, views=views)
+    sub.tof_parameters = p
+    sub.tof = True
+    y_sub = to_numpy_array(sub(img))
+    onp.testing.assert_allclose(
+        y_sub, onp.take(y_full, [1, 4, 5], axis=desc.view_axis_num), rtol=1e-5, atol=1e-6
+    )
+    assert sub.adjointness_test(xp, dev, dtype=xp.float32)
+
+    # all values equal -> same as scalars
+    p_const = ppt.TOFParameters(
+        num_tofbins=nb, tofbin_width=12.0, kernel=k,
+        kernel_scale=xp.full(sino_shape, 6.0, dtype=xp.float32, device=dev),
+        tofcenter_offset=xp.full(sino_shape, 1.5, dtype=xp.float32, device=dev),
+    )
+    p_scalar = ppt.TOFParameters(
+        num_tofbins=nb, tofbin_width=12.0, kernel=k, kernel_scale=6.0, tofcenter_offset=1.5
+    )
+    full.tof_parameters = p_const
+    a = to_numpy_array(full(img))
+    full.tof_parameters = p_scalar
+    onp.testing.assert_allclose(a, to_numpy_array(full(img)), rtol=1e-6, atol=1e-7)
+
+    # per-LOR arrays must have the full spatial sinogram shape
+    sub.tof_parameters = ppt.TOFParameters(
+        num_tofbins=nb,
+        tofbin_width=12.0,
+        sigma_tof=xp.ones(sub.out_shape[:-1], dtype=xp.float32, device=dev),
+    )
+    with pytest.raises(ValueError, match="per-LOR"):
+        sub(img)
+
+
+def test_tof_equalblock_per_lor_chunks(xp: ModuleType, dev: str) -> None:
+    """EqualBlockPETProjector: per-LOR values (num_block_pairs,
+    num_lors_per_block_pair) give the same result with 1 and 2 chunks, and the
+    projector stays adjoint."""
+    rng = onp.random.default_rng(3)
+    mods = []
+    for r in (10.0, -10.0):
+        aff = xp.eye(4, device=dev, dtype=xp.float32)
+        aff[1, -1] = r
+        mods.append(pps.BlockPETScannerModule(xp, dev, (2, 2, 2), (4.0, 3.0, 2.0), affine_transformation_matrix=aff))
+    aff = xp.eye(4, device=dev, dtype=xp.float32)
+    aff[0, -1] = 12.0
+    mods.append(pps.BlockPETScannerModule(xp, dev, (2, 2, 2), (4.0, 3.0, 2.0), affine_transformation_matrix=aff))
+    scanner = pps.ModularizedPETScannerGeometry(mods)
+    desc = ppl.EqualBlockPETLORDescriptor(scanner, xp.asarray([[0, 1], [0, 2], [1, 2]], device=dev))
+    shape = (desc.num_block_pairs, desc.num_lors_per_block_pair)
+    p = ppt.TOFParameters(
+        num_tofbins=5,
+        tofbin_width=3.0,
+        sigma_tof=xp.asarray(rng.uniform(2.0, 4.0, shape).astype(onp.float32), device=dev),
+        tofcenter_offset=xp.asarray(rng.uniform(-2.0, 2.0, shape).astype(onp.float32), device=dev),
+    )
+    img = xp.asarray(rng.uniform(0, 1, (14, 10, 3)).astype(onp.float32), device=dev)
+    res = []
+    for chunks in (1, 2):
+        proj = ppp.EqualBlockPETProjector(desc, (14, 10, 3), (1.0, 1.0, 1.0), num_chunks=chunks)
+        proj.tof_parameters = p
+        proj.tof = True
+        res.append(to_numpy_array(proj(img)))
+        assert proj.adjointness_test(xp, dev, dtype=xp.float32)
+    onp.testing.assert_allclose(res[0], res[1], rtol=1e-6, atol=1e-7)

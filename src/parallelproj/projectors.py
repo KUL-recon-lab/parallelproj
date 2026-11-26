@@ -28,7 +28,46 @@ from .pet_lors import (
     RegularPolygonPETLORDescriptor,
     EqualBlockPETLORDescriptor,
 )
-from .tof import TOFParameters
+from .tof import TOFParameters, _is_scalar
+
+#: CUDA threads per block for the TOF listmode forward projection.  With the
+#: tabulated TOF kernel, 256 is faster than the backend default (64) by up to
+#: ~20 % for sorted events (#165); back projections use the default.
+_LM_FWD_THREADS_PER_BLOCK = 256
+
+
+def _tof_lor_values(v, xp, dev, name, select) -> Array:
+    """A scalar or per-LOR TOF parameter as float32 array for the backend:
+    shape ``(1,)`` for scalars, else the per-LOR values selected for the
+    current call (``select = (expected_shape, function)``)."""
+    if _is_scalar(v):
+        if hasattr(v, "shape"):
+            return xp.reshape(xp.asarray(v, dtype=xp.float32, device=dev), (1,))
+        return xp.asarray([float(v)], dtype=xp.float32, device=dev)
+    expected_shape, fn = select
+    a = xp.asarray(v, dtype=xp.float32, device=dev)
+    if tuple(a.shape) != tuple(expected_shape):
+        raise ValueError(
+            f"per-LOR {name} must have shape {tuple(expected_shape)} for this "
+            f"projector, got {tuple(a.shape)}"
+        )
+    return fn(a)
+
+
+def _tof_tab_args(
+    tof_parameters: TOFParameters, xp: ModuleType, dev: Any, select
+) -> tuple[Array, float, float, Array, Array]:
+    """Arguments ``(tof_kernel_cdf, u_min, u_max, tof_kernel_scale,
+    tof_center_offset)`` of the tabulated TOF projectors of
+    ``parallelproj_core``.  Scalars become 1-element arrays (no per-LOR
+    overhead in the backend)."""
+    kernel = tof_parameters.tof_kernel
+    cdf = xp.asarray(kernel.cdf.astype(np.float32), device=dev)
+    scale = _tof_lor_values(tof_parameters.scale, xp, dev, "TOF kernel scale", select)
+    offset = _tof_lor_values(
+        tof_parameters.tofcenter_offset, xp, dev, "tofcenter_offset", select
+    )
+    return cdf, kernel.u_min, kernel.u_max, scale, offset
 
 
 class ParallelViewProjector2D(LinearOperator):
@@ -755,6 +794,15 @@ class RegularPolygonPETProjector(LinearOperator):
 
         return st
 
+    def _tof_lor_select(self):
+        """(expected shape, selection) of per-LOR TOF values: all views of the
+        LOR descriptor, the projector's ``views`` are selected."""
+        ax = self._lor_descriptor.view_axis_num
+        return (
+            tuple(self._lor_descriptor.spatial_sinogram_shape),
+            lambda a: self.xp.take(a, self._views, axis=ax),
+        )
+
     def _apply(self, x: Array) -> Array:
         """Forward projection of input image x (non-TOF and TOF), including image-based resolution model."""
 
@@ -784,7 +832,10 @@ class RegularPolygonPETProjector(LinearOperator):
             )
         else:
             assert self._tof_parameters is not None
-            parallelproj_core.joseph3d_tof_sino_fwd(
+            cdf, u_min, u_max, scale, offset = _tof_tab_args(
+                self._tof_parameters, self.xp, dev, self._tof_lor_select()
+            )
+            parallelproj_core.joseph3d_tof_sino_fwd_tab(
                 xstart,
                 xend,
                 x,
@@ -792,18 +843,12 @@ class RegularPolygonPETProjector(LinearOperator):
                 self._voxel_size,
                 x_fwd,
                 self._tof_parameters.tofbin_width,
-                self.xp.asarray(
-                    [self._tof_parameters.sigma_tof],
-                    dtype=self.xp.float32,
-                    device=dev,
-                ),
-                self.xp.asarray(
-                    [self._tof_parameters.tofcenter_offset],
-                    dtype=self.xp.float32,
-                    device=dev,
-                ),
+                offset,
                 self._tof_parameters.num_tofbins,
-                self._tof_parameters.num_sigmas,
+                cdf,
+                u_min,
+                u_max,
+                scale,
             )
 
         return x_fwd
@@ -841,7 +886,10 @@ class RegularPolygonPETProjector(LinearOperator):
             )
         else:
             assert self._tof_parameters is not None
-            parallelproj_core.joseph3d_tof_sino_back(
+            cdf, u_min, u_max, scale, offset = _tof_tab_args(
+                self._tof_parameters, self.xp, dev, self._tof_lor_select()
+            )
+            parallelproj_core.joseph3d_tof_sino_back_tab(
                 xstart,
                 xend,
                 y_back,
@@ -849,16 +897,12 @@ class RegularPolygonPETProjector(LinearOperator):
                 self._voxel_size,
                 y,
                 self._tof_parameters.tofbin_width,
-                self.xp.asarray(
-                    [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
-                ),
-                self.xp.asarray(
-                    [self._tof_parameters.tofcenter_offset],
-                    dtype=self.xp.float32,
-                    device=dev,
-                ),
+                offset,
                 self._tof_parameters.num_tofbins,
-                self._tof_parameters.num_sigmas,
+                cdf,
+                u_min,
+                u_max,
+                scale,
             )
 
         return y_back
@@ -1240,6 +1284,10 @@ class ListmodePETProjector(LinearOperator):
         """voxel size"""
         return self._voxel_size
 
+    def _tof_lor_select(self):
+        """(expected shape, selection) of per-event TOF values."""
+        return ((self.num_events,), lambda a: a)
+
     def _apply(self, x: Array) -> Array:
         dev = array_api_compat.device(x)
 
@@ -1257,7 +1305,10 @@ class ListmodePETProjector(LinearOperator):
         else:
             assert self._tof_parameters is not None
             assert self._tofbin is not None
-            parallelproj_core.joseph3d_tof_lm_fwd(
+            cdf, u_min, u_max, scale, offset = _tof_tab_args(
+                self._tof_parameters, self.xp, dev, self._tof_lor_select()
+            )
+            parallelproj_core.joseph3d_tof_lm_fwd_tab(
                 self._xstart,
                 self._xend,
                 x,
@@ -1265,19 +1316,14 @@ class ListmodePETProjector(LinearOperator):
                 self._voxel_size,
                 x_fwd,
                 self._tof_parameters.tofbin_width,
-                self.xp.asarray(
-                    [self._tof_parameters.sigma_tof],
-                    dtype=self.xp.float32,
-                    device=dev,
-                ),
-                self.xp.asarray(
-                    [self._tof_parameters.tofcenter_offset],
-                    dtype=self.xp.float32,
-                    device=dev,
-                ),
+                offset,
                 self._tofbin,
                 self._tof_parameters.num_tofbins,
-                self._tof_parameters.num_sigmas,
+                cdf,
+                u_min,
+                u_max,
+                scale,
+                threads_per_block=_LM_FWD_THREADS_PER_BLOCK,
             )
 
         return x_fwd
@@ -1298,7 +1344,10 @@ class ListmodePETProjector(LinearOperator):
         else:
             assert self._tof_parameters is not None
             assert self._tofbin is not None
-            parallelproj_core.joseph3d_tof_lm_back(
+            cdf, u_min, u_max, scale, offset = _tof_tab_args(
+                self._tof_parameters, self.xp, dev, self._tof_lor_select()
+            )
+            parallelproj_core.joseph3d_tof_lm_back_tab(
                 self._xstart,
                 self._xend,
                 y_back,
@@ -1306,17 +1355,13 @@ class ListmodePETProjector(LinearOperator):
                 self._voxel_size,
                 y,
                 self._tof_parameters.tofbin_width,
-                self.xp.asarray(
-                    [self._tof_parameters.sigma_tof], dtype=self.xp.float32, device=dev
-                ),
-                self.xp.asarray(
-                    [self._tof_parameters.tofcenter_offset],
-                    dtype=self.xp.float32,
-                    device=dev,
-                ),
+                offset,
                 self._tofbin,
                 self._tof_parameters.num_tofbins,
-                self.tof_parameters.num_sigmas,
+                cdf,
+                u_min,
+                u_max,
+                scale,
             )
 
         return y_back
@@ -1472,6 +1517,17 @@ class EqualBlockPETProjector(LinearOperator):
     def num_chunks(self, value: int) -> None:
         self._num_chunks = value
 
+    def _tof_lor_select(self, chunk_start: int, chunk_end: int):
+        """(expected shape, selection) of per-LOR TOF values for a chunk of
+        block pairs."""
+        return (
+            (
+                self._lor_descriptor.num_block_pairs,
+                self._lor_descriptor.num_lors_per_block_pair,
+            ),
+            lambda a: self.xp.reshape(a[chunk_start:chunk_end, ...], (-1,)),
+        )
+
     def _apply(self, x: Array) -> Array:
         """forward projection of input image x"""
 
@@ -1498,7 +1554,10 @@ class EqualBlockPETProjector(LinearOperator):
                 )
             else:
                 assert self._tof_parameters is not None
-                parallelproj_core.joseph3d_tof_sino_fwd(
+                cdf, u_min, u_max, scale, offset = _tof_tab_args(
+                    self._tof_parameters, self.xp, dev, self._tof_lor_select(chunk_start, chunk_end)
+                )
+                parallelproj_core.joseph3d_tof_sino_fwd_tab(
                     xstart,
                     xend,
                     x,
@@ -1509,18 +1568,12 @@ class EqualBlockPETProjector(LinearOperator):
                         (-1, self._tof_parameters.num_tofbins),
                     ),
                     self._tof_parameters.tofbin_width,
-                    self.xp.asarray(
-                        [self._tof_parameters.sigma_tof],
-                        dtype=self.xp.float32,
-                        device=dev,
-                    ),
-                    self.xp.asarray(
-                        [self._tof_parameters.tofcenter_offset],
-                        dtype=self.xp.float32,
-                        device=dev,
-                    ),
-                    self.tof_parameters.num_tofbins,
-                    self.tof_parameters.num_sigmas,
+                    offset,
+                    self._tof_parameters.num_tofbins,
+                    cdf,
+                    u_min,
+                    u_max,
+                    scale,
                 )
 
         return x_fwd
@@ -1550,7 +1603,10 @@ class EqualBlockPETProjector(LinearOperator):
                 )
             else:
                 assert self._tof_parameters is not None
-                parallelproj_core.joseph3d_tof_sino_back(
+                cdf, u_min, u_max, scale, offset = _tof_tab_args(
+                    self._tof_parameters, self.xp, dev, self._tof_lor_select(chunk_start, chunk_end)
+                )
+                parallelproj_core.joseph3d_tof_sino_back_tab(
                     xstart,
                     xend,
                     y_back,
@@ -1561,18 +1617,12 @@ class EqualBlockPETProjector(LinearOperator):
                         (-1, self._tof_parameters.num_tofbins),
                     ),
                     self._tof_parameters.tofbin_width,
-                    self.xp.asarray(
-                        [self._tof_parameters.sigma_tof],
-                        dtype=self.xp.float32,
-                        device=dev,
-                    ),
-                    self.xp.asarray(
-                        [self._tof_parameters.tofcenter_offset],
-                        dtype=self.xp.float32,
-                        device=dev,
-                    ),
-                    self.tof_parameters.num_tofbins,
-                    self.tof_parameters.num_sigmas,
+                    offset,
+                    self._tof_parameters.num_tofbins,
+                    cdf,
+                    u_min,
+                    u_max,
+                    scale,
                 )
 
         return y_back

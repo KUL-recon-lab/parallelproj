@@ -7,8 +7,36 @@ Changelog
 2.1.0 (unreleased)
 ^^^^^^^^^^^^^^^^^^
 
+New features
+~~~~~~~~~~~~
+
+- **Tabulated TOF kernels and per-LOR TOF parameters.** (`#166
+  <https://github.com/KUL-recon-lab/parallelproj/issues/166>`_)
+
+  - new :class:`.TOFKernel`: a TOF kernel given as a table of its cumulative
+    distribution, built with ``TOFKernel.gaussian``, ``TOFKernel.from_pdf`` or
+    ``TOFKernel.from_cdf``. Non-Gaussian (measured, asymmetric, with tails)
+    kernels are passed as ``TOFParameters(..., kernel=k, kernel_scale=s)``
+    instead of ``sigma_tof``;
+  - ``sigma_tof`` / ``kernel_scale`` and ``tofcenter_offset`` can be given per
+    LOR (sinogram projectors: one value per LOR of the LOR descriptor;
+    listmode: per event). Scalars cost nothing extra;
+  - the sinogram and listmode projectors **always use the tabulated TOF
+    projectors** of parallelproj-core. A Gaussian ``sigma_tof`` becomes a
+    2001-point table of the normal CDF; projections differ from the closed-form
+    Gaussian by < 1e-6 (relative to the maximum). The listmode forward
+    projection uses 256 CUDA threads per block (faster with the table, #165).
+
 Changes
 ~~~~~~~
+
+- **TOFParameters**: ``sigma_tof`` is optional (but required unless ``kernel``
+  is given), and the class has the new fields ``kernel`` and ``kernel_scale``
+  and properties ``tof_kernel``, ``scale`` and ``is_lor_dependent``. Existing
+  code that constructs ``TOFParameters(num_tofbins, tofbin_width, sigma_tof,
+  ...)`` works unchanged. The TOF unlisting helpers and ``show_tof_bins``
+  support only a scalar ``tofcenter_offset`` (``NotImplementedError``
+  otherwise).
 
 - **Requires parallelproj-core >= 3.0.** (`#164
   <https://github.com/KUL-recon-lab/parallelproj/issues/164>`_) Numerical

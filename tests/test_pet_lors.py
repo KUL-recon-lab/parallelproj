@@ -1957,6 +1957,16 @@ def test_tof_bin_mashing_operator(xp: ModuleType, dev: str) -> None:
     assert ctp.num_sigmas == tp.num_sigmas
     assert ctp.tofcenter_offset == tp.tofcenter_offset
 
+    # a tabulated kernel with its scale and per-LOR offsets is kept as well
+    k = tof.TOFKernel.gaussian(2.0, num_points=11)
+    offs = _np.zeros(non_tof, _np.float32)
+    tp_k = tof.TOFParameters(
+        num_tofbins=27, tofbin_width=5.0, kernel=k, kernel_scale=3.0, tofcenter_offset=offs
+    )
+    ctp_k = ppl.TOFBinMashingOperator(tp_k, non_tof, mashing_factor=G).coarse_tof_parameters
+    assert ctp_k.kernel is k and ctp_k.kernel_scale == 3.0
+    assert ctp_k.tofcenter_offset is offs and ctp_k.sigma_tof is None
+
     # adjointness (operator is backend-agnostic -> pass xp/dev explicitly)
     assert op.adjointness_test(xp, dev, dtype=xp.float64)
 
