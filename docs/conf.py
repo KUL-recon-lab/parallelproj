@@ -75,6 +75,8 @@ sphinx_gallery_conf = {
     "reset_modules": ("matplotlib", "parallelproj._examples_utils._reset_example_style"),
     # also render the figures at twice the resolution for high-DPI screens
     "image_srcset": ["2x"],
+    # hide "# sphinx_gallery_thumbnail_number = N" etc. in the rendered examples
+    "remove_config_comments": True,
     "parallel": os.cpu_count(),
     # Inject a setup note at the top of every generated Jupyter notebook.  The
     # example helpers ship inside parallelproj (parallelproj._examples_utils),
