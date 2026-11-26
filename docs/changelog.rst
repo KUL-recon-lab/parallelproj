@@ -99,6 +99,10 @@ Documentation
   print a note that the shown results are less converged. GPU builds keep the
   full numbers; ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1`` runs them on the
   CPU as well.
+- **New example: projection layers on multiple GPUs with CUDA streams.**
+  (`#177 <https://github.com/KUL-recon-lab/parallelproj/issues/177>`_) One
+  projector per GPU, a layer that splits a mini batch across all GPUs and
+  gathers the results (with gradients), and how to time GPU code correctly.
 
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^
