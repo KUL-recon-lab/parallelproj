@@ -5,8 +5,8 @@ Projection layers on multiple GPUs with CUDA streams
 Training a network that contains a forward or back projection is often limited
 by the projections.  With several GPUs, the samples of a mini batch can be
 projected **on all GPUs at the same time**.  This example shows how to do that
-efficiently with parallelproj and PyTorch, e.g. a mini batch of 4 samples on
-2 GPUs (2 samples per GPU).
+efficiently with parallelproj and PyTorch, e.g. a mini batch of 6 samples on
+2 GPUs (3 samples per GPU) or on 3 GPUs (2 samples per GPU).
 
 **You will learn**
 
@@ -174,7 +174,7 @@ class MultiDeviceProjection(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         devices = list(self.projectors)
-        chunks = torch.tensor_split(x, len(devices))  # e.g. 4 samples -> 2 + 2
+        chunks = torch.tensor_split(x, len(devices))  # e.g. 6 samples on 2 GPUs -> 3 + 3
         out = [
             ProjectChunk.apply(c.to(d, non_blocking=True), self.projectors[d], self.adjoint)
             for c, d in zip(chunks, devices)
@@ -187,13 +187,13 @@ fwd_layer = MultiDeviceProjection(projectors)  # A
 back_layer = MultiDeviceProjection(projectors, adjoint=True)  # A^T
 
 # %%
-# 4. A mini batch of 4 images
+# 4. A mini batch of 6 images
 # ---------------------------
 #
-# Four simple test images (a uniform cylinder with a hot and a cold rod at
+# Six simple test images (a uniform cylinder with a hot and a cold rod at
 # different positions), on the first device.
 
-batch_size = 4
+batch_size = 6  # splits evenly on 1, 2, 3 and 6 devices
 n0, n1, n2 = img_shape
 r0 = (torch.arange(n0, device=devices[0]) - (n0 - 1) / 2)[:, None]
 r1 = (torch.arange(n1, device=devices[0]) - (n1 - 1) / 2)[None, :]
@@ -222,13 +222,13 @@ print(f"sinograms: {tuple(y.shape)} on {y.device}")
 print(f"max. rel. difference to one device: {float((y - y_ref).abs().max() / y_ref.abs().max()):.1e}")
 
 # %%
-# The figure shows the 4 images (central plane) and their sinograms (one
+# The figure shows the 6 images (central plane) and their sinograms (one
 # plane), with the device each sample was projected on.
 
 dev_of_sample = [
     d for c, d in zip(torch.tensor_split(torch.arange(batch_size), len(devices)), devices) for _ in c
 ]
-fig, ax = plt.subplots(2, batch_size, figsize=(2.2 * batch_size, 4.6), layout="constrained")
+fig, ax = plt.subplots(2, batch_size, figsize=(1.7 * batch_size, 3.9), layout="constrained")
 for i in range(batch_size):
     ax[0, i].imshow(x[i, 0, :, :, n2 // 2].cpu().T, cmap="Greys", origin="lower")
     ax[0, i].set_title(f"sample {i} → {dev_of_sample[i]}", fontsize="small")
@@ -365,8 +365,8 @@ timings = {
     for task, make in tasks.items()
 }
 
-# the GPU with the most samples limits the speed-up, e.g. 4 samples on 3 GPUs
-# are split 2 + 1 + 1, so the best possible speed-up is 4 / 2 = 2
+# the GPU with the most samples limits the speed-up, e.g. 6 samples on 4 GPUs
+# would be split 2 + 2 + 1 + 1, so the best possible speed-up is 6 / 2 = 3
 max_chunk = -(-batch_size // len(devices))
 print(f"best possible speed-up with {len(devices)} device(s): {batch_size / max_chunk:.2f}")
 for task, t in timings.items():
@@ -382,18 +382,6 @@ for task, t in timings.items():
 # difference is smaller: the autograd engine runs the backward pass of every
 # GPU in its own thread, so the back projections overlap even with
 # synchronous calls.
-#
-# Measured on a machine with three NVIDIA RTX A6000 (CUDA 13), image
-# 128 x 128 x 32, sinogram 223 x 256 x 256, mini batch of 4 samples
-# (split 2 + 1 + 1, so at most 2x faster):
-#
-# ============================  ===================
-# training step                 time (speed-up)
-# ============================  ===================
-# 1 GPU                         169.6 ms (1.00x)
-# 3 GPUs, synchronous calls     111.4 ms (1.52x)
-# 3 GPUs, asynchronous calls    103.1 ms (1.65x)
-# ============================  ===================
 
 fig, axs = plt.subplots(
     1, 2, figsize=(10, 0.9 + 0.45 * len(configs)), layout="constrained", sharey=True
