@@ -342,7 +342,7 @@ axes[2].plot(
 axes[2].set_xlabel("plane index $n$")
 axes[2].set_ylabel("sum over radial bins and views")
 axes[2].set_title("per-plane sinogram sum")
-axes[2].legend(fontsize="x-small")
+axes[2].legend(loc="upper right", fontsize="x-small")
 axes[2].grid(True, ls=":")
 
 fig.show()
@@ -410,9 +410,9 @@ axes[1].grid(True, ls=":", axis="y")
 fig.show()
 
 # %%
-# The ratio follows the multiplicity of each plane (1, 2 or 3 here) but is not
-# exactly equal to it, because the constituent ring-pair LORs differ slightly
-# from the averaged LOR.
+# The ratio follows the multiplicity of each plane (1, 2 or 3 here).  For this
+# smooth phantom the agreement is very close; in general it is not exact,
+# because the constituent ring-pair LORs differ slightly from the averaged LOR.
 
 # %%
 # 6. GE-style layout
@@ -481,7 +481,7 @@ def show_segment_order_pair(make_michelogram, suptitle):
     ``make_michelogram(order)`` returns a :class:`.Michelogram` built with the
     given :class:`.SegmentOrder`.
     """
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5.5), layout="constrained")
+    fig, axes = plt.subplots(1, 2, figsize=(10, 6), layout="constrained")
     for ax, order in zip(
         axes, (SegmentOrder.POSITIVE_FIRST, SegmentOrder.NEGATIVE_FIRST)
     ):

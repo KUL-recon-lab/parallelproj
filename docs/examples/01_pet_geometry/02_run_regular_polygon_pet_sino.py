@@ -104,10 +104,12 @@ def show_segments(lor_desc, title: str) -> None:
     seg = np.asarray(lor_desc.plane_segment.tolist())
     num_cols = len(np.unique(np.abs(seg)))
     num_rows = 2 if (seg < 0).any() else 1
+    width = min(10, 2.5 * num_cols)
+    row_height = 1.05 * width / num_cols + 0.4  # panels are about square
     fig, axs = plt.subplots(
         num_rows,
         num_cols,
-        figsize=(min(10, 2.5 * num_cols), 3.2 * num_rows),
+        figsize=(width, row_height * num_rows + 0.4),
         squeeze=False,
         layout="constrained",
     )
@@ -381,7 +383,9 @@ show_michelogram(lor_desc_ge)
 show_segments(lor_desc_ge, "GE-style layout")
 
 # %%
-# Segment 0 holds three ring differences, all oblique segments hold two.
+# Segment 0 holds three ring differences (31 ring pairs in 21 planes).  The
+# oblique segments hold two ring differences each, except segments +/-5,
+# which only contain ring difference +/-10 (the maximum ring difference).
 
 # %%
 # 9. Sinogram indexing conventions
@@ -432,7 +436,7 @@ def print_table(lor_desc, title: str) -> None:
     print(f"\n{title}   (view 0 central bin -> detectors (0, {num_det // 2}))")
     print("  radial bin :", " ".join(f"{r:>3d}" for r in range(lor_desc.num_rad)))
     for v in range(lor_desc.num_views):
-        row = " ".join(f"{int(s[v, r])}-{int(e[v, r])}" for r in range(lor_desc.num_rad))
+        row = " ".join(f"{s[v, r]}-{e[v, r]}" for r in range(lor_desc.num_rad))
         print(f"  view {v}     :", row)
 
 
@@ -441,10 +445,13 @@ variants = {
     "default": {},
     "view_direction=MINUS": {"view_direction": lors.ViewDirection.MINUS},
     "radial_direction=MINUS": {"radial_direction": lors.RadialDirection.MINUS},
-    "zig_zag_order=START_FIRST": {"zig_zag_order": lors.SinogramZigZagOrder.START_FIRST},
+    "zig_zag_order=START_FIRST": {
+        "zig_zag_order": lors.SinogramZigZagOrder.START_FIRST
+    },
 }
 for title, kwargs in variants.items():
-    print_table(lors.RegularPolygonPETLORDescriptor(mini, radial_trim=0, **kwargs), title)
+    lor_desc = lors.RegularPolygonPETLORDescriptor(mini, radial_trim=0, **kwargs)
+    print_table(lor_desc, title)
 
 # %%
 # ``view_direction=MINUS`` reverses the order of the views (view 1 is rotated
@@ -456,6 +463,7 @@ for title, kwargs in variants.items():
 # (view, radial) index formula, so the tables above are unchanged while
 # detector 1 moves to the other side:
 
+ccw = parallelproj.pet_scanners.RingEndpointOrdering.COUNTERCLOCKWISE
 mini_ccw = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
     dev,
@@ -465,7 +473,7 @@ mini_ccw = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     lor_spacing=12.0,
     ring_positions=xp.asarray([0.0], device=dev),
     symmetry_axis=2,
-    ring_endpoint_ordering=parallelproj.pet_scanners.RingEndpointOrdering.COUNTERCLOCKWISE,
+    ring_endpoint_ordering=ccw,
 )
 endpoints_cw = parallelproj.to_numpy_array(mini.all_lor_endpoints).reshape(-1, 3)
 endpoints_ccw = parallelproj.to_numpy_array(mini_ccw.all_lor_endpoints).reshape(-1, 3)
@@ -511,7 +519,11 @@ def draw_directions_panel(ax, view_direction, radial_direction) -> None:
             m = 0.5 * (a + b) + (2.0 if view == 1 else -2.0)
             ax.text(m[0], m[1], m[2], f"r{r}", color=color, fontsize=8)
     ax.set_zticks([])  # single ring: the x2 axis carries no information
-    ax.set_title(f"view {view_direction.name}, radial {radial_direction.name}")
+    ax.set_zlabel("")
+    ax.set_title(
+        f"view_direction={view_direction.name}, "
+        f"radial_direction={radial_direction.name}"
+    )
 
 
 fig, axes = plt.subplots(
@@ -576,6 +588,7 @@ for ax, shift in zip(axes, (0, 2)):
     s_idx = int(parallelproj.to_numpy_array(lor_desc.start_in_ring_index)[0, central])
     e_idx = int(parallelproj.to_numpy_array(lor_desc.end_in_ring_index)[0, central])
     ax.set_zticks([])  # single ring: the x2 axis carries no information
+    ax.set_zlabel("")
     ax.set_title(f"view0_shift = {shift}, central bin = ({s_idx}, {e_idx})")
 fig.suptitle(f"complete view 0 (N = {mini_shift.num_lor_endpoints_per_ring})")
 fig.show()
