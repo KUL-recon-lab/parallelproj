@@ -554,8 +554,9 @@ print()
 # because the phantom is uniform, every voxel inside the ROI has the same
 # expected value.  Epoch 0 is the OSEM warm start.
 #
-# It is known that TOF reduces the noise in the centre of a uniform cylinder
-# with diameter :math:`D`; the SNR gain is approximately
+# TOF reduces the noise in the centre of a uniform cylinder with diameter
+# :math:`D`; the SNR gain derived by Tomitani :footcite:p:`Tomitani1981` is
+# approximately
 #
 # .. math::
 #
@@ -667,5 +668,11 @@ fig.show()
 #
 #    **Next:** :ref:`sphx_glr_auto_examples_03_algorithms_06_run_osem_memmap.py`
 #    -- OSEM with disk-backed TOF sinograms to save memory.
+
+
+# %%
+# .. rubric:: References
+#
+# .. footbibliography::
 
 # sphinx_gallery_thumbnail_number = 2

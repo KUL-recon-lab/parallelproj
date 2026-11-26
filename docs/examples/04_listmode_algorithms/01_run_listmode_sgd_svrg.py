@@ -40,7 +40,7 @@ this splitting:
   :math:`m` subset updates ~= one full data pass; fast empirical convergence
   but *no* convergence guarantee.
 * **SVRG** -- stochastic variance-reduced gradient with subsets; one epoch =
-  :math:`m` variance-reduced subset updates; provably convergent while
+  :math:`m` variance-reduced subset updates; convergent in practice while
   achieving the fast per-epoch progress of SGD.
 
 .. note::

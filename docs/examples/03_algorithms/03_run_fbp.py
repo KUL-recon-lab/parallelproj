@@ -334,6 +334,12 @@ filtered_back_proj = (delta_phi / delta_s**2) * proj.adjoint(
 # MLEM uses the same projector, includes the attenuation factors and the
 # contamination in its forward model, and works directly with the noisy
 # (not pre-corrected) emission sinogram.
+#
+# Like FBP, MLEM deliberately does **not** model the radial blurring
+# (resolution) used in the data simulation: both methods use the same
+# geometrical model, so the comparison shows the effect of the reconstruction
+# method (noise model, positivity), not of a better forward model.  Both
+# images are therefore equally blurred compared with the true object.
 
 x_mlem = xp.ones((num_rad, num_rad), device=dev, dtype=xp.float32)
 sens_img = proj.adjoint(sens_sino)

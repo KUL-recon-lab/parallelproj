@@ -8,9 +8,9 @@ Maximum-likelihood PET reconstruction minimises the negative Poisson
 log-likelihood of the measured data.  This example compares three iterative
 algorithms for this problem on simulated TOF data: **MLEM** (convergent but
 slow), **OSEM** (fast, but without convergence guarantee) and **SVRG**
-(stochastic variance-reduced gradient, fast *and* convergent).  We compare how
-quickly they decrease the objective per epoch and per full pass through the
-data, the main cost of every update.
+(stochastic variance-reduced gradient, fast and convergent in practice).  We
+compare how quickly they decrease the objective per epoch and per full pass
+through the data, the main cost of every update.
 
 **You will learn**
 
@@ -645,8 +645,11 @@ fig.show()
 #   :math:`\operatorname{diag}(x / (A^T 1))`; MLEM applies it to the full
 #   data, OSEM to one subset at a time.
 # - SVRG combines subset updates with stored gradients at an anchor point.
-#   Like MLEM it converges, but it decreases the objective much faster per
-#   epoch.
+#   It converges in practice, like MLEM, but decreases the objective much
+#   faster per epoch.  (The variant used here, with step size 1, a
+#   preconditioner that is frozen after a few epochs and clipping to
+#   non-negative values, is not covered by the standard SVRG convergence
+#   proofs.)
 # - An SVRG epoch with an anchor phase costs two full data passes: compare
 #   algorithms per data pass, not only per epoch.
 # - Voxels outside the scanner FOV have zero sensitivity and must be masked

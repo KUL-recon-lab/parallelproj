@@ -10,8 +10,8 @@ update no longer applies.  This example minimises such a regularised
 objective with two subset-based gradient methods: preconditioned
 **stochastic gradient descent (SGD)**, fast in the first epochs but without
 convergence guarantee, and **SVRG** (stochastic variance-reduced gradient),
-which converges.  We compare their convergence per epoch and per full data
-pass.
+which converges in practice.  We compare their convergence per epoch and per
+full data pass.
 
 **You will learn**
 
@@ -347,7 +347,16 @@ total_objective = full_data_fidelity + reg
 #         \operatorname{diag}\!\left(\psi''(Gx)\right) G x}\right),
 #     \qquad \psi(t) = \delta \log\cosh(t / \delta),
 #
-# computed with ``reg.hessian_diag_vec_prod(x, x)``.
+# computed with ``reg.hessian_diag_vec_prod(x, x)``.  The second term of the
+# denominator is the Hessian-vector product :math:`H_R(x)\, x` of the prior
+# (with :math:`v = x`), not the Hessian diagonal.  :math:`G^T
+# \operatorname{diag}(\psi''(Gx)) G` is a weighted graph Laplacian, so
+# :math:`[H_R(x)\, x]_j = \sum_k w_{jk} (x_j - x_k)` is **negative** in voxels
+# that are colder than their neighbours, even for non-negative images.  Here
+# the sensitivity :math:`A^T 1` dominates and the denominator stays positive
+# inside the FOV; with a much stronger prior or cold lesions it should be
+# checked (or replaced by the always non-negative Hessian diagonal
+# :math:`\operatorname{diag}(H_R(x))\, x`).
 #
 # The scanner's cylindrical field of view (FOV) does not cover every voxel of
 # the image grid.  Voxels outside the FOV are never intersected by any LOR, so
