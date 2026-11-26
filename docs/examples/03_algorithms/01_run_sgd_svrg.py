@@ -360,6 +360,9 @@ total_objective = full_data_fidelity + reg
 #
 # The warm start for both algorithms is one SGD epoch from a uniform image.
 
+cyl_mask = proj.fov_mask()
+fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
+
 
 def preconditioner(x: Array) -> Array:
     """Diagonal preconditioner x / (A^T 1 + 2 beta G^T H G x), 0 outside FOV"""
@@ -368,9 +371,6 @@ def preconditioner(x: Array) -> Array:
         return x / denom
     return xp.where(fov_mask, x / denom, xp.zeros_like(x))
 
-
-cyl_mask = proj.fov_mask()
-fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 if fov_mask is not None:

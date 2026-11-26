@@ -87,7 +87,9 @@ num_subsets = 24
 num_epochs = iterations_for_device(dev, cpu=3, gpu=1200 // num_subsets, what="epochs")
 num_epochs_mlem = num_epochs * num_subsets
 
-run_mlem = dev != "cpu"
+# the MLEM reference (1200 iterations) only runs with the full number of
+# iterations: on a GPU, or with PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1
+run_mlem = num_epochs_mlem >= 100
 
 # %%
 # 2. Scanner, sinogram and image
@@ -384,7 +386,8 @@ print()
 # One MLEM iteration uses the full data (:math:`A`, :math:`y`, :math:`s`)
 # and the full sensitivity image :math:`A^T 1`.  It is guaranteed to
 # converge to the maximum-likelihood solution but requires one full data
-# pass per iteration.  It only runs when ``run_mlem`` is ``True`` (on a GPU).
+# pass per iteration.  It only runs when ``run_mlem`` is ``True`` (full number
+# of iterations, e.g. on a GPU).
 
 if run_mlem:
     df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev)

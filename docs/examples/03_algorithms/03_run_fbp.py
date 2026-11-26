@@ -132,9 +132,7 @@ radon_object = RadonObjectSequence([disk0, disk1, disk2, disk3, disk4])
 true_img = radon_object.values(X0hr, X1hr)
 
 fig, ax = plt.subplots(figsize=(5, 4.2), layout="constrained")
-im = ax.imshow(
-    to_numpy_array(true_img.T), cmap="Greys", extent=ext_img, origin="lower"
-)
+im = ax.imshow(to_numpy_array(true_img.T), cmap="Greys", extent=ext_img, origin="lower")
 ax.set_xlabel("x0 [cm]")
 ax.set_ylabel("x1 [cm]")
 ax.set_title("True object")
@@ -385,8 +383,9 @@ fig.show()
 # Both methods reconstruct the object with the correct values.  The FBP image
 # shows strong high-frequency noise inside the ellipse, with streaks along
 # ``x0`` caused by the strongly amplified noise of the heavily attenuated LORs
-# along the long axis, and fine streaks outside the object.  MLEM models the Poisson statistics and the attenuation
-# directly, which gives a less noisy image with a clean background.
+# along the long axis, and fine streaks outside the object.  MLEM models the
+# Poisson statistics and the attenuation directly, which gives a less noisy
+# image with a clean background.
 
 # %%
 # Summary

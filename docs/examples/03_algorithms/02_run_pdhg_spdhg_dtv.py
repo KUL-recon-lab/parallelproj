@@ -811,9 +811,7 @@ fig, axes = plt.subplots(
     1, 4, figsize=(10, 3.2), sharex=True, sharey=True, layout="constrained"
 )
 for ax, (title, img) in zip(axes, images.items()):
-    im = ax.imshow(
-        to_numpy_array(img[:, :, sl]).T, cmap="Greys", vmin=0, vmax=vmax
-    )
+    im = ax.imshow(to_numpy_array(img[:, :, sl]).T, cmap="Greys", vmin=0, vmax=vmax)
     ax.set_title(title)
     ax.set_xlabel("x0 voxel")
 axes[0].set_ylabel("x1 voxel")
