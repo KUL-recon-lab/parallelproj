@@ -303,7 +303,14 @@ def best_time(fn, repeats: int = 5) -> float:
 
 
 # %%
-# We time a training step (forward and back projection of the mini batch)
+# We time two tasks:
+#
+# - the **forward projection** of the mini batch (e.g. inference with a
+#   network that contains a projection layer), and
+# - a **training step** (forward projection, loss, and the back projection of
+#   the gradient),
+#
+# each in three configurations:
 #
 # - on **one** device,
 # - on **all** devices, but waiting for the GPU after every projection, as
@@ -329,6 +336,14 @@ class SynchronousProjector:
         return x
 
 
+def forward_with(layer: MultiDeviceProjection):
+    def forward():
+        with torch.no_grad():
+            layer(x)
+
+    return forward
+
+
 def step_with(layer: MultiDeviceProjection):
     def step():
         x_est.grad = None
@@ -344,25 +359,53 @@ if len(devices) > 1:
     )
     configs[f"{len(devices)} GPUs, asynchronous calls"] = fwd_layer
 
-timings = {name: best_time(step_with(layer)) for name, layer in configs.items()}
-t1 = timings["1 device"]
-for name, t in timings.items():
-    print(f"{name:30s} {1000 * t:8.1f} ms   speed-up {t1 / t:4.2f}")
+tasks = {"forward projection": forward_with, "training step": step_with}
+timings = {
+    task: {name: best_time(make(layer)) for name, layer in configs.items()}
+    for task, make in tasks.items()
+}
+
+# the GPU with the most samples limits the speed-up, e.g. 4 samples on 3 GPUs
+# are split 2 + 1 + 1, so the best possible speed-up is 4 / 2 = 2
+max_chunk = -(-batch_size // len(devices))
+print(f"best possible speed-up with {len(devices)} device(s): {batch_size / max_chunk:.2f}")
+for task, t in timings.items():
+    print(f"{task}:")
+    for name, ti in t.items():
+        print(f"  {name:30s} {1000 * ti:8.1f} ms   speed-up {t['1 device'] / ti:4.2f}")
 
 # %%
-# With asynchronous projections, the training step on :math:`N` GPUs is up to
-# :math:`N` times faster than on one GPU (as long as the projections dominate
-# the run time).  Waiting for the GPU after every call removes most of the
-# gain: the GPUs then work one after another.
+# With asynchronous projections, :math:`N` GPUs are up to :math:`N` times
+# faster than one GPU, if the samples can be split evenly and the projections
+# dominate the run time.  Waiting for the GPU after every call makes the GPUs
+# work one after another in the forward pass.  In the training step, the
+# difference is smaller: the autograd engine runs the backward pass of every
+# GPU in its own thread, so the back projections overlap even with
+# synchronous calls.
+#
+# Measured on a machine with three NVIDIA RTX A6000 (CUDA 13), image
+# 128 x 128 x 32, sinogram 223 x 256 x 256, mini batch of 4 samples
+# (split 2 + 1 + 1, so at most 2x faster):
+#
+# ============================  ===================
+# training step                 time (speed-up)
+# ============================  ===================
+# 1 GPU                         169.6 ms (1.00x)
+# 3 GPUs, synchronous calls     111.4 ms (1.52x)
+# 3 GPUs, asynchronous calls    103.1 ms (1.65x)
+# ============================  ===================
 
-fig, ax = plt.subplots(figsize=(7, 0.6 + 0.5 * len(timings)), layout="constrained")
-names = list(timings)[::-1]
-bars = ax.barh(names, [1000 * timings[n] for n in names], color="#3c75aa")
-ax.bar_label(bars, labels=[f"{t1 / timings[n]:.2f}×" for n in names], padding=4)
-ax.set_xlabel("time per training step [ms]")
-ax.set_title(f"forward + back projection of {batch_size} samples")
-ax.spines[["top", "right"]].set_visible(False)
-ax.set_xlim(0, 1150 * max(timings.values()))
+fig, axs = plt.subplots(
+    1, 2, figsize=(10, 0.9 + 0.45 * len(configs)), layout="constrained", sharey=True
+)
+names = list(configs)[::-1]
+for ax, (task, t) in zip(axs, timings.items()):
+    bars = ax.barh(names, [1000 * t[n] for n in names], color="#3c75aa")
+    ax.bar_label(bars, labels=[f"{t['1 device'] / t[n]:.2f}x" for n in names], padding=4)
+    ax.set_xlabel("time [ms]")
+    ax.set_title(f"{task} ({batch_size} samples)")
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_xlim(0, 1200 * max(t.values()))
 fig.show()
 
 # %%
@@ -377,6 +420,12 @@ fig.show()
 #   all GPUs busy.  The autograd engine runs the backward pass of each GPU in
 #   its own thread.
 # - **Time** GPU code only with synchronization and a warm-up.
+# - Choose the mini batch size as a **multiple of the number of GPUs**, so that
+#   all GPUs get the same number of samples.
+# - Large outputs (with the GPU scanner here: a sinogram of 58 MB per sample) are copied
+#   between GPUs when they are gathered on one device.  In training, it can
+#   pay off to keep the data of every chunk on its GPU, compute the loss per
+#   GPU, and only sum the (scalar) losses on one device.
 # - **DistributedDataParallel** (one process per GPU, e.g. with ``torchrun``)
 #   is the alternative for multi-node training: each process uses the
 #   single-device layer of
