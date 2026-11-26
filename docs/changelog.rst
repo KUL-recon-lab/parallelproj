@@ -68,6 +68,16 @@ Changes
   and :math:`10^7`--:math:`10^9` bins. Previously, the float32 sum lost all
   significant digits of the change between late iterations. (`#167
   <https://github.com/KUL-recon-lab/parallelproj/issues/167>`_)
+
+Documentation
+~~~~~~~~~~~~~
+
+- **Shorter documentation build.** (`#169
+  <https://github.com/KUL-recon-lab/parallelproj/issues/169>`_) The six slowest
+  iterative examples run fewer iterations on the CPU (as on Read the Docs) and
+  print a note that the shown results are less converged. GPU builds keep the
+  full numbers; ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1`` runs them on the
+  CPU as well.
 - **``NegPoissonLogLListmode``: consistent constant and float64 sums.** The
   value now subtracts the number of events :math:`N_\text{ev}`, so it equals the
   sinogram deviance of ``NegPoissonLogL`` minus :math:`\sum_i y_i \log y_i`
