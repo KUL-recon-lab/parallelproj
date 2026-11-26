@@ -2,18 +2,30 @@
 Non-Gaussian TOF kernels and per-LOR TOF parameters
 ===================================================
 
+:bdg-primary:`projectors` :bdg-secondary:`advanced` :bdg-light:`CPU or GPU`
+
 The TOF projectors model the uncertainty of the TOF measurement with a *TOF
 kernel*: the probability density of the measured TOF position around the true
 emission position along a LOR.  By default this is a Gaussian with standard
 deviation ``sigma_tof``, truncated at ``num_sigmas`` sigma.  Real scanners can
-have non-Gaussian kernels, e.g. with a tail on one side.
+have non-Gaussian kernels, e.g. with a tail on one side, and timing
+calibrations that differ from LOR to LOR.
 
-parallelproj handles every TOF kernel as a table of its cumulative
-distribution (:class:`.TOFKernel`).  This example shows how to
+**You will learn**
 
-1. build a non-Gaussian kernel from samples of its density,
-2. use it in a projector (:class:`.TOFParameters` with ``kernel``),
-3. set the TOF centre offset (and the kernel scale) **per LOR**.
+- how parallelproj represents every TOF kernel as a table of its cumulative
+  distribution (:class:`.TOFKernel`),
+- how to build a non-Gaussian kernel from samples of its density,
+- how to use it in a projector (:class:`.TOFParameters` with ``kernel``) and
+  compute the expected TOF bin weights with :meth:`.TOFKernel.weights`,
+- how to set the TOF centre offset (and the kernel scale) **per LOR**, for
+  listmode and sinogram projectors.
+
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_02_run_pet_tof_sinogram_projector.py`
+(TOF sinogram projector) and
+:ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_04_run_pet_listmode_projector.py`
+(TOF listmode projector).
 
 .. note::
 
@@ -23,23 +35,30 @@ distribution (:class:`.TOFKernel`).  This example shows how to
 """
 
 # %%
-import numpy as np
-import matplotlib.pyplot as plt
+# 0. Setup
+# --------
+#
+# Every example selects its array backend (NumPy, CuPy or PyTorch) and device
+# (CPU or GPU) with ``suggest_array_backend_and_device``: PyTorch on a CUDA
+# GPU if available, otherwise the best available backend on the CPU.  The
+# same code runs unchanged on all of them.
 
-import parallelproj.pet_scanners
+import matplotlib.pyplot as plt
+import numpy as np
+
 import parallelproj.pet_lors
+import parallelproj.pet_scanners
 import parallelproj.projectors
 import parallelproj.tof
 from parallelproj import to_numpy_array
 from parallelproj._examples_utils import suggest_array_backend_and_device
 
-# To use a specific backend and/or device, replace the None arguments, e.g.:
-#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")
-xp, dev = suggest_array_backend_and_device(None, None)
+# to choose explicitly, e.g. suggest_array_backend_and_device("numpy", "cpu")
+xp, dev = suggest_array_backend_and_device()
 
 # %%
-# Two TOF kernels with the same core
-# ----------------------------------
+# 1. Two TOF kernels with the same core
+# -------------------------------------
 #
 # The Gaussian kernel of a scanner with 385 ps FWHM coincidence timing
 # resolution has :math:`\sigma \approx 24.5` mm.  As a non-Gaussian example we
@@ -56,7 +75,7 @@ sigma = (0.385 / 2.3548) * (parallelproj.tof.C_MM_PER_NS / 2)  # ~24.5 mm
 u = np.linspace(-3 * sigma, 8 * sigma, 2001)
 core = np.exp(-0.5 * (u / sigma) ** 2)
 tail_frac, tail_len = 0.15, 40.0
-# smooth onset of the tail (Gaussian CDF) so that the density is continuous
+# smooth (tanh) onset of the tail so that the density is continuous
 tail = np.exp(-u / tail_len) * 0.5 * (1 + np.tanh(u / sigma))
 pdf_tail = (1 - tail_frac) * core / core.sum() + tail_frac * tail / tail.sum()
 
@@ -70,33 +89,38 @@ print(kernel_tail)
 # Gaussian table, the positions are in units of sigma (``kernel_scale = sigma``).
 
 fig, ax = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
-for k, s, label, color in [
-    (kernel_gauss, sigma, "Gaussian (sigma_tof = 24.5 mm, 3 sigma)", "#257de0"),
-    (kernel_tail, 1.0, "Gaussian core + exponential tail", "#f47230"),
+for k, s, label in [
+    (kernel_gauss, sigma, "Gaussian (sigma_tof = 24.5 mm, 3 sigma)"),
+    (kernel_tail, 1.0, "Gaussian core + exponential tail"),
 ]:
     uk = k.u * s
     dens = np.gradient(k.cdf, uk) / (k.cdf[-1] - k.cdf[0])
     for a in ax:
-        a.plot(uk, dens, color=color, lw=2, label=label)
+        a.plot(uk, dens, lw=2, label=label)
 ax[1].set_yscale("log")
 ax[1].set_ylim(1e-5, 0.05)
 for a in ax:
     a.set_xlabel("u = TOF position - emission position [mm]")
     a.set_ylabel("kernel density [1/mm]")
     a.grid(alpha=0.3)
-ax[0].set_title("TOF kernels (linear)")
-ax[1].set_title("TOF kernels (log)")
+ax[0].set_title("TOF kernels (linear scale)")
+ax[1].set_title("TOF kernels (log scale)")
 ax[0].legend(fontsize="small")
 fig.show()
 
 # %%
-# TOF spectrum of a point source
-# ------------------------------
+# Both kernels share the Gaussian core; the log scale shows that the Gaussian
+# table ends at 3 sigma (about 73.5 mm), while the tail kernel extends to
+# about +196 mm (``u_max`` of the printed table).
+
+# %%
+# 2. TOF spectrum of a point source
+# ---------------------------------
 #
-# We project a single voxel (at the centre of a LOR along the x axis) with a
-# listmode projector that has one event per TOF bin: the result is the TOF
-# spectrum, i.e. the weights of the TOF bins.  A Gaussian kernel is given by
-# ``sigma_tof``, any other kernel by ``kernel`` (and optionally
+# We project a single voxel (at the centre of a LOR along the ``x0`` axis)
+# with a listmode projector that has one event per TOF bin: the result is the
+# TOF spectrum, i.e. the weights of the TOF bins.  A Gaussian kernel is given
+# by ``sigma_tof``, any other kernel by ``kernel`` (and optionally
 # ``kernel_scale``).  :meth:`.TOFKernel.weights` computes the same weights in
 # NumPy (dots), e.g. for checks and plots.
 
@@ -106,8 +130,8 @@ img = xp.zeros(img_shape, dtype=xp.float32, device=dev)
 img[img_shape[0] // 2, 0, 0] = 1.0 / voxel_size[0]  # unit line integral
 
 
-def tof_spectrum(tof_parameters, offsets=0.0):
-    """TOF spectrum of the central voxel on a LOR from x = -200 to x = +200 mm"""
+def tof_spectrum(tof_parameters):
+    """TOF spectrum of the central voxel on a LOR from x0 = -200 to +200 mm"""
     n = tof_parameters.num_tofbins
     xstart = xp.asarray([[-200.0, 0.0, 0.0]] * n, dtype=xp.float32, device=dev)
     xend = xp.asarray([[200.0, 0.0, 0.0]] * n, dtype=xp.float32, device=dev)
@@ -131,11 +155,11 @@ tof_tail = parallelproj.tof.TOFParameters(
 d = (np.arange(num_tofbins) - (num_tofbins - 1) / 2) * tofbin_width
 
 fig, ax = plt.subplots(figsize=(7, 3.8), layout="constrained")
-for tp, k, s, label, color in [
-    (tof_gauss, kernel_gauss, sigma, "Gaussian", "#257de0"),
-    (tof_tail, kernel_tail, 1.0, "Gaussian core + tail", "#f47230"),
+for tp, k, s, label in [
+    (tof_gauss, kernel_gauss, sigma, "Gaussian"),
+    (tof_tail, kernel_tail, 1.0, "Gaussian core + tail"),
 ]:
-    ax.step(d, tof_spectrum(tp), where="mid", color=color, lw=2, label=label)
+    ax.step(d, tof_spectrum(tp), where="mid", lw=2, label=label)
     ax.plot(
         d,
         k.weights(d - tofbin_width / 2, d + tofbin_width / 2, s),
@@ -151,8 +175,13 @@ ax.grid(alpha=0.3)
 fig.show()
 
 # %%
-# Per-LOR (per-event) TOF centre offsets
-# --------------------------------------
+# The projected spectra (steps) agree with the NumPy weights (dots).  With the
+# tail kernel, the TOF bins on the ``xend`` side (positive positions) receive
+# more weight, at the expense of the central bins.
+
+# %%
+# 3. Per-LOR (per-event) TOF centre offsets
+# -----------------------------------------
 #
 # ``tofcenter_offset`` (and ``sigma_tof`` / ``kernel_scale``) can be given per
 # LOR, e.g. from a timing calibration.  For a listmode projector, there is one
@@ -171,26 +200,34 @@ tof_tail_offset = parallelproj.tof.TOFParameters(
 )
 
 fig, ax = plt.subplots(figsize=(7, 3.8), layout="constrained")
-ax.step(d, tof_spectrum(tof_tail), where="mid", color="#f47230", lw=2, label="offset 0")
+ax.step(d, tof_spectrum(tof_tail), where="mid", lw=2, label="offset 0")
 ax.step(
-    d, tof_spectrum(tof_tail_offset), where="mid", color="#00b894", lw=2,
+    d,
+    tof_spectrum(tof_tail_offset),
+    where="mid",
+    lw=2,
     label="offset +30 mm (per event)",
 )
 ax.set_xlabel("(TOF bin - central bin) x bin width [mm]")
 ax.set_ylabel("TOF bin weight")
-ax.set_title("TOF centre offset per event")
+ax.set_title("TOF centre offset per event (tail kernel)")
 ax.legend()
 ax.grid(alpha=0.3)
 fig.show()
 
 # %%
-# Sinogram projectors
-# -------------------
+# The shape of the spectrum is unchanged; its maximum moves from the central
+# bin to the bins at -24 mm and -36 mm, i.e. by -30 mm.
+
+# %%
+# 4. Per-LOR parameters in sinogram projectors
+# --------------------------------------------
 #
 # For the sinogram projectors, per-LOR values have the spatial sinogram shape
 # of the LOR descriptor (all views); the projector selects its ``views``
 # itself.  As an example, the timing calibration of the scanner below has an
-# offset that grows linearly with the radial position of the LOR.
+# offset that grows linearly with the radial position of the LOR (from -5 mm
+# to +5 mm).
 
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     xp,
@@ -214,8 +251,9 @@ offset_per_lor = np.ascontiguousarray(
     np.broadcast_to(5.0 * radial[:, None, None], sino_shape)
 )
 
+sino_img_shape, sino_voxel_size = (40, 40, 7), (2.0, 2.0, 2.0)
 proj = parallelproj.projectors.RegularPolygonPETProjector(
-    lor_desc, img_shape=(40, 40, 7), voxel_size=(2.0, 2.0, 2.0)
+    lor_desc, img_shape=sino_img_shape, voxel_size=sino_voxel_size
 )
 # 45 TOF bins of 12 mm cover the LORs (~130 mm) plus the long tail of the
 # kernel (up to ~200 mm), so no counts fall outside the TOF bins
@@ -233,11 +271,13 @@ x[20, 20, 3] = 1.0
 x[10, 26, 3] = 1.0
 y = proj(x)
 
-# if the TOF bins cover the kernel support, the TOF projection summed over the
-# TOF bins is the non-TOF projection, for any kernel (it is normalised) and
-# any offset
+# %%
+# If the TOF bins cover the kernel support, the TOF projection summed over
+# the TOF bins equals the non-TOF projection, for any kernel (it is
+# normalised) and any offset.  We check this against a non-TOF projector:
+
 proj_nontof = parallelproj.projectors.RegularPolygonPETProjector(
-    lor_desc, img_shape=(40, 40, 7), voxel_size=(2.0, 2.0, 2.0)
+    lor_desc, img_shape=sino_img_shape, voxel_size=sino_voxel_size
 )
 print(
     "max |sum over TOF bins - non-TOF| =",
@@ -245,8 +285,11 @@ print(
 )
 
 # %%
-# Notes
-# -----
+# The difference is at the level of float32 rounding errors.
+
+# %%
+# 5. Notes on the kernel table
+# ----------------------------
 #
 # - The projectors always use the tabulated kernel; ``sigma_tof`` is turned
 #   into a 2001-point table of the Gaussian (:meth:`.TOFKernel.gaussian`),
@@ -257,3 +300,26 @@ print(
 #   ``[u_min, u_max]`` of the table.
 # - ``kernel_scale`` (scalar or per LOR) stretches a kernel around ``u = 0``:
 #   :math:`F_s(u) = F(u / s)`, e.g. for LOR-dependent timing resolution.
+
+# %%
+# Summary
+# -------
+#
+# - Every TOF kernel is a table of its cumulative distribution
+#   (:class:`.TOFKernel`): :meth:`.TOFKernel.gaussian` for the default
+#   Gaussian, :meth:`.TOFKernel.from_pdf` for any density given by samples.
+# - A non-Gaussian kernel is passed to a projector as ``kernel`` in
+#   :class:`.TOFParameters`; :meth:`.TOFKernel.weights` gives the expected TOF
+#   bin weights in NumPy.
+# - ``tofcenter_offset``, ``sigma_tof`` and ``kernel_scale`` accept one value
+#   per event (listmode) or per LOR in the spatial sinogram shape (sinogram
+#   projectors).
+# - As long as the TOF bins cover the kernel support, summing a TOF projection
+#   over the TOF bins gives the non-TOF projection.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_03_algorithms_00_run_mlem_osem_svrg.py`
+#    -- the first image reconstruction example (MLEM, OSEM and SVRG).
+
+# sphinx_gallery_thumbnail_number = 1

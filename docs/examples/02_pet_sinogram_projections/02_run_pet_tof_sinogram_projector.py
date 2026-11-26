@@ -2,34 +2,71 @@
 PET TOF sinogram projector
 ==========================
 
-In this example we will show how to setup and use a TOF PET sinogram projector
-consisting of a geometrical TOF forward projector (Joseph's method),
-a resolution model and the modeling of attenuation.
+:bdg-primary:`projectors` :bdg-secondary:`intermediate` :bdg-light:`CPU or GPU`
 
+Time-of-flight (TOF) PET measures the difference of the arrival times of the
+two annihilation photons, which localizes the emission along each line of
+response (LOR) to within a few centimetres.  A TOF sinogram therefore has an
+additional TOF-bin axis.  In this example we set up a TOF sinogram projector
+together with a resolution model and attenuation, and show how the convention
+for the start and end point of an LOR fixes the direction of the TOF bins.
+
+**You will learn**
+
+- how to turn a :class:`.RegularPolygonPETProjector` into a TOF projector by
+  assigning :class:`.TOFParameters`,
+- why the attenuation sinogram is computed with the non-TOF projector, and how
+  to broadcast it over the TOF bins,
+- how to combine resolution model, TOF projector and attenuation in a
+  :class:`.CompositeLinearOperator`,
+- how :class:`.LOREndpointOrder` reverses the direction of the TOF-bin axis.
+
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_01_run_pet_non_tof_sinogram_projector.py`
+(the non-TOF forward model).
 """
 
 # %%
+# 0. Setup
+# --------
+#
+# Every example selects its array backend (NumPy, CuPy or PyTorch) and device
+# (CPU or GPU) with ``suggest_array_backend_and_device``: PyTorch on a CUDA
+# GPU if available, otherwise the best available backend on the CPU.  The
+# same code runs unchanged on all of them.
+
 import matplotlib.pyplot as plt
+from matplotlib.colors import PowerNorm
 
-from parallelproj._examples_utils import show_vol_cuts
-
-import parallelproj.pet_scanners
-import parallelproj.pet_lors
-import parallelproj.projectors
 import parallelproj.operators
+import parallelproj.pet_lors
+import parallelproj.pet_scanners
+import parallelproj.projectors
 import parallelproj.tof
 from parallelproj import to_numpy_array
+from parallelproj._examples_utils import (
+    show_vol_cuts,
+    suggest_array_backend_and_device,
+)
+
+# to choose explicitly, e.g. suggest_array_backend_and_device("numpy", "cpu")
+xp, dev = suggest_array_backend_and_device()
+
+
+def view_from_front(ax) -> None:
+    """3D view from in front of the scanner (looking along +x2, +x1 down)"""
+    ax.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
+    # the scanner is only 8 mm long along x2: one tick avoids overlapping labels
+    ax.set_zticks([0.0])
+
 
 # %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
-
-# To use a specific backend and/or device, replace the None arguments, e.g.:
-#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
-xp, dev = suggest_array_backend_and_device(None, None)
-
-
-# %%
-# setup a small regular polygon PET scanner with 3 rings (polygons)
+# 1. Scanner and sinogram definition
+# ----------------------------------
+#
+# We use a small regular polygon scanner with 3 rings and a sinogram with all
+# ring pairs with a ring difference of up to 1 (span 1), 10 radial bins
+# trimmed at each edge, and the axis order (radial, view, plane) (``RVP``).
 
 num_rings = 3
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -43,9 +80,6 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     symmetry_axis=2,
 )
 
-# %%
-# setup the LOR descriptor that defines the sinogram
-
 lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
     scanner,
     parallelproj.pet_lors.Michelogram(scanner.num_rings, max_ring_difference=1, span=1),
@@ -54,157 +88,200 @@ lor_desc = parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
 )
 
 # %%
-# Setting up the base projector (non-TOF initially)
-# -------------------------------------------------
+# 2. Setting up the base projector (non-TOF initially)
+# ----------------------------------------------------
 #
 # :class:`.RegularPolygonPETProjector` combines the scanner, LOR and image
-# geometry.  It starts in non-TOF mode; TOF is enabled in the next step by
-# assigning ``tof_parameters``.  The image geometry is defined by the image
-# shape, the voxel size, and the image origin.
+# geometry.  It starts in non-TOF mode; TOF is enabled in section 5 by
+# assigning ``tof_parameters``.  The image has 40 x 40 x 7 voxels of
+# 2 x 2 x 2 mm, and its centre is at world coordinate (0, 0, 0).
 
-# define a first projector using an image with 40x8x40 voxels of size 2x2x2 mm
-# where the image center is at world coordinate (0, 0, 0)
 proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=(40, 40, 7), voxel_size=(2.0, 2.0, 2.0)
 )
 
-
-# %%
-# Visualize the scanner and image geometry
-# ----------------------------------------
-#
-# :meth:`.RegularPolygonPETProjector.show_geometry` can be used
-# to visualize the scanner and image geometry
-
-fig = plt.figure(figsize=(8, 8))
-ax1 = fig.add_subplot(111, projection="3d")
-ax1.view_init(elev=-30, azim=160, roll=180, vertical_axis="y")
-proj.show_geometry(ax1)
-fig.tight_layout()
+fig = plt.figure(figsize=(5.5, 5.5), layout="constrained")
+ax = fig.add_subplot(projection="3d")
+view_from_front(ax)
+proj.show_geometry(ax)
+ax.set_title("scanner and image field of view")
 fig.show()
 
 # %%
-# Adding an image-based resolution model
-# --------------------------------------
+# The image field of view (box) lies inside the 3-ring scanner and covers
+# most of its bore.
 
-# setup a simple image-based resolution model with an Gaussian FWHM of 4.5mm
+# %%
+# 3. Image-based resolution model
+# -------------------------------
+#
+# As in the non-TOF example, a Gaussian filter with a FWHM of 4.5 mm
+# (``sigma`` in voxels) models the spatial resolution in image space.
+
 res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
 )
 
 # %%
-# Calculation of the non-TOF attenuation sinogram
-# -----------------------------------------------
+# 4. Non-TOF attenuation sinogram
+# -------------------------------
+#
+# The attenuation of a photon pair depends only on its LOR, not on where along
+# the LOR the annihilation happened.  The attenuation factors
+# :math:`\exp(-\int \mu \, dl)` are therefore the same for all TOF bins of an
+# LOR, and we compute them with the projector while it is still in non-TOF
+# mode, from an image of water (:math:`\mu` = 0.01 / mm).
 
-# setup an attenuation image containing the attenuation coeff. of water
-# (in 1/mm)
 x_att = xp.full(proj.in_shape, 0.01, device=dev, dtype=xp.float32)
-
-# forward project the attenuation image
-x_att_fwd = proj(x_att)
-
-# calculate the attenuation sinogram
-att_sino = xp.exp(-x_att_fwd)
+att_sino = xp.exp(-proj(x_att))
 
 # %%
-# Adding time-of-flight to the projector
-# --------------------------------------
+# 5. Adding time-of-flight to the projector
+# -----------------------------------------
+#
+# Assigning :class:`.TOFParameters` switches the projector to TOF mode.  The
+# parameters define the number and width (in mm, along the LOR) of the TOF
+# bins and the TOF resolution: ``sigma_tof`` is the standard deviation (in mm)
+# of the Gaussian TOF kernel, which is truncated at ``num_sigmas`` standard
+# deviations.  The values below are those of a clinical scanner: a 385 ps FWHM
+# timing resolution gives ``sigma_tof`` = 24.4 mm, and 9 bins of 78 mm cover a
+# clinical bore of about 700 mm.  For our small scanner with a bore of 130 mm,
+# only the central TOF bins receive counts.
 
 proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=9,
-    tofbin_width=78.0,  # 9 bins x 78 mm covers the ~700 mm scanner diameter
-    sigma_tof=24.4,  # 385 ps FWHM: (385e-3 / 2.355) * (C_MM_PER_NS / 2)
+    tofbin_width=78.0,
+    sigma_tof=24.4,  # (385e-3 ns / 2.355) * (C_MM_PER_NS / 2)
     num_sigmas=3.0,
 )
 
 # %%
-# Combining resolution model, TOF projector and attenuation model
-# ---------------------------------------------------------------
+# 6. Combining resolution model, TOF projector and attenuation
+# ------------------------------------------------------------
 #
-# The attenuation sinogram is non-TOF with shape = (159, 90, 7) while the projector
-# output is a TOF sinogram with shape = (159, 90, 7, num_tofbins).
-# We use broadcast_to to add a trailing singleton dimension to att_sino and broadcast
-# it over the TOF-bins axis without copying data (zero-stride view).
+# The attenuation sinogram is non-TOF with shape (159, 90, 7), while the
+# projector output is now a TOF sinogram with the TOF bins as last axis,
+# shape (159, 90, 7, 9):
 
-print(f"atten. sino shape {att_sino.shape}")
-print(f"proj output shape {proj.out_shape}")
+print(f"attenuation sinogram shape {att_sino.shape}")
+print(f"TOF projector output shape {proj.out_shape}")
+
+# %%
+# ``expand_dims`` adds a trailing singleton axis to the attenuation sinogram,
+# and ``broadcast_to`` repeats it over the TOF-bin axis without copying data
+# (a zero-stride view).  The complete forward operator is
+# :math:`A = \text{diag}(a) P_\text{TOF} G`.
 
 att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
     xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
 )
 
-# setup a forward projector containing the attenuation and resolution
 proj_with_att_and_res_model = parallelproj.operators.CompositeLinearOperator(
     (att_op, proj, res_model)
 )
 
-
 # %%
-# setup a simple test image containing a few "hot rods"
-# -----------------------------------------------------
+# 7. Forward and back projection of a test image
+# ----------------------------------------------
+#
+# The test image contains three "hot rods" parallel to ``x1``: one through the
+# image centre and one near the left image border in the central axial slice
+# 3, and a shorter one through the image centre in slice 4.
 
-# setup a simple test image containing a few "hot rods"
 x = xp.zeros(proj.in_shape, device=dev, dtype=xp.float32)
 x[proj.in_shape[0] // 2, :, proj.in_shape[2] // 2] = 1.0
 x[4, 3:, proj.in_shape[2] // 2] = 1.0
 x[proj.in_shape[0] // 2, :-3, 4] = 1.0
 
-
-# %%
-# forward and back project the image
-# ----------------------------------
-
 x_fwd = proj_with_att_and_res_model(x)
 x_fwd_back = proj_with_att_and_res_model.adjoint(x_fwd)
 
 # %%
-# visualize the forward and the back projection
-# ---------------------------------------------
+# The TOF sinogram has the shape (r, v, p, t).  ``show_vol_cuts`` shows a 4D
+# array as cuts through the last three axes at the central index of the first
+# axis, so we move the TOF-bin axis to the front and look at TOF bin 4, the
+# central one.
 
-# TOF sinogram shape is (r, v, p, t) -- transpose to (t, r, v, p) so the
-# TOF-bin axis becomes the leading slider in the 4-D viewer
 x_fwd_np = to_numpy_array(x_fwd).transpose(3, 0, 1, 2)
 
-# %%
-fig, _, widgets = show_vol_cuts(
-    x_fwd_np, axis_labels=("t", "r", "v", "p"), fig_title="TOF sinogram"
+fig, _, _ = show_vol_cuts(
+    x_fwd_np,
+    axis_labels=("t", "r", "v", "p"),
+    fig_title="TOF sinogram",
+    cmap="magma",
 )
 fig.show()
 
 # %%
-# visualize the back projection
-fig2, _, widgets2 = show_vol_cuts(
-    x_fwd_back, fig_title="back projection"
+# The central TOF bin looks much like a non-TOF sinogram: the LORs that run
+# along the rods (around view 7) give bright peaks.  The next figure compares
+# plane 1 (the direct plane of the central ring) in the three central TOF bins
+# with a common, square-root colour scale (``PowerNorm``).
+
+plane = 1
+norm = PowerNorm(gamma=0.5, vmin=0.0, vmax=float(x_fwd_np.max()))
+fig, axes = plt.subplots(
+    1, 3, figsize=(10, 3.8), sharex=True, sharey=True, layout="constrained"
 )
-fig2.show()
+for ax, tof_bin in zip(axes, (3, 4, 5)):
+    im = ax.imshow(
+        x_fwd_np[tof_bin, :, :, plane].T,
+        cmap="magma",
+        norm=norm,
+        aspect="auto",
+    )
+    ax.set_title(f"TOF bin {tof_bin}")
+    ax.set_xlabel("radial bin")
+axes[0].set_ylabel(f"view (plane {plane})")
+fig.colorbar(im, ax=axes, shrink=0.9)
+fig.show()
 
 # %%
-# LOR start / end convention and the TOF-bin direction
-# ----------------------------------------------------
+# TOF bin 4 covers the central 78 mm of every LOR and contains most counts.
+# TOF bins 3 and 5 receive the activity more than 39 mm from the LOR centre,
+# towards the start and the end point (blurred by the TOF kernel); they show
+# only parts of the sinogram structures, and these parts differ between the
+# two bins, which is the TOF information.  TOF bins 0 to 2 and 6 to 8 are
+# (almost) empty in this small scanner.
 #
-# A sinogram bin defines a line of response (LOR) between two detectors, but
-# *which* of the two endpoints is the "start" (``xstart``) and which is the
-# "end" (``xend``) is a convention.  For **non-TOF** projections it is
-# irrelevant -- the line integral is the same in either direction.  For **TOF**
-# it matters: the TOF-bin axis is defined *along* ``xstart -> xend``, so the
-# first TOF bin sits near ``xstart``.  Different vendors adopt different
-# start/end conventions, which flips where the first TOF bin lives.
+# The back projection :math:`A^T A x` spreads each TOF bin only over its part
+# of the LOR:
+
+fig, _, _ = show_vol_cuts(
+    x_fwd_back, axis_labels=("x0", "x1", "x2"), fig_title="TOF back projection"
+)
+fig.show()
+
+# %%
+# Compared with the non-TOF back projection of the previous example, the
+# activity is concentrated more closely around the rods: the central rod now
+# has the highest values, and the shorter rod in slice 4 is visible in the
+# cut perpendicular to ``x1`` (bottom right).
+
+# %%
+# 8. LOR start / end convention and the TOF-bin direction
+# -------------------------------------------------------
+#
+# A sinogram bin defines an LOR between two detectors, but *which* of the two
+# endpoints is the "start" (``xstart``) and which is the "end" (``xend``) is a
+# convention.  For **non-TOF** projections it is irrelevant -- the line
+# integral is the same in either direction.  For **TOF** it matters: the
+# TOF-bin axis is defined *along* ``xstart -> xend``, so the first TOF bin sits
+# near ``xstart``.  Different vendors adopt different start/end conventions,
+# which flips where the first TOF bin lives.
 #
 # :class:`.LOREndpointOrder` on :class:`.RegularPolygonPETLORDescriptor` lets
 # you choose: ``START_END`` (default) or ``END_START`` (endpoints swapped).
-# Below we make the effect visible by back-projecting a sinogram that is zero
-# everywhere except a few LORs (in several views) at an **off-center TOF bin**.
-# The back-projected activity is localised near that TOF position along each
-# LOR; swapping the endpoints reflects every blob to the opposite side (a
-# point reflection through the scanner centre).
-#
-# For a clear picture we use a transaxial FOV that covers the bore and a finer
-# TOF binning than above (so an off-center bin falls *inside* the image).
+# We make the effect visible by back projecting a sinogram that is zero
+# everywhere except for a few LORs (3 central radial bins in 4 views) in an
+# **off-centre TOF bin**.  For a clear picture we use a transaxial FOV that
+# covers the bore and finer TOF bins than above (9 bins of 16 mm), so that the
+# off-centre bin falls *inside* the image.
 
 LOREndpointOrder = parallelproj.pet_lors.LOREndpointOrder
 
 
-def _tof_descriptor(order):
+def tof_lor_descriptor(order):
     return parallelproj.pet_lors.RegularPolygonPETLORDescriptor(
         scanner,
         parallelproj.pet_lors.Michelogram(
@@ -217,49 +294,80 @@ def _tof_descriptor(order):
 
 
 demo_img_shape = (80, 80, 7)
-demo_voxel_size = (1.6, 1.6, 2.0)  # ~128 mm transaxial FOV (covers the bore)
+demo_voxel_size = (1.6, 1.6, 2.0)  # 128 mm transaxial FOV (covers the bore)
 demo_tof = parallelproj.tof.TOFParameters(
     num_tofbins=9, tofbin_width=16.0, sigma_tof=6.0, num_sigmas=3.0
 )
 
 proj_se = parallelproj.projectors.RegularPolygonPETProjector(
-    _tof_descriptor(LOREndpointOrder.START_END), demo_img_shape, demo_voxel_size
+    tof_lor_descriptor(LOREndpointOrder.START_END), demo_img_shape, demo_voxel_size
 )
 proj_es = parallelproj.projectors.RegularPolygonPETProjector(
-    _tof_descriptor(LOREndpointOrder.END_START), demo_img_shape, demo_voxel_size
+    tof_lor_descriptor(LOREndpointOrder.END_START), demo_img_shape, demo_voxel_size
 )
 proj_se.tof_parameters = demo_tof
 proj_es.tof_parameters = demo_tof
 
-# sinogram: a few central-radial LORs across several views, all set at the
-# same off-center TOF bin (bin 1 of 9; the central bin is bin 4)
+# sinogram: 3 central radial bins in 4 views, all in the same off-centre TOF
+# bin (bin 1 of 9; the central bin is bin 4)
 y_tof = xp.zeros(proj_se.out_shape, device=dev, dtype=xp.float32)
 r_center = proj_se.out_shape[0] // 2
 plane_center = proj_se.out_shape[2] // 2
-tof_bin = 1  # off-center
+tof_bin = 1
 for view in (0, 20, 40, 60):
     for rad in (r_center - 1, r_center, r_center + 1):
         y_tof[rad, view, plane_center, tof_bin] = 1.0
 
-# back project with both conventions and show the transaxial max-intensity
-# projection (over the axial axis)
+# back project with both conventions; maximum intensity projection over x2
 bp_se = to_numpy_array(proj_se.adjoint(y_tof)).max(axis=2)
 bp_es = to_numpy_array(proj_es.adjoint(y_tof)).max(axis=2)
 
-fig3, ax3 = plt.subplots(1, 2, figsize=(9, 4.6), tight_layout=True)
+half_fov = 0.5 * demo_img_shape[0] * demo_voxel_size[0]
+extent = (-half_fov, half_fov, half_fov, -half_fov)  # x1 points down
 vmax = float(max(bp_se.max(), bp_es.max()))
-for a, bp, title in (
-    (ax3[0], bp_se, "LOREndpointOrder.START_END"),
-    (ax3[1], bp_es, "LOREndpointOrder.END_START"),
-):
-    a.imshow(bp.T, origin="lower", cmap="Greys", vmax=vmax)
-    a.axhline(demo_img_shape[1] / 2 - 0.5, color="w", lw=0.4, ls=":")
-    a.axvline(demo_img_shape[0] / 2 - 0.5, color="w", lw=0.4, ls=":")
-    a.set_title(title, fontsize="medium")
-    a.set_xlabel("x0 voxel")
-    a.set_ylabel("x1 voxel")
-fig3.suptitle(
-    "Back projection of a single off-center TOF bin: swapping the LOR\n"
-    "start/end reflects the TOF-localised activity through the centre"
+
+fig, axes = plt.subplots(
+    1, 2, figsize=(9, 4.6), sharex=True, sharey=True, layout="constrained"
 )
-fig3.show()
+for ax, bp, title in (
+    (axes[0], bp_se, "LOREndpointOrder.START_END"),
+    (axes[1], bp_es, "LOREndpointOrder.END_START"),
+):
+    ax.imshow(bp.T, cmap="Greys", vmax=vmax, extent=extent)
+    ax.axhline(0.0, lw=0.8, ls=":")
+    ax.axvline(0.0, lw=0.8, ls=":")
+    ax.set_title(title)
+    ax.set_xlabel("x0 [mm]")
+axes[0].set_ylabel("x1 [mm]")
+fig.suptitle(f"Back projection of TOF bin {tof_bin} of {demo_tof.num_tofbins}")
+fig.show()
+
+# %%
+# The back-projected activity is localized near TOF bin 1 along each of the 4
+# LOR bundles, i.e. 3 bins (48 mm) from the LOR centre towards ``xstart``.
+# Swapping the endpoints moves every blob to the opposite side of the scanner
+# centre (a point reflection through the centre), because TOF bin ``k`` of one
+# convention is TOF bin ``num_tofbins - 1 - k`` of the other.
+
+# %%
+# Summary
+# -------
+#
+# - Assigning :class:`.TOFParameters` to ``tof_parameters`` turns a
+#   :class:`.RegularPolygonPETProjector` into a TOF projector; its output gets
+#   a trailing TOF-bin axis.
+# - Attenuation factors do not depend on the TOF bin: compute them with the
+#   non-TOF projector and broadcast them over the TOF axis with
+#   ``expand_dims`` and ``broadcast_to``.
+# - Resolution model, TOF projector and attenuation are combined with
+#   :class:`.CompositeLinearOperator`, exactly as in the non-TOF case.
+# - The TOF-bin axis runs from ``xstart`` to ``xend``; use
+#   :class:`.LOREndpointOrder` to match the start/end convention of other
+#   software.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_03_run_equalblock_projector.py`
+#    -- non-TOF and TOF projections for scanners made of block modules.
+
+# sphinx_gallery_thumbnail_number = 5
