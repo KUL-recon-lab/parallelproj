@@ -60,14 +60,60 @@ def test_elliptic_cylinder_phantom_default() -> None:
 
 
 def test_show_vol_cuts_headless() -> None:
+    """Interactive viewer (forced), built headlessly."""
     vol = np.reshape(np.arange(8 * 8 * 4, dtype=np.float32), (8, 8, 4))
-    fig, ax_im, widgets = ex.show_vol_cuts(vol, fig_title="smoke test")
+    fig, ax_im, widgets = ex.show_vol_cuts(vol, fig_title="smoke test", interactive=True)
     try:
         assert fig is not None
         assert ax_im is not None
-        assert isinstance(widgets, dict)
+        assert isinstance(widgets, dict) and len(widgets) > 0
     finally:
         plt.close(fig)
+
+
+@pytest.mark.parametrize("ndim", [3, 4])
+def test_show_vol_cuts_static(ndim) -> None:
+    """Non-interactive backend (as in the docs build): static cuts, no widgets."""
+    shape = (8, 8, 4) if ndim == 3 else (3, 8, 8, 4)
+    vol = np.reshape(np.arange(int(np.prod(np.asarray(shape))), dtype=np.float32), shape)
+    assert not ex._interactive_backend()  # tests run with a non-interactive backend
+    fig, ax_im, widgets = ex.show_vol_cuts(
+        vol, voxel_size=(1.0, 1.0, 2.0), fig_title="static", origin="lower"
+    )
+    try:
+        assert widgets == {}
+        assert len(ax_im) == 3
+        assert ax_im[2].get_title() == "z = 2"
+        assert fig.get_suptitle().startswith("static")
+        assert ("t = 1" in fig.get_suptitle()) == (ndim == 4)
+        assert len(fig.axes) == 4  # three panels + colorbar
+    finally:
+        plt.close(fig)
+    with pytest.raises(ValueError):
+        ex.show_vol_cuts(vol, origin=("lower", "upper"), interactive=False)
+
+
+def test_interactive_backend_detection(monkeypatch) -> None:
+    for backend, expected in [
+        ("agg", False),
+        ("module://matplotlib_inline.backend_inline", False),
+        ("QtAgg", True),
+        ("tkagg", True),
+        ("module://ipympl.backend_nbagg", True),
+        ("widget", True),
+    ]:
+        monkeypatch.setattr(ex.plt, "get_backend", lambda b=backend: b)
+        assert ex._interactive_backend() == expected, backend
+
+
+def test_set_style() -> None:
+    import matplotlib as mpl
+
+    with mpl.rc_context():
+        ex._reset_example_style(None, None)
+        colors = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+        assert tuple(colors) == ex.EXAMPLE_COLORS
+        assert mpl.rcParams["legend.frameon"] is False
 
 
 def test_radon_objects_construct() -> None:

@@ -1,5 +1,5 @@
-Custom parallelproj pytorch layer examples
-------------------------------------------
+PyTorch layers and multiple GPUs
+--------------------------------
 
 How to wrap a parallelproj operator as a differentiable PyTorch layer, with an
 autograd-compatible forward and adjoint, so that projectors can be embedded in
