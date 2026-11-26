@@ -374,3 +374,5 @@ fig2 = show_vol_cuts(
 )
 
 plt.show()
+
+# sphinx_gallery_thumbnail_path = "_static/thumbnails/01_os_mltr_svrg.png"

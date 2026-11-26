@@ -603,3 +603,5 @@ if track_cost:
 # .. rubric:: References
 #
 # .. footbibliography::
+
+# sphinx_gallery_thumbnail_path = "_static/thumbnails/02_lm_spdhg.png"
