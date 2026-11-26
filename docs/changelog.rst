@@ -30,6 +30,21 @@ New features
 Changes
 ~~~~~~~
 
+- **GPU projections run on the current CUDA stream (asynchronous).** (`#176
+  <https://github.com/KUL-recon-lab/parallelproj/issues/176>`_) All projectors
+  pass the current stream of the GPU of their arrays to parallelproj-core
+  (PyTorch: ``torch.cuda.current_stream(device)``, CuPy:
+  ``cupy.cuda.get_current_stream()``). A GPU projection now behaves like any
+  other PyTorch / CuPy operation: it is queued on that stream and returns
+  without waiting for the GPU, it is correctly ordered with the other work on
+  that stream (also inside ``with torch.cuda.stream(s):``, where the previous
+  projections on the legacy default stream did not wait for the work queued on
+  ``s``), and projections on several GPUs run at the same time even when
+  called one after another from one Python thread. Results are unchanged, and
+  everything that reads a result (``.cpu()``, ``.item()``, ``print``,
+  ``to_numpy_array``, ...) waits for it automatically; only hand-written timing
+  code has to synchronize (``torch.cuda.synchronize()``) before reading the
+  clock. CPU arrays are not affected.
 - **TOFParameters**: ``sigma_tof`` is optional (but required unless ``kernel``
   is given), and the class has the new fields ``kernel`` and ``kernel_scale``
   and properties ``tof_kernel``, ``scale`` and ``is_lor_dependent``. Existing

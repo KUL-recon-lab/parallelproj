@@ -182,3 +182,43 @@ def empty_cuda_cache(xp: ModuleType) -> None:
         torch_mod = getattr(xp, "torch", xp)
         if torch_mod.cuda.is_available():
             torch_mod.cuda.empty_cache()
+
+
+def _current_cuda_stream(x: Array) -> int | None:
+    """Handle of the current CUDA stream of the GPU of *x* (``None`` for CPU arrays).
+
+    Passed as ``stream`` to the projectors of ``parallelproj_core``, so that a
+    projection of GPU arrays behaves like any other operation of the array
+    library: it is queued on the current stream of the GPU of the arrays, runs
+    in order with all other operations on that stream (also inside
+    ``with torch.cuda.stream(s):`` / ``with cupy.cuda.Stream():``) and returns
+    without waiting for the GPU.  Projections on several GPUs therefore run at
+    the same time, even when called one after another from a single thread.
+    The stream allocators of PyTorch and CuPy are stream-ordered, so temporary
+    arrays freed after the call are not reused before the projection is done.
+
+    Parameters
+    ----------
+    x : Array
+        Array on the device of the projection.
+
+    Returns
+    -------
+    int or None
+        ``torch.cuda.current_stream(x.device).cuda_stream`` for PyTorch CUDA
+        tensors, ``cupy.cuda.get_current_stream().ptr`` (of the GPU of *x*) for
+        CuPy arrays (``0`` is the default stream of both libraries), ``None``
+        otherwise (synchronous call; CPU arrays always give complete results).
+    """
+    if array_api_compat.is_torch_array(x):
+        if x.device.type == "cuda":  # pragma: no cover (GPU only)
+            import torch
+
+            return torch.cuda.current_stream(x.device).cuda_stream
+        return None
+    if array_api_compat.is_cupy_array(x):  # pragma: no cover
+        import cupy
+
+        with x.device:
+            return cupy.cuda.get_current_stream().ptr
+    return None
