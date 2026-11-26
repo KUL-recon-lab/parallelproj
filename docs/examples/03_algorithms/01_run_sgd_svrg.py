@@ -356,7 +356,10 @@ total_objective = full_data_fidelity + reg
 # images.  (The Hessian-vector product :math:`H_R(x)\, x`, by contrast, is a
 # weighted graph Laplacian applied to :math:`x` and negative in voxels that
 # are colder than their neighbours, so it is not suited as a curvature
-# estimate.)
+# estimate.)  For strong priors, the Hessian diagonal can be too small for
+# a fixed step size; the separable majorizer
+# (``reg.separable_majorizer_curvature(x)``) is a safe alternative, see
+# :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`.
 #
 # The scanner's cylindrical field of view (FOV) does not cover every voxel of
 # the image grid.  Voxels outside the FOV are never intersected by any LOR, so
@@ -620,5 +623,7 @@ fig.show()
 #
 #    **Next:** :ref:`sphx_glr_auto_examples_03_algorithms_02_run_pdhg_spdhg_dtv.py`
 #    -- PDHG and SPDHG for a non-smooth directional TV prior.
+#    The choice of the preconditioner for weak and strong priors is compared
+#    in :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`.
 
 # sphinx_gallery_thumbnail_number = 3
