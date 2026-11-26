@@ -49,6 +49,15 @@ variants (sinogram MLEM, LM-MLEM, sinogram OSEM, LM-OSEM) because every
 objective implements the :class:`.C1Function` interface with the correct
 gradient w.r.t. :math:`x`.
 
+.. note::
+
+    To keep the documentation build short, this example runs **fewer
+    iterations on the CPU** than on a GPU (see the printed note below).
+    The results shown on CPU-only builds (e.g. on Read the Docs) are
+    therefore less converged.  Run the example on a GPU, or set the environment
+    variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
+    results.
+
 """
 
 # %%
@@ -76,7 +85,7 @@ from parallelproj.functions import (
 )
 
 # %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import iterations_for_device, suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
@@ -99,9 +108,9 @@ xp, dev = suggest_array_backend_and_device(None, None)
 # image-based resolution model, a non-TOF PET projector and an attenuation model
 #
 
-num_epochs_mlem = 96
 num_subsets = 24
-num_epochs = num_epochs_mlem // num_subsets
+num_epochs = iterations_for_device(dev, cpu=2, gpu=96 // num_subsets, what="epochs")
+num_epochs_mlem = num_epochs * num_subsets
 
 # run full MLEM only on GPU -- too slow on CPU for the number of iterations used here
 run_mlem = dev != "cpu"

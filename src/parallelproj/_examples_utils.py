@@ -37,6 +37,7 @@ from __future__ import annotations
 import abc
 import itertools
 import math
+import os
 from collections.abc import Sequence
 from importlib import import_module, util as iutil
 from types import ModuleType
@@ -54,6 +55,53 @@ from parallelproj import Array, to_numpy_array
 # ---------------------------------------------------------------------------
 # array_utils
 # ---------------------------------------------------------------------------
+
+
+def iterations_for_device(dev: Any, cpu: int, gpu: int, what: str = "iterations") -> int:
+    """Number of iterations of an example for the compute device ``dev``.
+
+    Iterative examples run fewer iterations on the CPU, so that the
+    documentation (built on CPU-only machines, e.g. on Read the Docs) builds
+    in reasonable time.  On the CPU, a note is printed (and shown in the
+    rendered example) that the results are less converged than with the
+    full number of iterations used on a GPU.
+
+    Set the environment variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``
+    to run the full (GPU) number of iterations on the CPU as well.
+
+    Parameters
+    ----------
+    dev : device
+        Compute device returned by :func:`suggest_array_backend_and_device`.
+    cpu : int
+        Number of iterations on the CPU (reduced).
+    gpu : int
+        Number of iterations on a GPU (the number the example is meant for).
+    what : str, optional
+        What is counted, e.g. ``"epochs"``, for the note.
+
+    Returns
+    -------
+    int
+        ``cpu`` if ``dev`` is a CPU device (and the full number of
+        iterations is not requested via the environment), else ``gpu``.
+    """
+    if str(dev).split(":")[0] != "cpu" or _full_iterations_requested():
+        return gpu
+    if cpu < gpu:
+        print(
+            f"NOTE: running on the CPU, this example uses {cpu} {what} instead of "
+            f"{gpu} to keep the documentation build short.  The results shown are "
+            f"less converged; run it on a GPU, increase the number of {what}, or "
+            f"set PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1 for converged results."
+        )
+    return cpu
+
+
+def _full_iterations_requested() -> bool:
+    """True if ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS`` is set to a true value."""
+    value = os.environ.get("PARALLELPROJ_EXAMPLES_FULL_ITERATIONS", "")
+    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def suggest_array_backend_and_device(

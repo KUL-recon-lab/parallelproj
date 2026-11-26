@@ -75,6 +75,16 @@ Changes
   accumulated in float64. Gradient and Hessian are unchanged; function values
   differ from 2.0 by :math:`-N_\text{ev}`.
 
+Documentation
+~~~~~~~~~~~~~
+
+- **Shorter documentation build.** (`#169
+  <https://github.com/KUL-recon-lab/parallelproj/issues/169>`_) The six slowest
+  iterative examples run fewer iterations on the CPU (as on Read the Docs) and
+  print a note that the shown results are less converged. GPU builds keep the
+  full numbers; ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1`` runs them on the
+  CPU as well.
+
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^
 

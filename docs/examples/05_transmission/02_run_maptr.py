@@ -62,6 +62,15 @@ penalised objective, with a converged **L-BFGS-B** reference:
     (anchor + subset sweep), so the epoch axis understates SVRG's cost by
     about a factor of 1.5.
 
+.. note::
+
+    To keep the documentation build short, this example runs **fewer
+    iterations on the CPU** than on a GPU (see the printed note below).
+    The results shown on CPU-only builds (e.g. on Read the Docs) are
+    therefore less converged.  Run the example on a GPU, or set the environment
+    variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
+    results.
+
 """
 
 # %%
@@ -88,14 +97,15 @@ from parallelproj._examples_utils import (
 )
 
 # %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import iterations_for_device, suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")
 xp, dev = suggest_array_backend_and_device(None, None)
 
 # %%
-num_epochs = 30  # epochs (full data passes) for the subset algorithms
+# epochs (full data passes) for the subset algorithms (fewer on the CPU)
+num_epochs = iterations_for_device(dev, cpu=10, gpu=30, what="epochs")
 num_subsets = 28  # number of ordered view subsets (divides the 168 views evenly)
 num_lbfgs = 80  # L-BFGS-B iterations for the reference solution
 blank_counts = 500.0  # blank scan counts per LOR

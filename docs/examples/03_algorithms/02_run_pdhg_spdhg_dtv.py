@@ -40,6 +40,15 @@ See :footcite:p:`Ehrhardt2016` and :footcite:p:`Ehrhardt2019` for details on the
 and the SPDHG algorithm (Algorithm 2), and :footcite:p:`Schramm2022` for the step-size
 rules used here.
 
+.. note::
+
+    To keep the documentation build short, this example runs **fewer
+    iterations on the CPU** than on a GPU (see the printed note below).
+    The results shown on CPU-only builds (e.g. on Read the Docs) are
+    therefore less converged.  Run the example on a GPU, or set the environment
+    variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
+    results.
+
 """
 
 # %%
@@ -61,7 +70,7 @@ import parallelproj.projectors
 from parallelproj import to_numpy_array, Array
 
 # %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import iterations_for_device, suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
@@ -256,11 +265,13 @@ img_scale = 0.1
 # number of MLEM epochs used to initialize PDHG and SPDHG
 num_epochs_mlem = 10
 # number of SPDHG epochs (each = 2 * num_subsets mini-iterations)
-num_epochs_spdhg = 20
+num_epochs_spdhg = iterations_for_device(dev, cpu=10, gpu=20, what="SPDHG epochs")
 # number of sinogram subsets for SPDHG
 num_subsets = 28
 # number of PDHG epochs
-num_epochs_pdhg = 20 if dev == "cpu" else num_epochs_spdhg * num_subsets
+num_epochs_pdhg = iterations_for_device(
+    dev, cpu=10, gpu=num_epochs_spdhg * num_subsets, what="PDHG iterations"
+)
 # regularization weight
 beta = 6.0
 # step size ratio (used by both PDHG and SPDHG)

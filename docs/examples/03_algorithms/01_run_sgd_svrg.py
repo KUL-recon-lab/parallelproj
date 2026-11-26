@@ -53,6 +53,15 @@ exploit this splitting:
     convergence plot therefore understates the true computational cost of
     SVRG relative to SGD by a factor of roughly two.
 
+.. note::
+
+    To keep the documentation build short, this example runs **fewer
+    iterations on the CPU** than on a GPU (see the printed note below).
+    The results shown on CPU-only builds (e.g. on Read the Docs) are
+    therefore less converged.  Run the example on a GPU, or set the environment
+    variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
+    results.
+
 """
 
 # %%
@@ -80,7 +89,7 @@ from parallelproj._examples_utils import show_vol_cuts
 from parallelproj._examples_utils import elliptic_cylinder_phantom
 
 # %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
+from parallelproj._examples_utils import iterations_for_device, suggest_array_backend_and_device
 
 # To use a specific backend and/or device, replace the None arguments, e.g.:
 #   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
@@ -92,7 +101,7 @@ xp, dev = suggest_array_backend_and_device(None, None)
 num_subsets = 12
 
 # if run on a CPU limit the number of epochs
-num_epochs = (120 if dev == "cpu" else 240) // num_subsets
+num_epochs = iterations_for_device(dev, cpu=5, gpu=240 // num_subsets, what="epochs")
 
 # regularisation weight beta
 beta = 1.0
