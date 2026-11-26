@@ -547,8 +547,9 @@ mu = count_event_multiplicity(events)
 #  :math:`T_i = \gamma^{-1} \text{diag}(\frac{\rho p_i}{{A^{LM}_{N_i}}^T 1/\mu_{N_i}})`
 #  for the data subsets :math:`i \leq n`
 #
-#  :math:`T_{n+1} = T_G = \gamma^{-1} \frac{\rho}{\|\nabla\|}` for the gradient
-#  (the same value as for PDHG)
+#  :math:`T_{n+1} = \gamma^{-1} \frac{\rho\, p_G}{\|\nabla\|}` for the gradient
+#  (the PDHG value :math:`T_G` times the selection probability :math:`p_G`,
+#  as for every block of SPDHG)
 #
 #  :math:`T = \min_{i=1,\ldots,n+1} T_i` pointwise
 #
@@ -575,8 +576,9 @@ z += op_G.adjoint(w_lm)
 zbar = 1.0 * z
 
 # %%
-# The step sizes follow the rules above (the gradient step size ``S_G`` and
-# ``T_G`` are the ones computed for PDHG).
+# The step sizes follow the rules above (the dual step size ``S_G`` of the
+# gradient is the one computed for PDHG, its primal step size is the PDHG
+# value ``T_G`` times ``p_g``).
 
 S_A_lm = []
 ones_img = xp.ones(img_shape, dtype=xp.float32, device=dev)
@@ -592,7 +594,7 @@ T_A_lm = xp.zeros(
 for k, sl in enumerate(subset_slices_lm):
     tmp = lm_pet_subset_linop_seq[k].adjoint(1 / mu[sl])
     T_A_lm[k] = (rho * p_a / gamma) / tmp
-T_A_lm[-1] = T_G
+T_A_lm[-1] = p_g * T_G
 T_lm = xp.min(T_A_lm, axis=0)
 
 # %%
