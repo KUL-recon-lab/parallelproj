@@ -405,7 +405,7 @@ ax[0].set_xlabel("iteration (MLTR / SPS) or function evaluation (L-BFGS-B)")
 ax[0].set_ylabel(r"$-L(\mu)$")
 ax[0].set_title("Convergence")
 ax[0].grid(ls=":")
-ax[0].legend()
+ax[0].legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=3)
 
 ax[1].plot(
     x0_mm,
@@ -421,7 +421,7 @@ ax[1].set_xlabel(r"$x_0$ [mm]")
 ax[1].set_ylabel(r"$\mu$ [1/mm]")
 ax[1].set_title(r"Central profile along $x_0$")
 ax[1].grid(ls=":")
-ax[1].legend()
+ax[1].legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=4)
 fig.show()
 
 # %%
@@ -460,7 +460,7 @@ extent = (
 )
 
 fig2, ax2 = plt.subplots(
-    1, len(images), figsize=(10, 3.2), sharey=True, layout="constrained"
+    1, len(images), figsize=(10, 2.8), sharey=True, layout="compressed"
 )
 for axi, (name, img) in zip(ax2, images.items()):
     im = axi.imshow(
