@@ -9,7 +9,7 @@ Preconditioned stochastic gradient methods such as SVRG take steps
 reconstruction with a prior, :math:`D` has to account for the curvature of
 the data fidelity *and* of the prior.  This example compares three diagonal
 preconditioners for a logcosh prior, for high and low count data and for
-weak, medium and strong regularisation, and uses a monotone MAP-EM algorithm
+weak to strong, and more or less edge-preserving, regularisation, and uses a monotone MAP-EM algorithm
 built from the separable majorizer of the prior as reference.
 
 **You will learn**
@@ -183,23 +183,36 @@ subset_sens = [
 ]
 
 # %%
-# 4. Six scenarios
-# ----------------
+# 4. Eight scenarios
+# ------------------
 #
 # We simulate Poisson data with about :math:`3 \cdot 10^6` (high) and
 # :math:`3 \cdot 10^4` (low) true counts, with a constant contamination of
-# half the mean of the noise-free trues, and combine both with a weak, a
-# medium and a strong prior.  The logcosh parameter :math:`\delta` is 5 % of the maximum
-# of the image, so the prior scales like the data with the count level, and
-# :math:`\beta` means the same relative regularisation strength for both
-# count levels.  The curvature of the prior adds to the denominator
-# :math:`A^T 1` of the preconditioners (median over the FOV, Hessian diagonal
-# / majorizer): about 3 % / 7 % for the weak prior (:math:`\beta = 3`),
-# 9 % / 25 % for the medium prior (:math:`\beta = 10`) and 25 % / 70 % for the
-# strong prior (:math:`\beta = 30`, visibly over-smoothing); twice the
-# Hessian diagonal adds twice as much as the Hessian diagonal.
+# half the mean of the noise-free trues, and combine both with four priors:
+# a weak, a medium and a strong one with :math:`\delta` = 5 % of the maximum
+# of the image, and a strong one with a small :math:`\delta` = 1 %, which is
+# more edge-preserving (closer to total variation): more image differences
+# lie in the range :math:`|t| \gg \delta`, where :math:`\psi` is almost
+# linear.  :math:`\delta` scales with the image, so the prior scales like the
+# data with the count level, and :math:`\beta` means the same for both count
+# levels.
+#
+# The curvature of the prior adds to the denominator :math:`A^T 1` of the
+# preconditioners (median over the FOV, Hessian diagonal / majorizer): about
+# 3 % / 7 % for the weak prior (:math:`\beta = 3`), 9 % / 25 % for the
+# medium prior (:math:`\beta = 10`), 26 % / 75 % for the strong prior
+# (:math:`\beta = 30`, visibly over-smoothing) and 35 % / 170 % for the
+# strong prior with small :math:`\delta`.  Twice the Hessian diagonal adds
+# twice as much as the Hessian diagonal; with the small :math:`\delta`, that
+# is still less than half of the majorizer.
 
-betas = {"weak": 3.0, "medium": 10.0, "strong": 30.0}
+# (beta, delta as a fraction of the maximum of the image)
+priors = {
+    "weak prior": (3.0, 0.05),
+    "medium prior": (10.0, 0.05),
+    "strong prior": (30.0, 0.05),
+    "strong prior, small δ": (30.0, 0.01),
+}
 total_counts = {"high counts": 3e6, "low counts": 3e4}
 
 G = parallelproj.operators.FiniteForwardDifference(img_shape)
@@ -214,10 +227,13 @@ for counts_name, counts in total_counts.items():
     y = xp.asarray(
         rng.poisson(to_numpy_array(trues + contamination)), dtype=xp.float32, device=dev
     )
-    delta = 0.05 * float(xp.max(x_true))
-    for beta_name, beta in betas.items():
-        scenarios[f"{counts_name}, {beta_name} prior"] = dict(
-            x_true=x_true, y=y, s=contamination, delta=delta, beta=beta
+    for prior_name, (beta, delta_rel) in priors.items():
+        scenarios[f"{counts_name}, {prior_name}"] = dict(
+            x_true=x_true,
+            y=y,
+            s=contamination,
+            delta=delta_rel * float(xp.max(x_true)),
+            beta=beta,
         )
     print(f"{counts_name}: {float(xp.sum(y)):.3g} counts (trues + contamination)")
 
@@ -384,7 +400,7 @@ for name, res in results.items():
 # against the number of data passes.
 
 fig, axs = plt.subplots(
-    2, 3, figsize=(10, 6.4), layout="constrained", sharex=True, sharey=True
+    2, 4, figsize=(10, 5.6), layout="constrained", sharex=True, sharey=True
 )
 for ax, (name, res) in zip(axs.ravel(), results.items()):
     f_star = res["F*"]
@@ -395,8 +411,8 @@ for ax, (name, res) in zip(axs.ravel(), results.items()):
         ax.semilogy(passes, np.maximum(gap, 1e-8), "o-", ms=3, label=f"SVRG, {kind}")
     mm_gap = (np.asarray(res["MAP-EM"][1]) - f_star) / (f0 - f_star)
     ax.semilogy(np.maximum(mm_gap, 1e-8), "k--", label="MAP-EM (majorizer)")
-    ax.set_title(name, fontsize="medium")
-    ax.set_ylim(1e-7, 3)
+    ax.set_title(name.replace(", ", ",\n", 1), fontsize="small")
+    ax.set_ylim(1e-7, 30)
     ax.grid(alpha=0.3)
 for ax in axs[1]:
     ax.set_xlabel("data passes")
@@ -414,11 +430,16 @@ fig.show()
 #   curvature :math:`\psi''(t)` of logcosh decays exponentially for
 #   differences :math:`|t| \gg \delta` (edges, noise), while the prior still
 #   changes like :math:`\psi'(t) / t \sim 1 / |t|` there, so the steps of
-#   these voxels are too large.  With twice the Hessian diagonal and with the
-#   separable majorizer, SVRG converges, about equally fast.
-# - The factor 2 is what makes the difference here.  The separable majorizer
-#   additionally *guarantees* an upper bound of the prior (2 x the Hessian
-#   diagonal does not), which makes MAP-EM monotone.
+#   these voxels are too large.  Twice the Hessian diagonal compensates for
+#   this here, and SVRG converges about as fast as with the majorizer.
+# - **Strong prior, small** :math:`\delta`: now most differences lie in the
+#   range :math:`|t| \gg \delta`, where :math:`\psi'(t)/t` exceeds
+#   :math:`\psi''(t)` by orders of magnitude, and the factor 2 is not
+#   enough: SVRG with twice the Hessian diagonal does not improve on the
+#   initial image (gap of about 1 or larger), with the Hessian diagonal it
+#   gets worse.  Only the separable majorizer, an upper bound of the prior
+#   by construction, converges; it is slower than for the larger
+#   :math:`\delta`, as the prior is closer to non-smooth.
 # - The count level hardly matters, because the prior was scaled with the
 #   data.  MAP-EM is monotone in all scenarios, but needs many more data
 #   passes than SVRG.
@@ -431,16 +452,16 @@ fig.show()
 # true image of each count level for comparison (each row on its own grey
 # scale).
 
-fig, axs = plt.subplots(2, 4, figsize=(10, 5.0), layout="constrained")
+fig, axs = plt.subplots(2, 5, figsize=(10, 4.4), layout="constrained")
 for row, counts_name in enumerate(total_counts):
     x_true = scenarios[f"{counts_name}, weak prior"]["x_true"]
     vmax = 1.3 * float(xp.max(x_true))
     panels = [("true image", x_true)] + [
         (
-            f"{beta_name} prior",
-            results[f"{counts_name}, {beta_name} prior"]["separable majorizer"][0],
+            prior_name,
+            results[f"{counts_name}, {prior_name}"]["separable majorizer"][0],
         )
-        for beta_name in betas
+        for prior_name in priors
     ]
     for ax, (title, img) in zip(axs[row], panels):
         im = ax.imshow(to_numpy_array(img)[:, :, 0].T, cmap="Greys", vmin=0, vmax=vmax)
@@ -452,7 +473,8 @@ fig.show()
 # %%
 # The weak prior leaves the low count image noisy, the medium prior
 # suppresses most of the noise and keeps the hot insert, and the strong prior
-# over-smooths.  A preconditioner has to work for all of them, since the
+# over-smooths.  With the small :math:`\delta`, the strong prior keeps
+# sharper edges (piecewise constant regions, as with total variation).  A preconditioner has to work for all of them, since the
 # regularisation strength is usually tuned after the algorithm is chosen.
 
 # %%
@@ -469,10 +491,11 @@ fig.show()
 # - The **Hessian diagonal** (:meth:`.C2Function.hessian_diag`) is the local
 #   curvature: fine for weak and medium priors, but SVRG with step size 1
 #   does not converge for a strong prior.
-# - **Twice the Hessian diagonal** works as well as the majorizer in these
-#   tests, but without a guarantee.
+# - **Twice the Hessian diagonal** works for the strong prior with the larger
+#   :math:`\delta`, but not for a more edge-preserving prior (small
+#   :math:`\delta`): it is a heuristic without a guarantee.
 # - With a fixed step size, use the separable majorizer when the
-#   regularisation can be strong.
+#   regularisation can be strong or strongly edge-preserving.
 #
 # .. seealso::
 #

@@ -146,9 +146,11 @@ Documentation
   Compares the Hessian diagonal, twice the Hessian diagonal and the
   separable majorizer of a logcosh prior as curvature in the SVRG
   preconditioner, for high / low counts and weak / medium / strong
-  regularisation, with a monotone MAP-EM algorithm (De Pierro with the
-  separable majorizer) as reference.  With the Hessian diagonal, SVRG does
-  not converge for strong priors.
+  regularisation and a strongly edge-preserving prior (small :math:`\delta`),
+  with a monotone MAP-EM algorithm (De Pierro with the separable majorizer)
+  as reference.  With the Hessian diagonal, SVRG does not converge for strong
+  priors, with twice the Hessian diagonal not for the edge-preserving one;
+  the separable majorizer converges in all scenarios.
 - **New example: projection layers on multiple GPUs with CUDA streams.**
   (`#177 <https://github.com/KUL-recon-lab/parallelproj/issues/177>`_) One
   projector per GPU, a layer that splits a mini batch across all GPUs and
