@@ -1,60 +1,33 @@
 """
-Convergence comparison: SGD vs SVRG with regularization (sinogram and listmode)
-================================================================================
+Listmode SGD and SVRG with a logcosh prior
+==========================================
 
-This example compares sinogram and listmode variants of SGD and SVRG for
-minimising the regularised negative Poisson log-likelihood
+:bdg-primary:`reconstruction` :bdg-secondary:`advanced` :bdg-light:`CPU or GPU`
 
-.. math::
-    F(x) = \\underbrace{\\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i}_{\\text{data fidelity}}
-           + \\beta \\, R(x),
-    \\qquad \\bar{y}(x) = A x + s
+An edge-preserving prior suppresses the noise of maximum-likelihood
+reconstructions, but the EM update no longer applies.  This example minimises
+the regularised negative Poisson log-likelihood of simulated TOF data with
+preconditioned **stochastic gradient descent (SGD)** and **SVRG** (stochastic
+variance-reduced gradient), each run on a sinogram and on an event list.
+Once the subset objective functions are defined, the SGD and SVRG loops are
+*identical* for both data representations: they only use the
+:class:`.C1Function` interface, and the prior is added with ``+``.
 
-where the edge-preserving logcosh penalty is
+**You will learn**
 
-.. math::
-    R(x) = \\delta \\sum_i \\log\\!\\cosh\\!\\left(\\frac{(Gx)_i}{\\delta}\\right)
+- how to add a logcosh prior to sinogram and listmode subset objectives
+  so that they sum exactly to the regularised objective,
+- how to build a preconditioner from the sensitivity image and the curvature
+  of a separable quadratic majorizer of the prior,
+- how to run preconditioned SGD and SVRG on sinogram and listmode subsets
+  with the same code,
+- how sinogram and listmode variants compare per epoch and per data pass.
 
-and :math:`G` is the finite forward-difference operator.  The scale
-:math:`\\delta` is set relative to the maximum of the ground truth image
-(``delta = delta_rel * max(x_true)``), placing true edges in the linear
-(edge-preserving) regime while penalising smooth-region deviations
-quadratically.  The same objective is expressed in two equivalent ways:
-
-* **Sinogram** -- via :class:`.C2AffineObjective` wrapping :class:`.NegPoissonLogL`
-  (operates on predicted counts :math:`\\bar{y}`).
-* **Listmode** -- via :class:`.NegPoissonLogLListmode` (operates directly on the
-  image :math:`x` with the forward model built in).
-
-The objective is decomposed into :math:`m` subset functions
-
-.. math::
-    f_k(x) = \\underbrace{\\sum_{i \\in S_k} \\bar{y}_i - y_i \\log \\bar{y}_i}_{\\text{subset data fidelity}}
-             + \\frac{\\beta}{m} R(x),
-    \\qquad k = 1, \\ldots, m,
-
-so that :math:`F(x) = \\sum_{k=1}^m f_k(x)` exactly.  Both algorithms exploit
-this splitting:
-
-* **SGD** -- stochastic gradient descent using ordered subsets; one epoch =
-  :math:`m` subset updates ~= one full data pass; fast empirical convergence
-  but *no* convergence guarantee.
-* **SVRG** -- stochastic variance-reduced gradient with subsets; one epoch =
-  :math:`m` variance-reduced subset updates; convergent in practice while
-  achieving the fast per-epoch progress of SGD.
-
-.. note::
-    For SVRG, one epoch requires **two** full data passes: one to compute the
-    snapshot gradients at the anchor point, and one for the :math:`m`
-    variance-reduced subset updates.  The epoch axis in the convergence plot
-    therefore understates the true computational cost of SVRG relative to SGD
-    by a factor of roughly two.
-
-**Key learning goal**: Once the subset objective functions are defined (either
-as sinogram :class:`.C2AffineObjective` or listmode :class:`.NegPoissonLogLListmode`
-objects), the SGD and SVRG loops are *identical* -- they only depend on the
-:class:`.C1Function` interface (``gradient`` method).  Regularisation is added
-transparently via the :meth:`~.C1Function.__add__` operator.
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_04_listmode_algorithms_00_run_listmode_mlem_osem_svrg.py`
+(listmode data, objective and subsets) and
+:ref:`sphx_glr_auto_examples_03_algorithms_01_run_sgd_svrg.py`
+(SGD and SVRG with a logcosh prior for sinograms).
 
 .. note::
 
@@ -64,67 +37,87 @@ transparently via the :meth:`~.C1Function.__add__` operator.
     therefore less converged.  Run the example on a GPU, or set the environment
     variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
     results.
-
 """
 
 # %%
+# 0. Setup
+# --------
+#
+# Every example selects its array backend (NumPy, CuPy or PyTorch) and device
+# (CPU or GPU) with ``suggest_array_backend_and_device``: PyTorch on a CUDA
+# GPU if available, otherwise the best available backend on the CPU.  The
+# same code runs unchanged on all of them.
+
 from __future__ import annotations
+
 from collections.abc import Sequence
-import matplotlib.pyplot as plt
 from copy import copy
+
+import matplotlib.pyplot as plt
 import numpy as np
 from array_api_compat import size
+from matplotlib.ticker import MaxNLocator
 
 import parallelproj.operators
-import parallelproj.tof
-import parallelproj.pet_scanners
 import parallelproj.pet_lors
+import parallelproj.pet_scanners
 import parallelproj.projectors
-from parallelproj import to_numpy_array, Array
+import parallelproj.tof
+from parallelproj import Array, to_numpy_array
+from parallelproj._examples_utils import (
+    elliptic_cylinder_phantom,
+    iterations_for_device,
+    show_vol_cuts,
+    suggest_array_backend_and_device,
+)
 from parallelproj.functions import (
+    C1Function,
+    C2AffineObjective,
+    LogCosh,
     NegPoissonLogL,
     NegPoissonLogLListmode,
-    LogCosh,
-    C2AffineObjective,
-    C1Function,
 )
 
-
-from parallelproj._examples_utils import show_vol_cuts
-from parallelproj._examples_utils import elliptic_cylinder_phantom
-
-# %%
-from parallelproj._examples_utils import iterations_for_device, suggest_array_backend_and_device
-
-# To use a specific backend and/or device, replace the None arguments, e.g.:
-#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
-xp, dev = suggest_array_backend_and_device(None, None)
+# to choose explicitly, e.g. suggest_array_backend_and_device("numpy", "cpu")
+xp, dev = suggest_array_backend_and_device()
 
 # %%
+# 1. Reconstruction settings
+# --------------------------
+#
+# SGD and SVRG split the data into ``num_subsets`` subsets; an **epoch** is
+# one cycle through all subsets.  ``beta`` is the weight of the prior,
+# ``delta_rel`` its transition scale relative to the maximum of the ground
+# truth (see section 7).  ``sens_factor`` scales the ground truth image, and
+# with it the number of counts.
 
-# number of subsets for SGD and SVRG
 num_subsets = 24
 
-# if run on a CPU limit the number of epochs
+# fewer epochs on the CPU
 num_epochs = iterations_for_device(dev, cpu=2, gpu=240 // num_subsets, what="epochs")
 
-# sens factor
 sens_factor = 0.2
 
-# regularisation weight beta
 beta = 1.0
-# delta value relative to max of ground truth image for logcosh prior
 delta_rel = 0.05
 
-# step size for SGD and SVRG updates
+# step size of the SGD and SVRG updates
 step_size = 1.0
 
 # %%
-# Sinogram forward model setup
-# ----------------------------
+# 2. Scanner, sinogram and image
+# ------------------------------
 #
-# We setup a linear forward operator :math:`A` consisting of an
-# image-based resolution model, a non-TOF PET projector and an attenuation model.
+# The same small scanner (16 sides, 5 rings), span-1 sinogram and
+# 40 x 40 x 8 image (2 mm voxels) as in the previous example.  The ground
+# truth is an elliptic cylinder with hot and cold spherical inserts.
+#
+# The scanner's cylindrical field of view (FOV) does not cover every voxel of
+# the image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity :math:`(A^T \mathbf{1})_i = 0`.  Zeroing the initial image
+# and the preconditioner outside the FOV keeps those voxels at zero throughout
+# the reconstruction.  ``fov_mask`` is ``True`` inside the FOV and ``None``
+# when every image voxel is inside the FOV (no masking needed).
 
 num_rings = 5
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -137,9 +130,6 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
     symmetry_axis=2,
 )
-
-# %%
-# setup the LOR descriptor that defines the sinogram
 
 img_shape = (40, 40, 8)
 voxel_size = (2.0, 2.0, 2.0)
@@ -155,44 +145,31 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-# The scanner's cylindrical field of view does not cover every voxel of the
-# image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity (A^T 1)_i = 0.  Zeroing the initial image outside the FOV
-# ensures those voxels stay at zero throughout reconstruction (the
-# preconditioner is proportional to x, so a zero initialisation propagates as
-# zero updates).  fov_mask is True inside the FOV and is set to None when every
-# image voxel is inside the FOV (no masking needed).
 cyl_mask = proj.fov_mask()
 fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
-del cyl_mask
 
-# setup a simple test image
 x_true = sens_factor * elliptic_cylinder_phantom(
     xp, dev, image_shape=img_shape, voxel_size=voxel_size
 )
 
 # %%
-# Attenuation image and sinogram setup
+# 3. Sinogram forward model :math:`\bar{y}(x) = A x + s`
+# ------------------------------------------------------
+#
+# :math:`A` combines an image-based resolution model (Gaussian, 2 mm FWHM), a
+# TOF projector (13 TOF bins of 12 mm) and attenuation (water,
+# :math:`\mu` = 0.01 / mm, inside the phantom).  The attenuation sinogram has
+# no TOF axis; for TOF, ``xp.broadcast_to`` repeats it over the TOF bins
+# without copying data.  Leave out the ``proj.tof_parameters`` line to
+# reconstruct non-TOF data.
 
 x_att = 0.01 * xp.astype(x_true > 0, xp.float32)
 att_sino = xp.exp(-proj(x_att))
 
-# %%
-# Complete PET forward model setup
-# --------------------------------
-#
-# We combine an image-based resolution model,
-# a non-TOF or TOF PET projector and an attenuation model
-# into a single linear operator.
-
-# enable TOF - comment if you want to run non-TOF
 proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-# For TOF, att_sino has no TOF-bins dimension while the projector output does.
-# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
-# the TOF-bins axis without copying data (zero-stride view).
 att_values = (
     xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
     if proj.tof
@@ -207,11 +184,12 @@ res_model = parallelproj.operators.GaussianFilterOperator(
 pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
-# Simulation of projection data
-# -----------------------------
+# 4. Simulated sinogram data
+# --------------------------
 #
-# We setup an arbitrary ground truth :math:`x_{true}` and simulate
-# noisy data :math:`y` by adding Poisson noise.
+# Noise-free data :math:`A x_{true} + s` with a constant contamination
+# :math:`s` of half the mean of :math:`A x_{true}`, and a Poisson
+# realisation :math:`y` of them, stored as integers.
 
 noise_free_data = pet_lin_op(x_true)
 
@@ -232,39 +210,49 @@ y = xp.asarray(
 )
 
 # %%
-# Conversion of the emission sinogram to listmode
-# -----------------------------------------------
+# 5. Conversion of the sinogram to listmode
+# -----------------------------------------
 #
-# Using :meth:`.RegularPolygonPETProjector.convert_sinogram_to_listmode` we
-# convert the integer sinogram to a shuffled event list.
+# :meth:`.RegularPolygonPETProjector.convert_sinogram_to_listmode` converts the
+# integer sinogram into a shuffled event list (LOR endpoints and TOF bin of
+# every event).
 
 event_start_coords, event_end_coords, event_tofbins = proj.convert_sinogram_to_listmode(
     y, shuffle=True
 )
 
 # %%
-# Setup of the LM projector and LM forward model
-# -----------------------------------------------
+# 6. Listmode forward model
+# -------------------------
+#
+# As in the previous example, the listmode operator :math:`A_\text{LM}`
+# chains the resolution model, a :class:`.ListmodePETProjector` and the
+# (non-TOF) attenuation factor of every event.  The contamination of every
+# event is the constant contamination of the sinogram bins.
 
-lm_proj = parallelproj.projectors.ListmodePETProjector(
-    event_start_coords,
-    event_end_coords,
-    img_shape,
-    voxel_size,
-    proj.img_origin,
+
+def setup_listmode_projector(
+    start_coords: Array, end_coords: Array, tofbins: Array | None
+) -> tuple[parallelproj.projectors.ListmodePETProjector, Array]:
+    """TOF listmode projector for an event list and its attenuation factors"""
+    lm_proj = parallelproj.projectors.ListmodePETProjector(
+        start_coords, end_coords, img_shape, voxel_size, proj.img_origin
+    )
+    # attenuation factors of all events (non-TOF projection)
+    att_list = xp.exp(-lm_proj(x_att))
+    lm_proj.tof_parameters = proj.tof_parameters
+    if proj.tof:
+        assert tofbins is not None
+        lm_proj.event_tofbins = tofbins
+        lm_proj.tof = proj.tof
+    return lm_proj, att_list
+
+
+lm_proj, att_list = setup_listmode_projector(
+    event_start_coords, event_end_coords, event_tofbins
 )
-
-# recalculate the attenuation factor for all LM events (non-TOF projection)
-att_list = xp.exp(-lm_proj(x_att))
 lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_list)
 
-# enable TOF in the LM projector
-lm_proj.tof_parameters = proj.tof_parameters
-if proj.tof:
-    lm_proj.event_tofbins = event_tofbins
-    lm_proj.tof = proj.tof
-
-# create the contamination list (uniform, same mean as sinogram contamination)
 contamination_list = xp.full(
     event_start_coords.shape[0],
     float(xp.reshape(contamination, (size(contamination),))[0]),
@@ -277,32 +265,48 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 )
 
 # %%
-# Sensitivity image and full objective functions
-# ----------------------------------------------
+# 7. The logcosh prior and the subset decomposition
+# -------------------------------------------------
 #
-# The sensitivity image :math:`A^T\mathbf{1}` is required by
-# :class:`.NegPoissonLogLListmode` and serves as the EM diagonal preconditioner.
-# The full objectives (sinogram and listmode) are used only for evaluation.
-
-adjoint_ones = pet_lin_op.adjoint(
-    xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
-)
-
-# %%
-# Regularisation :math:`R(x)`
-# ---------------------------
+# We minimise the regularised negative Poisson log-likelihood
 #
-# The edge-preserving logcosh penalty is built from the
-# :class:`.FiniteForwardDifference` operator :math:`G` and :class:`.LogCosh`.
-# The full regulariser ``reg`` (weight :math:`\beta`) is used for total
-# objective evaluation.  The per-subset regulariser (weight :math:`\beta/m`)
-# is added to each subset data-fidelity function so that
-# :math:`\sum_k f_k(x) = F(x)`.
+# .. math::
+#     F(x) = \underbrace{\sum_i \bar{y}_i - y_i \log \bar{y}_i}_{
+#            \text{data fidelity}} + \beta \, R(x),
+#     \qquad \bar{y}(x) = A x + s
 #
-# ``delta`` is set to ``delta_rel`` times the maximum of the ground truth
-# image.  With ``delta_rel = 0.05`` edges with gradient equal to the image
+# subject to :math:`x \geq 0`, where the edge-preserving logcosh penalty is
+#
+# .. math::
+#     R(x) = \delta \sum_i \log\!\cosh\!\left(\frac{(Gx)_i}{\delta}\right)
+#
+# and :math:`G` is the finite forward-difference operator
+# (:class:`.FiniteForwardDifference`, combined with :class:`.LogCosh`).  The
+# scale ``delta`` is ``delta_rel`` times the maximum of the ground truth
+# image.  With ``delta_rel = 0.05``, edges with a gradient equal to the image
 # maximum are placed firmly in the linear (edge-preserving) regime, while
-# smooth-region gradients near zero remain quadratic.
+# smooth-region gradients near zero are penalised quadratically.
+#
+# The data fidelity is expressed in two equivalent ways (same gradient, see
+# the previous example):
+#
+# * **Sinogram** -- :class:`.C2AffineObjective` wrapping
+#   :class:`.NegPoissonLogL` (operates on the predicted counts
+#   :math:`\bar{y}`).
+# * **Listmode** -- :class:`.NegPoissonLogLListmode` (operates directly on
+#   the image :math:`x` with the forward model built in).
+#
+# Both algorithms use the decomposition into :math:`m` subset functions
+#
+# .. math::
+#     f_k(x) = \underbrace{\sum_{i \in S_k} \bar{y}_i - y_i \log \bar{y}_i}_{
+#              \text{subset data fidelity}} + \frac{\beta}{m} R(x),
+#     \qquad k = 1, \ldots, m,
+#
+# so that :math:`F(x) = \sum_{k=1}^m f_k(x)` exactly.  The full prior ``reg``
+# (weight :math:`\beta`) is used to evaluate :math:`F` and the
+# preconditioner; the subset functions use ``reg_per_subset`` (weight
+# :math:`\beta / m`), added with the :meth:`~.C1Function.__add__` operator.
 
 G = parallelproj.operators.FiniteForwardDifference(pet_lin_op.in_shape)
 
@@ -312,6 +316,14 @@ reg = C2AffineObjective(LogCosh(delta=delta, beta=beta), G)
 reg_per_subset = C2AffineObjective(LogCosh(delta=delta, beta=beta / num_subsets), G)
 
 # %%
+# 8. Sensitivity image and full objective
+# ---------------------------------------
+#
+# The sensitivity image :math:`A^T\mathbf{1}` is required by
+# :class:`.NegPoissonLogLListmode` and the preconditioner.  The full
+# regularised sinogram objective :math:`F` is used to evaluate the iterates
+# of all variants.
+#
 # .. note::
 #     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
 #     (shifted Poisson) surrogate: a tiny ``eps = rel_eps * mean(y)`` is
@@ -324,56 +336,53 @@ reg_per_subset = C2AffineObjective(LogCosh(delta=delta, beta=beta / num_subsets)
 #     handled exactly).  Keep the default whenever the expected data can
 #     reach zero in bins with counts.
 
-# the strictly positive contamination guarantees A x + s > 0 in every bin,
-# so the exact (unmodified) log-likelihood can be used
+adjoint_ones = pet_lin_op.adjoint(
+    xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
+)
+
 exact_mode = bool(xp.min(contamination) > 0)
 
-# full sinogram data fidelity (for evaluation)
 sinogram_data_fidelity = C2AffineObjective(
     NegPoissonLogL(y, exact=exact_mode), pet_lin_op, contamination
 )
-
-# full listmode data fidelity (for evaluation)
-lm_data_fidelity = NegPoissonLogLListmode(
-    lm_pet_lin_op, adjoint_ones, contamination_list, float(xp.sum(contamination))
-)
-
-# total objectives (data fidelity + regularisation) -- used only for evaluation
 total_objective_sino = sinogram_data_fidelity + reg
-total_objective_lm = lm_data_fidelity + reg
 
 # %%
-# Sinogram subset objectives :math:`f_k^{\text{sino}}`
-# -----------------------------------------------------
+# 9. Sinogram subset objectives :math:`f_k^{\text{sino}}`
+# -------------------------------------------------------
 #
-# The sinogram is split into ``num_subsets`` subsets of regularly-spaced views.
-# Each subset objective is a sinogram data-fidelity term plus :math:`\beta/m \cdot R(x)`.
+# The sinogram views are distributed over ``num_subsets`` subsets.  Each
+# subset objective is a sinogram data-fidelity term with the subset operator
+# :math:`A^k` plus :math:`\beta/m \cdot R(x)`.
 
 subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
 )
+# the attenuation sinogram has no TOF axis: slices for 3 dimensions
 _, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, 3
 )
 
+# clear the cached LOR endpoints since we create many copies of the projector
 proj.clear_cached_lor_endpoints()
-sino_subset_linop_list = []
 
+sino_subset_linops = []
 for k in range(num_subsets):
     subset_proj = copy(proj)
     subset_proj.views = subset_views[k]
-    att_values_k = (
-        xp.broadcast_to(
-            xp.expand_dims(att_sino[subset_slices_non_tof[k]], axis=-1),
-            subset_proj.out_shape,
-        )
+
+    subset_att_sino = att_sino[subset_slices_non_tof[k]]
+    subset_att_values = (
+        xp.broadcast_to(xp.expand_dims(subset_att_sino, axis=-1), subset_proj.out_shape)
         if subset_proj.tof
-        else att_sino[subset_slices_non_tof[k]]
+        else subset_att_sino
     )
-    sino_subset_linop_list.append(
+    sino_subset_linops.append(
         parallelproj.operators.CompositeLinearOperator(
             [
-                parallelproj.operators.ElementwiseMultiplicationOperator(att_values_k),
+                parallelproj.operators.ElementwiseMultiplicationOperator(
+                    subset_att_values
+                ),
                 subset_proj,
                 res_model,
             ]
@@ -384,55 +393,36 @@ for k in range(num_subsets):
 sino_subset_objectives: list[C1Function] = [
     C2AffineObjective(
         NegPoissonLogL(y[sl], exact=exact_mode),
-        sino_subset_linop_list[k],
+        sino_subset_linops[k],
         contamination[sl],
     )
     + reg_per_subset
     for k, sl in enumerate(subset_slices)
 ]
 
-# sensitivity images (A^k)^T 1 -- one per subset, used as SGD/SVRG preconditioner
-subset_adjoint_ones = xp.zeros(
-    (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
-)
-for k, op in enumerate(sino_subset_linop_list):
-    subset_adjoint_ones[k] = op.adjoint(
-        xp.ones(op.out_shape, dtype=xp.float32, device=dev)
-    )
-
 # %%
-# Listmode subset objectives :math:`f_k^{\text{LM}}`
-# ---------------------------------------------------
+# 10. Listmode subset objectives :math:`f_k^{\text{LM}}`
+# ------------------------------------------------------
 #
 # The event list is partitioned into ``num_subsets`` subsets by taking every
-# :math:`m`-th event: subset :math:`k` uses events at indices
-# :math:`k, k{+}m, k{+}2m, \ldots`
-#
-# Since each subset holds approximately :math:`1/m` of all events, its
-# expected sensitivity is :math:`A^T\mathbf{1} / m`.  The same
-# :math:`\beta/m` regulariser is added to each listmode subset objective via
-# the :meth:`~.C1Function.__add__` operator.
+# :math:`m`-th event: subset :math:`k` uses the events with indices
+# :math:`k, k{+}m, k{+}2m, \ldots`.  Since each subset holds approximately
+# :math:`1/m` of all events, its sensitivity image is approximated as
+# :math:`A^T\mathbf{1} / m`, and the contamination constant is scaled by the
+# same factor.  The same :math:`\beta/m` prior is added to each listmode
+# subset objective.
 
 lm_subset_adj_ones = adjoint_ones / num_subsets
 lm_subset_contamination_sum = float(xp.sum(contamination)) / num_subsets
 
 lm_subset_objectives: list[C1Function] = []
 for k in range(num_subsets):
-    lm_proj_k = parallelproj.projectors.ListmodePETProjector(
+    lm_proj_k, att_list_k = setup_listmode_projector(
         xp.asarray(event_start_coords[k::num_subsets], copy=True),
         xp.asarray(event_end_coords[k::num_subsets], copy=True),
-        img_shape,
-        voxel_size,
-        proj.img_origin,
+        xp.asarray(event_tofbins[k::num_subsets], copy=True) if proj.tof else None,
     )
-    att_list_k = xp.exp(-lm_proj_k(x_att))
     lm_att_op_k = parallelproj.operators.ElementwiseMultiplicationOperator(att_list_k)
-    lm_proj_k.tof_parameters = proj.tof_parameters
-    if proj.tof:
-        assert event_tofbins is not None
-        lm_proj_k.event_tofbins = xp.asarray(event_tofbins[k::num_subsets], copy=True)
-        lm_proj_k.tof = proj.tof
-
     lm_subset_objectives.append(
         NegPoissonLogLListmode(
             parallelproj.operators.CompositeLinearOperator(
@@ -446,25 +436,142 @@ for k in range(num_subsets):
     )
 
 # %%
-# SVRG helper functions
-# ---------------------
+# 11. Preconditioner and warm start
+# ---------------------------------
 #
-# Both helpers operate on any list of :class:`.C1Function` objects, so the
-# same code drives both sinogram and listmode SVRG.
+# SGD and SVRG take preconditioned gradient steps with the diagonal
+# preconditioner
+#
+# .. math::
+#     D = \operatorname{diag}\left(\frac{x}{S + \beta\, c_R(x)\, x}\right),
+#
+# with the curvature :math:`\beta\, c_R(x)` of the separable quadratic
+# majorizer of the prior (``reg.separable_majorizer_curvature(x)``, an upper
+# bound of the prior, safe also for strong priors, see
+# :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`)
+# and the full sensitivity image :math:`S = A^T\mathbf{1}` for both the
+# sinogram and the listmode variants (the scaled subset gradient
+# :math:`m \nabla f_k` approximates the gradient of the *full* objective).
+# The preconditioner is zero outside the FOV.
+#
+# The warm start for all four reconstructions is four preconditioned LM-SGD
+# subset updates from a uniform image (zero outside the FOV).
+
+
+def preconditioner(x: Array) -> Array:
+    """Diagonal preconditioner x / (A^T 1 + beta c_R(x) x), 0 outside the FOV"""
+    denom = adjoint_ones + reg.separable_majorizer_curvature(x) * x
+    if fov_mask is None:
+        return x / denom
+    return xp.where(fov_mask, x / denom, xp.zeros_like(x))
+
+
+x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
+if fov_mask is not None:
+    x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
+
+num_init_updates = 4
+
+for k in range(num_init_updates):
+    print(f"warm-start LM-SGD subset {(k + 1):03} / {num_init_updates:03}", end="\r")
+    init_precond = preconditioner(x_init)
+    x_init = xp.clip(
+        x_init
+        - init_precond * (num_subsets * lm_subset_objectives[k].gradient(x_init)),
+        0,
+        None,
+    )
+print()
+
+# %%
+# 12. SGD (sinogram and listmode)
+# -------------------------------
+#
+# Each SGD epoch cycles through all :math:`m` subsets.  Because
+# :math:`F(x) = \sum_k f_k(x)`, the full gradient is approximated as
+#
+# .. math::
+#     \nabla F(x) \approx m\,\nabla f_k(x)
+#
+# and a gradient step with the diagonal preconditioner :math:`D` is taken,
+# followed by a projection onto :math:`x \geq 0`:
+#
+# .. math::
+#     x^+ = \left(x - D\, m\,\nabla f_k(x)\right)_+.
+#
+# The preconditioner is updated infrequently to amortise its cost: at the
+# start of epochs 1, 3 and 5, and kept fixed afterwards.  The same function
+# runs the sinogram and the listmode variant; every iterate is evaluated with
+# the regularised *sinogram* objective :math:`F`.
+
+
+def run_sgd(
+    subset_objectives: Sequence[C1Function], label: str
+) -> tuple[Array, list[float]]:
+    """SGD from x_init; returns the image and the objective F after each epoch"""
+    df: list[float] = []
+    x = xp.asarray(x_init, copy=True)
+    for i in range(num_epochs):
+        if i % 2 == 0 and i <= 4:
+            precond = preconditioner(x)
+        for k in range(num_subsets):
+            print(
+                f"{label} epoch {(i + 1):04} / {num_epochs:04}, "
+                f"subset {(k + 1):03} / {num_subsets:03}",
+                end="\r",
+            )
+            approx_grad = num_subsets * subset_objectives[k].gradient(x)
+            x = xp.clip(x - step_size * precond * approx_grad, 0, None)
+        df.append(float(total_objective_sino(x)))
+    print()
+    return x, df
+
+
+x_sgd_sino, df_sgd_sino = run_sgd(sino_subset_objectives, "Sino-SGD")
+x_sgd_lm, df_sgd_lm = run_sgd(lm_subset_objectives, "LM-SGD")
+
+# %%
+# 13. SVRG (sinogram and listmode)
+# --------------------------------
+#
+# Each SVRG epoch consists of two phases:
+#
+# 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
+#    subset gradients :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` at the
+#    current point :math:`\tilde{x}`, then take a full gradient step using
+#    :math:`\nabla F(\tilde{x}) = \sum_k \tilde{g}_k`.
+# 2. **Variance-reduced subset updates**: for each subset :math:`k`, form
+#    the variance-reduced gradient
+#
+#    .. math::
+#        g^{VR}_k = m \left( \nabla f_k(x) - \tilde{g}_k \right)
+#                   + \sum_{j=1}^m \tilde{g}_j
+#
+#    and take a preconditioned, projected gradient step.
+#
+# As for SGD, the preconditioner is updated in epochs 1, 3 and 5 (in the
+# anchor phase).  The helper functions only use the :class:`.C1Function`
+# interface; the prior is already folded into every subset objective.
+#
+# .. note::
+#     An SVRG epoch with an anchor phase costs **two** full data passes (one
+#     for the snapshot gradients, one for the :math:`m` subset updates), the
+#     other epochs one.  With an anchor every other epoch, an SVRG epoch
+#     costs 1.5 data passes on average, compared to one per SGD epoch.
 
 
 def svrg_calc_snapshot_gradients(
     x_cur: Array,
     subset_obj_functions: Sequence[C1Function],
 ) -> tuple[Array, Array]:
-    """Compute and store all subset gradients at the current anchor point.
+    """Store all subset gradients at the current anchor point and return their sum.
 
     Returns
     -------
     stored_grads : Array, shape (m, *x_cur.shape)
         Stacked subset gradients evaluated at the anchor point.
     full_grad : Array, shape x_cur.shape
-        Sum of all subset gradients (approximates the full gradient of F).
+        Sum of all subset gradients (the full gradient of F).
     """
     m = len(subset_obj_functions)
     stored_grads = xp.zeros((m,) + x_cur.shape, dtype=x_cur.dtype, device=dev)
@@ -483,16 +590,7 @@ def svrg_update(
     precond: Array,
     step_size: float = 1.0,
 ) -> Array:
-    """Single SVRG subset update with variance-reduced gradient.
-
-    The variance-reduced gradient for subset :math:`k` is
-
-    .. math::
-
-        g^{VR}_k = m\\bigl(\\nabla f_k(x) - \\tilde{g}_k\\bigr) + \\sum_j \\tilde{g}_j
-
-    where :math:`\\tilde{g}_k` are the stored anchor gradients.
-    """
+    """Single SVRG subset update with variance-reduced gradient."""
     m = len(subset_obj_functions)
     grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
     approx_grad = (
@@ -502,333 +600,134 @@ def svrg_update(
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
-# %%
-# Warm start
-# ----------
-#
-# Run one LM-SGD epoch as a common warm-start for all four reconstructions.
-
-x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-if fov_mask is not None:
-    x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
-
-_denom = adjoint_ones + reg.separable_majorizer_curvature(x_init) * x_init
-if fov_mask is None:
-    init_precond = x_init / _denom
-else:
-    init_precond = xp.where(fov_mask, x_init / _denom, xp.zeros_like(x_init))
-
-num_init_updates = 4
-
-for k in range(num_init_updates):
-    print(f"warm-start LM-SGD subset {(k+1):03} / {num_init_updates:03}", end="\r")
-    _denom = adjoint_ones + reg.separable_majorizer_curvature(x_init) * x_init
-    if fov_mask is None:
-        init_precond = x_init / _denom
-    else:
-        init_precond = xp.where(fov_mask, x_init / _denom, xp.zeros_like(x_init))
-    x_init = xp.clip(
-        x_init
-        - init_precond * (num_subsets * lm_subset_objectives[k].gradient(x_init)),
-        0,
-        None,
-    )
-print()
-
-# %%
-# SGD with regularisation (sinogram and listmode)
-# -----------------------------------------------
-#
-# Each SGD epoch cycles through all :math:`m` subsets.  Because
-# :math:`F(x) = \sum_k f_k(x)`, the full gradient is approximated as
-#
-# .. math::
-#     \nabla F(x) \approx m\,\nabla f_k(x)
-#
-# and a gradient step with a diagonal preconditioner :math:`D` is taken:
-#
-# .. math::
-#     x^+ = \left(x - D\, m\,\nabla f_k(x)\right)_+
-#
-# The preconditioner is updated infrequently to amortise its cost.  It is
-#
-# .. math::
-#     D = \operatorname{diag}\left(\frac{x}{S + \beta\, c_R(x)\, x}\right),
-#
-# with the curvature :math:`\beta\, c_R(x)` of the separable quadratic
-# majorizer of the prior (``reg.separable_majorizer_curvature(x)``, an upper
-# bound of the prior, safe also for strong priors, see
-# :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`),
-# and the sensitivity :math:`S = (A^k)^T\mathbf{1}` (exact subset
-# sensitivity) for the sinogram variant or :math:`S = A^T\mathbf{1}/m`
-# (scaled full sensitivity) for the listmode variant.
-
-# --- sinogram SGD ---
-df_sgd_sino: list[float] = []
-x_sgd_sino = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + reg.separable_majorizer_curvature(x_sgd_sino) * x_sgd_sino
-if fov_mask is None:
-    sgd_precond_sino = x_sgd_sino / _denom
-else:
-    sgd_precond_sino = xp.where(
-        fov_mask, x_sgd_sino / _denom, xp.zeros_like(x_sgd_sino)
-    )
-
-for i in range(num_epochs):
-    if i % 2 == 0 and i <= 4:
-        # Use mean subset sensitivity as a single shared preconditioner
-        _denom = adjoint_ones + reg.separable_majorizer_curvature(x_sgd_sino) * x_sgd_sino
-        if fov_mask is None:
-            sgd_precond_sino = x_sgd_sino / _denom
-        else:
-            sgd_precond_sino = xp.where(
-                fov_mask, x_sgd_sino / _denom, xp.zeros_like(x_sgd_sino)
+def run_svrg(
+    subset_objectives: Sequence[C1Function], label: str
+) -> tuple[Array, list[float]]:
+    """SVRG from x_init; returns the image and the objective F after each epoch"""
+    df: list[float] = []
+    x = xp.asarray(x_init, copy=True)
+    for epoch in range(num_epochs):
+        if epoch % 2 == 0:
+            if epoch <= 4:
+                precond = preconditioner(x)
+            stored_grads, full_grad = svrg_calc_snapshot_gradients(x, subset_objectives)
+            x = xp.clip(x - step_size * precond * full_grad, 0, None)
+        for k in range(num_subsets):
+            print(
+                f"{label} epoch {(epoch + 1):04} / {num_epochs:04}, "
+                f"subset {(k + 1):03} / {num_subsets:03}",
+                end="\r",
             )
-    for k in range(num_subsets):
-        print(
-            f"Sino-SGD epoch {(i+1):04} / {num_epochs:04}, "
-            f"subset {(k+1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        approx_grad = num_subsets * sino_subset_objectives[k].gradient(x_sgd_sino)
-        x_sgd_sino = xp.clip(
-            x_sgd_sino - step_size * sgd_precond_sino * approx_grad, 0, None
-        )
-    df_sgd_sino.append(float(total_objective_sino(x_sgd_sino)))
-print()
-
-# --- listmode SGD ---
-df_sgd_lm: list[float] = []
-x_sgd_lm = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + reg.separable_majorizer_curvature(x_sgd_lm) * x_sgd_lm
-if fov_mask is None:
-    sgd_precond_lm = x_sgd_lm / _denom
-else:
-    sgd_precond_lm = xp.where(fov_mask, x_sgd_lm / _denom, xp.zeros_like(x_sgd_lm))
-
-for i in range(num_epochs):
-    if i % 2 == 0 and i <= 4:
-        _denom = adjoint_ones + reg.separable_majorizer_curvature(x_sgd_lm) * x_sgd_lm
-        if fov_mask is None:
-            sgd_precond_lm = x_sgd_lm / _denom
-        else:
-            sgd_precond_lm = xp.where(
-                fov_mask, x_sgd_lm / _denom, xp.zeros_like(x_sgd_lm)
+            x = svrg_update(
+                x,
+                k,
+                subset_objectives,
+                stored_grads,
+                full_grad,
+                precond,
+                step_size=step_size,
             )
-    for k in range(num_subsets):
-        print(
-            f"LM-SGD epoch {(i+1):04} / {num_epochs:04}, "
-            f"subset {(k+1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        approx_grad = num_subsets * lm_subset_objectives[k].gradient(x_sgd_lm)
-        x_sgd_lm = xp.clip(x_sgd_lm - step_size * sgd_precond_lm * approx_grad, 0, None)
-    df_sgd_lm.append(float(total_objective_sino(x_sgd_lm)))
-print()
+        df.append(float(total_objective_sino(x)))
+    print()
+    return x, df
+
+
+x_svrg_sino, df_svrg_sino = run_svrg(sino_subset_objectives, "Sino-SVRG")
+x_svrg_lm, df_svrg_lm = run_svrg(lm_subset_objectives, "LM-SVRG")
 
 # %%
-# SVRG with regularisation (sinogram and listmode)
-# -------------------------------------------------
+# 14. Convergence comparison
+# --------------------------
 #
-# Each SVRG epoch consists of two phases:
-#
-# 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
-#    subset gradients :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` at the
-#    current point :math:`\tilde{x}`, then take a full gradient step using
-#    :math:`\nabla F(\tilde{x}) = \sum_k \tilde{g}_k`.
-# 2. **Variance-reduced subset updates**: for each subset :math:`k`, form
-#    the variance-reduced gradient
-#
-#    .. math::
-#        g^{VR}_k = m \left( \nabla f_k(x) - \tilde{g}_k \right)
-#                   + \sum_{j=1}^m \tilde{g}_j
-#
-# The same :func:`svrg_calc_snapshot_gradients` and :func:`svrg_update`
-# functions are used for both sinogram and listmode because both expose the
-# :class:`.C1Function` interface -- the regularisation term is already folded
-# into every subset objective via :meth:`~.C1Function.__add__`.
-
-# --- sinogram SVRG ---
-df_svrg_sino: list[float] = []
-x_svrg_sino = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + reg.separable_majorizer_curvature(x_svrg_sino) * x_svrg_sino
-if fov_mask is None:
-    svrg_precond_sino = x_svrg_sino / _denom
-else:
-    svrg_precond_sino = xp.where(
-        fov_mask, x_svrg_sino / _denom, xp.zeros_like(x_svrg_sino)
-    )
-stored_grads_sino: Array
-full_grad_sino: Array
-
-for epoch in range(num_epochs):
-    if epoch % 2 == 0:
-        if epoch <= 4:
-            _denom = adjoint_ones + reg.separable_majorizer_curvature(x_svrg_sino) * x_svrg_sino
-            if fov_mask is None:
-                svrg_precond_sino = x_svrg_sino / _denom
-            else:
-                svrg_precond_sino = xp.where(
-                    fov_mask, x_svrg_sino / _denom, xp.zeros_like(x_svrg_sino)
-                )
-        stored_grads_sino, full_grad_sino = svrg_calc_snapshot_gradients(
-            x_svrg_sino, sino_subset_objectives
-        )
-        x_svrg_sino = xp.clip(
-            x_svrg_sino - step_size * svrg_precond_sino * full_grad_sino, 0, None
-        )
-    for k in range(num_subsets):
-        print(
-            f"Sino-SVRG epoch {(epoch+1):04} / {num_epochs:04}, "
-            f"subset {(k+1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        x_svrg_sino = svrg_update(
-            x_svrg_sino,
-            k,
-            sino_subset_objectives,
-            stored_grads_sino,
-            full_grad_sino,
-            svrg_precond_sino,
-            step_size=step_size,
-        )
-    df_svrg_sino.append(float(total_objective_sino(x_svrg_sino)))
-print()
-
-# --- listmode SVRG ---
-df_svrg_lm: list[float] = []
-x_svrg_lm = xp.asarray(x_init, copy=True)
-_denom = adjoint_ones + reg.separable_majorizer_curvature(x_svrg_lm) * x_svrg_lm
-if fov_mask is None:
-    svrg_precond_lm = x_svrg_lm / _denom
-else:
-    svrg_precond_lm = xp.where(fov_mask, x_svrg_lm / _denom, xp.zeros_like(x_svrg_lm))
-stored_grads_lm: Array
-full_grad_lm: Array
-
-for epoch in range(num_epochs):
-    if epoch % 2 == 0:
-        if epoch <= 4:
-            _denom = adjoint_ones + reg.separable_majorizer_curvature(x_svrg_lm) * x_svrg_lm
-            if fov_mask is None:
-                svrg_precond_lm = x_svrg_lm / _denom
-            else:
-                svrg_precond_lm = xp.where(
-                    fov_mask, x_svrg_lm / _denom, xp.zeros_like(x_svrg_lm)
-                )
-        stored_grads_lm, full_grad_lm = svrg_calc_snapshot_gradients(
-            x_svrg_lm, lm_subset_objectives
-        )
-        x_svrg_lm = xp.clip(
-            x_svrg_lm - step_size * svrg_precond_lm * full_grad_lm, 0, None
-        )
-    for k in range(num_subsets):
-        print(
-            f"LM-SVRG epoch {(epoch+1):04} / {num_epochs:04}, "
-            f"subset {(k+1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        x_svrg_lm = svrg_update(
-            x_svrg_lm,
-            k,
-            lm_subset_objectives,
-            stored_grads_lm,
-            full_grad_lm,
-            svrg_precond_lm,
-            step_size=step_size,
-        )
-    df_svrg_lm.append(float(total_objective_sino(x_svrg_lm)))
-print()
-
-# %%
-# Convergence comparison
-# ----------------------
-#
-# We plot the total objective :math:`F(x) = \sum_i(\bar{y}_i - y_i\log\bar{y}_i) + \beta R(x)`
-# vs epoch (left) and vs full data passes (right).
-#
-# Data-pass counts:
-#
-# * **SGD**: 1 full data pass per epoch.
-# * **SVRG**: 2 passes on anchor epochs (snapshot + subset updates),
-#   1 pass on non-anchor epochs.
-#
-# Both sinogram and listmode variants are compared, demonstrating that the
-# choice of data representation does not affect convergence when the same
-# subset splitting and step size are used.
+# We plot the regularised objective
+# :math:`F(x) = \sum_i(\bar{y}_i - y_i\log\bar{y}_i) + \beta R(x)` of all
+# variants vs epoch (left) and vs full data passes (right): one per SGD epoch,
+# two per SVRG epoch with an anchor phase and one otherwise.
 
 epochs = np.arange(1, num_epochs + 1)
-sgd_passes = epochs.copy()
+svrg_passes = np.cumsum(np.where(np.arange(num_epochs) % 2 == 0, 2, 1))
 
-svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
-svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
-
-all_values = df_sgd_sino + df_sgd_lm + df_svrg_sino + df_svrg_lm
-df_min = min(all_values)
+df_min = min(df_sgd_sino + df_sgd_lm + df_svrg_sino + df_svrg_lm)
 df_max = max(df_sgd_sino[0], df_sgd_lm[0])
 
-sgd_label_sino = f"Sino-SGD ({num_subsets} subsets, step={step_size:.1f})"
-sgd_label_lm = f"LM-SGD ({num_subsets} subsets, step={step_size:.1f})"
-svrg_label_sino = f"Sino-SVRG ({num_subsets} subsets, step={step_size:.1f})"
-svrg_label_lm = f"LM-SVRG ({num_subsets} subsets, step={step_size:.1f})"
+fig, axs = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
 
-fig, axs = plt.subplots(1, 2, figsize=(13, 4.5), layout="constrained")
-
-for ax, xvals_sgd, xvals_svrg, xlabel in (
-    (axs[0], epochs, epochs, "Epoch"),
-    (axs[1], sgd_passes, svrg_cumulative_passes, "Full data passes"),
-):
-    ax.plot(xvals_sgd, df_sgd_sino, label=sgd_label_sino, marker="o")
-    ax.plot(xvals_sgd, df_sgd_lm, label=sgd_label_lm, marker="s")
-    ax.plot(xvals_svrg, df_svrg_sino, label=svrg_label_sino, marker="^")
-    ax.plot(xvals_svrg, df_svrg_lm, label=svrg_label_lm, marker="v")
+for ax, svrg_xvals in ((axs[0], epochs), (axs[1], svrg_passes)):
+    ax.plot(epochs, df_sgd_sino, marker="o", label="Sino-SGD")
+    ax.plot(epochs, df_sgd_lm, marker="s", label="LM-SGD")
+    ax.plot(svrg_xvals, df_svrg_sino, marker="^", label="Sino-SVRG")
+    ax.plot(svrg_xvals, df_svrg_lm, marker="v", label="LM-SVRG")
     ax.set_ylim(df_min, df_max)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(r"$F(x) = \sum_i(\bar{y}_i - y_i \log \bar{y}_i) + \beta R(x)$")
-    ax.set_title(rf"Convergence ($\beta={beta}$)")
-    ax.legend(fontsize="small")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(ls=":")
 
+axs[0].set_xlabel("epoch")
+axs[0].set_ylabel("regularised objective F(x)")
+axs[0].set_title(f"Convergence per epoch (beta = {beta})")
+axs[1].set_xlabel("full data passes")
+axs[1].set_title(f"Convergence per data pass (beta = {beta})")
+fig.legend(
+    *axs[0].get_legend_handles_labels(),
+    loc="outside lower center",
+    ncols=4,
+    title=f"{num_subsets} subsets, step size {step_size:.1f}",
+    fontsize="small",
+)
 fig.show()
 
 # %%
-# Reconstruction results
-# ----------------------
+# SVRG reaches clearly lower objective values than SGD, per epoch and per
+# data pass.  Sinogram and listmode variants of each algorithm follow the
+# same course; the small offsets between them come from the different subset
+# partitions (views vs. every :math:`m`-th event) and subset sensitivities,
+# which change the individual subset updates.
+
+# %%
+# 15. Reconstructed images
+# ------------------------
+#
+# The final images of all four variants, with the same colour scale.
 
 vmax = float(xp.max(x_sgd_sino))
 
-# %%
-fig_sgd_sino, _, widgets_sgd_sino = show_vol_cuts(
-    x_sgd_sino,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Sino-SGD ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_sgd_sino.show()
+for img, title in (
+    (x_sgd_sino, "Sinogram SGD"),
+    (x_sgd_lm, "Listmode SGD"),
+    (x_svrg_sino, "Sinogram SVRG"),
+    (x_svrg_lm, "Listmode SVRG"),
+):
+    fig, _, _ = show_vol_cuts(
+        img,
+        voxel_size=voxel_size,
+        fig_title=f"{title} ({num_subsets} subsets, {num_epochs} epochs)",
+        vmin=0,
+        vmax=vmax,
+    )
+    fig.show()
 
 # %%
-fig_sgd_lm, _, widgets_sgd_lm = show_vol_cuts(
-    x_sgd_lm,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"LM-SGD ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_sgd_lm.show()
+# Sinogram and listmode images of the same algorithm look alike.  Thanks to
+# the prior, the images are much less noisy than the unregularised
+# reconstructions of the previous example, and the inserts are visible.
 
 # %%
-fig_svrg_sino, _, widgets_svrg_sino = show_vol_cuts(
-    x_svrg_sino,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Sino-SVRG ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_svrg_sino.show()
+# Summary
+# -------
+#
+# - Adding :math:`\beta R / m` to each sinogram or listmode subset data
+#   fidelity splits the regularised objective exactly into subset functions,
+#   :math:`F = \sum_k f_k`.
+# - The preconditioner :math:`x / (A^T\mathbf{1} + \beta c_R(x) x)` combines
+#   the EM preconditioner with the curvature of a separable quadratic
+#   majorizer of the prior.
+# - SGD and SVRG only use the :class:`.C1Function` interface: the same code
+#   reconstructs sinogram and listmode data with similar convergence.
+# - SVRG reaches lower objective values than SGD; an SVRG epoch with an anchor
+#   phase costs two data passes, so compare per data pass, not only per epoch.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_04_listmode_algorithms_02_lm_spdhg.py`
+#    -- listmode SPDHG with a non-smooth total variation prior.
 
-# %%
-fig_svrg_lm, _, widgets_svrg_lm = show_vol_cuts(
-    x_svrg_lm,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"LM-SVRG ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_svrg_lm.show()
+# sphinx_gallery_thumbnail_number = 1
