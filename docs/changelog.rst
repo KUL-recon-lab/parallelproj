@@ -141,6 +141,18 @@ Documentation
   print a note that the shown results are less converged. GPU builds keep the
   full numbers; ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1`` runs them on the
   CPU as well.
+- **MAP examples use the separable majorizer of the prior in their
+  preconditioners.** (`#187
+  <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_) The SGD /
+  SVRG examples (sinogram and listmode) use
+  :math:`x / (A^T 1 + \beta c_R(x)\, x)`, the transmission examples (MAPTR,
+  MLAA) :math:`1 / (c_\text{data} + \beta c_R)` (activity in MLAA:
+  :math:`\lambda / (\text{sens} + \beta c_R \lambda)`), with
+  :math:`\beta c_R` = ``reg.separable_majorizer_curvature(x)``.  The
+  transmission examples previously used the constant
+  :math:`\beta \operatorname{diag}(G^TG) / \delta`, the maximal Hessian
+  diagonal, which is not a separable majorizer (it lacks the factor 2 of De
+  Pierro's surrogate).  Results are practically unchanged.
 - **New example: preconditioners for SVRG with an edge-preserving prior.**
   (`#187 <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_)
   Compares the Hessian diagonal, twice the Hessian diagonal and the

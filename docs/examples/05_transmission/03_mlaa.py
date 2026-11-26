@@ -115,14 +115,16 @@ where :math:`x` is :math:`\\lambda` or :math:`\\mu`, :math:`G` is the
 :math:`d` and voxels :math:`j`), and :math:`\\delta` -- :math:`\\delta_\\lambda`
 or :math:`\\delta_\\mu` -- is the edge-preservation scale: differences
 :math:`\\gg \\delta` are penalised roughly linearly (edges preserved),
-:math:`\\ll \\delta` quadratically (noise smoothed).  The constant
-:math:`\\kappa = \\operatorname{diag}(G^T G) \\approx 2\\,n_\\text{dim}` is the
-log-cosh **maximal curvature** (a valid diagonal majorant, since
-:math:`\\tfrac{d^2}{dz^2}\\,\\delta\\log\\cosh(z/\\delta) =
-\\tfrac1\\delta\\operatorname{sech}^2 \\le \\tfrac1\\delta`); it enters the
+:math:`\\ll \\delta` quadratically (noise smoothed).  The prior enters the
 **harmonic-mean preconditioners** :math:`D_\\lambda^{(k)}` and
-:math:`D_\\mu^{(k)}` through the :math:`\\beta\\,\\kappa/\\delta` term, which
-combines the data (sensitivity) and prior curvatures.
+:math:`D_\\mu^{(k)}` through the curvature :math:`c_R(x)` of its **separable
+quadratic majorizer** (``reg.separable_majorizer_curvature(x)``, De Pierro's
+surrogate :math:`c_R = |G|^T(\\omega(Gx) \\odot |G|\\mathbf 1)` with Huber's
+curvature :math:`\\omega(t) = \\psi'(t)/t`, see
+:meth:`.C2Function.separable_majorizer_curvature`), which combines with the
+data (sensitivity) curvature.  It adapts to the image and, unlike the maximal
+Hessian diagonal :math:`\\operatorname{diag}(G^TG)/\\delta`, it is a
+majorizer of the prior.
 
 * **activity** (:math:`\\mu` fixed) -- a penalised OSEM step driven by
   :math:`\\nabla_\\lambda L^{(k)}`:
@@ -137,7 +139,7 @@ combines the data (sensitivity) and prior curvatures.
 
       D_\\lambda^{(k)} = \\lambda \\oslash \\big(
       B^T (P_\\text{tof}^{(k)})^T a^{(k)}
-      + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot \\kappa / \\delta_\\lambda\\big) .
+      + \\tfrac{\\beta_\\lambda}{m}\\,\\lambda \\odot c_R(\\lambda)\\big) .
 
 * **attenuation** (:math:`\\lambda` fixed) -- a penalised **OS-MAPTR** step
   driven by :math:`\\nabla_\\mu L^{(k)}`: the transmission update of
@@ -154,7 +156,7 @@ combines the data (sensitivity) and prior curvatures.
 
       D_\\mu^{(k)} = \\mathbf 1 \\oslash \\big(
       (P_\\text{nt}^{(k)})^T\\big[(P_\\text{nt}^{(k)}\\mathbf 1) \\odot c^{(k)}\\big]
-      + \\tfrac{\\beta_\\mu}{m}\\,\\kappa / \\delta_\\mu\\big),
+      + \\tfrac{\\beta_\\mu}{m}\\,c_R(\\mu)\\big),
       \\qquad
       c^{(k)}_i = \\Sigma_t\\, \\frac{(\\bar z^{(k)}_{i,t})^2}{\\bar y^{(k)}_{i,t}},
 
@@ -404,7 +406,6 @@ Pnt1_k = [proj_nt_k[k](ones_img) for k in range(num_subsets)]  # subset att sens
 
 # finite-difference operator G of the edge-preserving prior (NOT the PSF B above)
 G = parallelproj.operators.FiniteForwardDifference(img_shape)
-kappa = 2.0 * len(img_shape)  # diag(G^T G) for forward differences = 2 * ndim
 
 
 def emission_neg_logL(lam: Array, mu: Array) -> float:
@@ -489,8 +490,16 @@ for k in range(num_subsets):
 delta_lam = 0.3 * float(xp.mean(lam_warm[lam_warm > 0]))
 reg_lam = C2AffineObjective(LogCosh(delta=delta_lam, beta=beta_lam), G)
 reg_mu = C2AffineObjective(LogCosh(delta=delta_mu, beta=beta_mu), G)
-prior_curv_lam = beta_lam * kappa / delta_lam
-prior_curv_mu = beta_mu * kappa / delta_mu
+
+
+def prior_curv_lam(lam: Array) -> Array:
+    """separable majorizer curvature of beta_lam R at lam, per subset"""
+    return reg_lam.separable_majorizer_curvature(lam) / num_subsets
+
+
+def prior_curv_mu(mu: Array) -> Array:
+    """separable majorizer curvature of beta_mu R at mu, per subset"""
+    return reg_mu.separable_majorizer_curvature(mu) / num_subsets
 
 
 def penalised_cost(lam: Array, mu: Array) -> float:
@@ -515,7 +524,7 @@ for it in range(num_outer):
         grad = A_k[k].adjoint(a0_k[k] * (y_k[k] / ybar - 1.0))
         sens = A_k[k].adjoint(a0_k[k] * xp.ones_like(ybar))
         g_pen = grad - reg_lam.gradient(lam_ac) / num_subsets
-        D = _safe(lam_ac, sens + lam_ac * prior_curv_lam / num_subsets, fov_mask)
+        D = _safe(lam_ac, sens + lam_ac * prior_curv_lam(lam_ac), fov_mask)
         lam_ac = xp.clip(lam_ac + D * g_pen, 0, None)
 print()
 
@@ -535,7 +544,7 @@ for it in range(num_outer):
         grad = A_k[k].adjoint(aT_k[k] * (y_k[k] / ybar - 1.0))
         sens = A_k[k].adjoint(aT_k[k] * xp.ones_like(ybar))
         g_pen = grad - reg_lam.gradient(lam_ref) / num_subsets
-        D = _safe(lam_ref, sens + lam_ref * prior_curv_lam / num_subsets, fov_mask)
+        D = _safe(lam_ref, sens + lam_ref * prior_curv_lam(lam_ref), fov_mask)
         lam_ref = xp.clip(lam_ref + D * g_pen, 0, None)
 print()
 
@@ -572,7 +581,7 @@ for it in range(num_outer):
         )  # B^T P_tof^T (a * 1), attenuated
         g_pen = grad - reg_lam.gradient(lam) / num_subsets
         # harmonic-mean preconditioner: 1 / (sens/lam + prior curvature)
-        D = _safe(lam, sens + lam * prior_curv_lam / num_subsets, fov_mask)
+        D = _safe(lam, sens + lam * prior_curv_lam(lam), fov_mask)
         lam = xp.clip(lam + D * g_pen, 0, None)
 
         # --- num_att_updates_per_act_update attenuation (OS-MAPTR) subset updates ---
@@ -591,7 +600,7 @@ for it in range(num_outer):
             grad = proj_nt_k[kt].adjoint(grad_sino) - reg_mu.gradient(mu) / num_subsets
             denom = (
                 proj_nt_k[kt].adjoint(Pnt1_k[kt] * curv_sino)
-                + prior_curv_mu / num_subsets
+                + prior_curv_mu(mu)
             )
             # mu is estimated only inside the object support
             mu = xp.clip(mu + _safe(grad, denom, support), 0, None)

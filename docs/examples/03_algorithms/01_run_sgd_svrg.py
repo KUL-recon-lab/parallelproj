@@ -343,22 +343,19 @@ total_objective = full_data_fidelity + reg
 # curvature of the prior,
 #
 # .. math::
-#     D = \operatorname{diag}\left(\frac{x}{A^T 1 +
-#         \operatorname{diag}\!\left(H_R(x)\right) x}\right),
-#     \qquad H_R(x) = \beta\, G^T \operatorname{diag}\!\left(\psi''(Gx)\right) G,
+#     D = \operatorname{diag}\left(\frac{x}{A^T 1 + \beta\, c_R(x)\, x}\right),
+#     \qquad c_R(x) = |G|^T \left(\omega(Gx) \odot |G| 1\right),
+#     \qquad \omega(t) = \frac{\psi'(t)}{t},
 #     \qquad \psi(t) = \delta \log\cosh(t / \delta),
 #
-# where :math:`\operatorname{diag}(H_R(x))` is the **Hessian diagonal** of the
-# prior, ``reg.hessian_diag(x)``.  For the forward differences :math:`G`
-# (entries :math:`\pm 1`) it is :math:`\beta\, |G|^T \psi''(Gx)`: the sum of
-# the curvatures of all differences a voxel takes part in.  It is
+# where :math:`\beta\, c_R(x)` (``reg.separable_majorizer_curvature(x)``) is
+# the curvature of the **separable quadratic majorizer** of the prior (De
+# Pierro's surrogate with Huber's curvature :math:`\omega \geq \psi''`): a
+# separable quadratic that lies above :math:`\beta R` everywhere.  It is
 # non-negative, so the preconditioner is non-negative for non-negative
-# images.  (The Hessian-vector product :math:`H_R(x)\, x`, by contrast, is a
-# weighted graph Laplacian applied to :math:`x` and negative in voxels that
-# are colder than their neighbours, so it is not suited as a curvature
-# estimate.)  For strong priors, the Hessian diagonal can be too small for
-# a fixed step size; the separable majorizer
-# (``reg.separable_majorizer_curvature(x)``) is a safe alternative, see
+# images, and it keeps the steps safe also for strong or strongly
+# edge-preserving priors, where the Hessian diagonal
+# (``reg.hessian_diag(x)``) is too small for a fixed step size, see
 # :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`.
 #
 # The scanner's cylindrical field of view (FOV) does not cover every voxel of
@@ -377,8 +374,8 @@ fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 
 
 def preconditioner(x: Array) -> Array:
-    """Diagonal preconditioner x / (A^T 1 + 2 beta G^T H G x), 0 outside FOV"""
-    denom = adjoint_ones + reg.hessian_diag(x) * x
+    """Diagonal preconditioner x / (A^T 1 + beta c_R(x) x), 0 outside FOV"""
+    denom = adjoint_ones + reg.separable_majorizer_curvature(x) * x
     if fov_mask is None:
         return x / denom
     return xp.where(fov_mask, x / denom, xp.zeros_like(x))
