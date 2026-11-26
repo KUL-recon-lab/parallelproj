@@ -30,6 +30,32 @@ New features
 Changes
 ~~~~~~~
 
+- **Hessian-vector products and Hessian diagonals of C2 functions.** (`#185
+  <https://github.com/KUL-recon-lab/parallelproj/issues/185>`_)
+  ``C2Function.hessian_diag_vec_prod`` was documented as
+  :math:`\operatorname{diag}(H_f(x)) \odot v`, but composite functions
+  (:class:`.C2AffineObjective`, :class:`.NegPoissonLogLListmode`) return the
+  full Hessian-vector product :math:`H_f(x)\, v`.
+
+  - new :meth:`.C2Function.hessian_vec_prod`: the Hessian-vector product
+    (same values as the old method for all classes);
+    ``hessian_diag_vec_prod`` is a deprecated alias (``DeprecationWarning``),
+    and subclasses that implement the old ``_hessian_diag_vec_prod`` keep
+    working (with a ``DeprecationWarning``);
+  - new :meth:`.C2Function.hessian_diag`: the Hessian diagonal
+    :math:`\operatorname{diag}(H_f(x))`, for composite functions
+    :math:`|A|^{2\,T} \operatorname{diag}(H_g)`;
+  - new :meth:`.LinearOperator.abs_sq_adjoint`: :math:`(|A|^2)^T y`,
+    implemented for :class:`.MatrixOperator`,
+    :class:`.ElementwiseMultiplicationOperator`,
+    :class:`.FiniteForwardDifference` and :class:`.VstackOperator`; other
+    operators (e.g. the PET projectors) raise ``NotImplementedError``;
+  - the SGD / SVRG examples (sinogram and listmode) use the non-negative
+    Hessian diagonal of the prior in their preconditioner,
+    :math:`x / (A^T 1 + \operatorname{diag}(H_R(x))\, x)`, instead of
+    :math:`2 H_R(x)\, x`, which is negative in voxels colder than their
+    neighbours.
+
 - **GPU projections run on the current CUDA stream (asynchronous).** (`#176
   <https://github.com/KUL-recon-lab/parallelproj/issues/176>`_) All projectors
   pass the current stream of the GPU of their arrays to parallelproj-core

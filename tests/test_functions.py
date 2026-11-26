@@ -171,21 +171,21 @@ def test_neg_poisson_logl_call_and_gradient(xp: ModuleType, dev: str):
     assert allclose(grad, f.gradient(ybar))
 
 
-def test_neg_poisson_logl_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+def test_neg_poisson_logl_hessian_vec_prod(xp: ModuleType, dev: str):
     v_np = _np.asarray([1.0, -1.0, 2.0, 0.5])
     y = xp.asarray(_Y_NP, device=dev)
     ybar = xp.asarray(_YBAR_NP, device=dev)
     v = xp.asarray(v_np, device=dev)
 
     f = ppf.NegPoissonLogL(y, exact=True)
-    hv = f.hessian_diag_vec_prod(ybar, v)
+    hv = f.hessian_vec_prod(ybar, v)
     expected = xp.asarray(_Y_NP / _YBAR_NP**2 * v_np, device=dev)
     assert allclose(hv, expected)
 
     # default (eps) mode
     f_eps = ppf.NegPoissonLogL(y)
     e = f_eps.eps
-    hv_eps = f_eps.hessian_diag_vec_prod(ybar, v)
+    hv_eps = f_eps.hessian_vec_prod(ybar, v)
     expected_eps = xp.asarray((_Y_NP + e) / (_YBAR_NP + e) ** 2 * v_np, device=dev)
     assert allclose(hv_eps, expected_eps)
 
@@ -247,7 +247,7 @@ def test_neg_poisson_logl_exact_hessian_diag_zero_bins(xp: ModuleType, dev: str)
     v = xp.asarray(v_np, device=dev)
 
     f = ppf.NegPoissonLogL(y, exact=True)
-    hv = f.hessian_diag_vec_prod(ybar, v)
+    hv = f.hessian_vec_prod(ybar, v)
 
     expected_np = _np.concatenate(
         [
@@ -304,7 +304,7 @@ def test_neg_poisson_logl_eps_finite_on_zero_bins(xp: ModuleType, dev: str):
 
     val = f(ybar)
     grad = f.gradient(ybar)
-    hv = f.hessian_diag_vec_prod(ybar, xp.ones_like(ybar))
+    hv = f.hessian_vec_prod(ybar, xp.ones_like(ybar))
     assert math.isfinite(val)
     assert bool(xp.all(xp.isfinite(grad))) and bool(xp.all(xp.isfinite(hv)))
 
@@ -344,8 +344,8 @@ def test_neg_poisson_logl_eps_shifted_poisson_identity(xp: ModuleType, dev: str)
     assert abs(f_eps(ybar) - f_ref(ybar_shift)) < 1e-8
     assert allclose(f_eps.gradient(ybar), f_ref.gradient(ybar_shift))
     assert allclose(
-        f_eps.hessian_diag_vec_prod(ybar, v),
-        f_ref.hessian_diag_vec_prod(ybar_shift, v),
+        f_eps.hessian_vec_prod(ybar, v),
+        f_ref.hessian_vec_prod(ybar_shift, v),
     )
 
 
@@ -647,25 +647,25 @@ def test_half_sq_l2_call_and_gradient_with_weights(xp: ModuleType, dev: str):
     assert allclose(grad, f.gradient(x))
 
 
-def test_half_sq_l2_hessian_diag_vec_prod(xp: ModuleType, dev: str):
-    """Hessian diagonal is w, so hessian_diag_vec_prod = w * v."""
+def test_half_sq_l2_hessian_vec_prod(xp: ModuleType, dev: str):
+    """Hessian diagonal is w, so hessian_vec_prod = w * v."""
     x = xp.asarray(_X_NP, device=dev)
     w = xp.asarray(_W_NP, device=dev)
     v = xp.asarray(_V_NP, device=dev)
 
     f = ppf.HalfSquaredL2Deviation(weights=w)
-    hv = f.hessian_diag_vec_prod(x, v)
+    hv = f.hessian_vec_prod(x, v)
     expected = xp.asarray(_W_NP * _V_NP, device=dev)
     assert allclose(hv, expected)
 
 
 def test_half_sq_l2_hessian_diag_no_weights(xp: ModuleType, dev: str):
-    """Without weights the Hessian diagonal is all-ones, so hessian_diag_vec_prod = v."""
+    """Without weights the Hessian diagonal is all-ones, so hessian_vec_prod = v."""
     x = xp.asarray(_X_NP, device=dev)
     v = xp.asarray(_V_NP, device=dev)
 
     f = ppf.HalfSquaredL2Deviation()
-    hv = f.hessian_diag_vec_prod(x, v)
+    hv = f.hessian_vec_prod(x, v)
     assert allclose(hv, v)
 
 
@@ -731,20 +731,20 @@ def test_log_cosh_call_and_gradient(xp: ModuleType, dev: str):
         assert allclose(grad, f.gradient(x))
 
 
-def test_log_cosh_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+def test_log_cosh_hessian_vec_prod(xp: ModuleType, dev: str):
     """Hessian diagonal is sech^2(x/delta)/delta^2 = (1 - tanh^2(x/delta))/delta^2."""
     x = xp.asarray(_X_LC_NP, device=dev)
     v = xp.asarray(_V_LC_NP, device=dev)
 
     f = ppf.LogCosh()
     expected = xp.asarray((1 - _np.tanh(_X_LC_NP) ** 2) * _V_LC_NP, device=dev)
-    assert allclose(f.hessian_diag_vec_prod(x, v), expected, atol=1e-5)
+    assert allclose(f.hessian_vec_prod(x, v), expected, atol=1e-5)
 
     f_d = ppf.LogCosh(delta=_DELTA)
     expected_d = xp.asarray(
         (1 - _np.tanh(_X_LC_NP / _DELTA) ** 2) / _DELTA * _V_LC_NP, device=dev
     )
-    assert allclose(f_d.hessian_diag_vec_prod(x, v), expected_d, atol=1e-5)
+    assert allclose(f_d.hessian_vec_prod(x, v), expected_d, atol=1e-5)
 
 
 def test_log_cosh_beta_scaling(xp: ModuleType, dev: str):
@@ -844,7 +844,7 @@ def test_sum_c1_call_and_gradient(xp: ModuleType, dev: str):
     assert allclose(grad, s.gradient(x))
 
 
-def test_sum_c2_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+def test_sum_c2_hessian_vec_prod(xp: ModuleType, dev: str):
     x = xp.asarray(_X_NP, device=dev)
     v = xp.asarray(_V_NP, device=dev)
     d = xp.asarray(_D_NP, device=dev)
@@ -854,8 +854,8 @@ def test_sum_c2_hessian_diag_vec_prod(xp: ModuleType, dev: str):
     f2 = ppf.HalfSquaredL2Deviation(weights=w)
     s = cast(ppf.SumC2Function, f1 + f2)
 
-    hv = s.hessian_diag_vec_prod(x, v)
-    expected = f1.hessian_diag_vec_prod(x, v) + f2.hessian_diag_vec_prod(x, v)
+    hv = s.hessian_vec_prod(x, v)
+    expected = f1.hessian_vec_prod(x, v) + f2.hessian_vec_prod(x, v)
     assert allclose(hv, expected)
 
 
@@ -987,7 +987,7 @@ def test_c2_affine_objective_call_and_gradient(xp: ModuleType, dev: str):
     assert allclose(grad, obj.gradient(x))
 
 
-def test_c2_affine_objective_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+def test_c2_affine_objective_hessian_vec_prod(xp: ModuleType, dev: str):
     """H_f(x) v = A^T (diag_H_g(Ax) * (Av)) = A^T (w * (Av)) for HalfSquaredL2."""
     A = xp.asarray(_A_NP, device=dev)
     x = xp.asarray(_X2_NP, device=dev)
@@ -999,7 +999,7 @@ def test_c2_affine_objective_hessian_diag_vec_prod(xp: ModuleType, dev: str):
     loss = ppf.HalfSquaredL2Deviation(data=d, weights=w)
     obj = ppf.C2AffineObjective(loss, op)
 
-    hv = obj.hessian_diag_vec_prod(x, v)
+    hv = obj.hessian_vec_prod(x, v)
 
     # manual: A^T (w * (A v))
     Av_np = _A_NP @ _V2_NP
@@ -1009,7 +1009,7 @@ def test_c2_affine_objective_hessian_diag_vec_prod(xp: ModuleType, dev: str):
 
 
 def test_c2_affine_objective_hessian_with_contamination(xp: ModuleType, dev: str):
-    """Covers the contamination branch inside _hessian_diag_vec_prod (line 606)."""
+    """Covers the contamination branch inside _hessian_vec_prod (line 606)."""
     A = xp.asarray(_A_NP, device=dev)
     x = xp.asarray(_X2_NP, device=dev)
     v = xp.asarray(_V2_NP, device=dev)
@@ -1021,7 +1021,7 @@ def test_c2_affine_objective_hessian_with_contamination(xp: ModuleType, dev: str
     loss = ppf.HalfSquaredL2Deviation(data=d, weights=w)
     obj = ppf.C2AffineObjective(loss, op, s)
 
-    hv = obj.hessian_diag_vec_prod(x, v)
+    hv = obj.hessian_vec_prod(x, v)
 
     # manual: A^T (w * (A v)),  pred = Ax + s (s cancels in hessian for this loss)
     Av_np = _A_NP @ _V2_NP
@@ -1045,7 +1045,7 @@ def test_c2_affine_objective_beta_scaling(xp: ModuleType, dev: str):
     assert abs(obj2(x) - 2.0 * obj1(x)) < 1e-8
     assert allclose(obj2.gradient(x), 2.0 * obj1.gradient(x))
     assert allclose(
-        obj2.hessian_diag_vec_prod(x, v), 2.0 * obj1.hessian_diag_vec_prod(x, v)
+        obj2.hessian_vec_prod(x, v), 2.0 * obj1.hessian_vec_prod(x, v)
     )
 
 
@@ -1127,13 +1127,13 @@ def test_neg_poisson_logl_lm_call_and_gradient(xp: ModuleType, dev: str):
     assert allclose(grad, f.gradient(x))
 
 
-def test_neg_poisson_logl_lm_hessian_diag_vec_prod(xp: ModuleType, dev: str):
+def test_neg_poisson_logl_lm_hessian_vec_prod(xp: ModuleType, dev: str):
     """H_lm(x) v = A_lm^T (A_lm v / pred^2); verify against finite differences of gradient."""
     x = xp.asarray(_X_LM_NP, device=dev, dtype=xp.float32)
     v = xp.asarray(_V_LM_NP, device=dev, dtype=xp.float32)
     f = _make_lm_obj(xp, dev)
 
-    hv = f.hessian_diag_vec_prod(x, v)
+    hv = f.hessian_vec_prod(x, v)
 
     # finite-difference check: d/dt gradient(x + t*v) |_{t=0}
     eps = 1e-4
@@ -1195,8 +1195,8 @@ def test_neg_poisson_logl_lm_matches_sinogram_hessian(xp: ModuleType, dev: str):
     )
 
     assert allclose(
-        f_lm.hessian_diag_vec_prod(x, v),
-        f_sino.hessian_diag_vec_prod(x, v),
+        f_lm.hessian_vec_prod(x, v),
+        f_sino.hessian_vec_prod(x, v),
         atol=1e-4,
         rtol=1e-4,
     )
@@ -1260,7 +1260,7 @@ def test_neg_poisson_logl_lm_eps_finite_on_zero_pred(xp: ModuleType, dev: str):
     )
     val = f_eps(x0)
     grad = f_eps.gradient(x0)
-    hv = f_eps.hessian_diag_vec_prod(x0, v)
+    hv = f_eps.hessian_vec_prod(x0, v)
     assert math.isfinite(val)
     assert bool(xp.all(xp.isfinite(grad))) and bool(xp.all(xp.isfinite(hv)))
     # -n_events - n_events * log(eps) is the exact value at x = 0
