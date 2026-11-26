@@ -70,6 +70,11 @@ sphinx_gallery_conf = {
     # plot_gallery=False disables execution of ALL examples
     "plot_gallery": not _build_no_examples,
     "within_subsection_order": FileNameSortKey,
+    # shared look of all example figures: reset matplotlib, then apply
+    # parallelproj._examples_utils.set_style (colour cycle, font sizes, ...)
+    "reset_modules": ("matplotlib", "parallelproj._examples_utils._reset_example_style"),
+    # also render the figures at twice the resolution for high-DPI screens
+    "image_srcset": ["2x"],
     "parallel": os.cpu_count(),
     # Inject a setup note at the top of every generated Jupyter notebook.  The
     # example helpers ship inside parallelproj (parallelproj._examples_utils),

@@ -299,6 +299,131 @@ def elliptic_cylinder_phantom(
 # ---------------------------------------------------------------------------
 
 
+# Categorical colours of the example figures (validated for colour-vision
+# deficiencies on a white background; assign in this order).
+EXAMPLE_COLORS = (
+    "#257de0",  # blue
+    "#f47230",  # orange
+    "#00b894",  # aqua
+    "#f2a600",  # yellow
+    "#ee7fac",  # magenta
+    "#008a17",  # green
+    "#6a4ce2",  # violet
+    "#ec4647",  # red
+)
+
+
+def set_style() -> None:
+    """Matplotlib style shared by all examples.
+
+    Sets the colour cycle (:data:`EXAMPLE_COLORS`), font sizes, line widths,
+    a recessive grid style and frameless legends.  Applied automatically to
+    every example of the documentation (``reset_modules`` in ``docs/conf.py``);
+    call it at the top of a script to get the same look when running an
+    example locally.
+    """
+    from cycler import cycler
+
+    plt.rcParams.update(
+        {
+            "axes.prop_cycle": cycler(color=list(EXAMPLE_COLORS)),
+            "font.size": 10,
+            "axes.titlesize": 11,
+            "axes.labelsize": 10,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "legend.fontsize": 9,
+            "figure.titlesize": 12,
+            "axes.edgecolor": "#4d4d4d",
+            "axes.linewidth": 0.8,
+            "axes.titlepad": 6.0,
+            "grid.color": "#dddddd",
+            "grid.linewidth": 0.6,
+            "lines.linewidth": 1.8,
+            "lines.markersize": 5.0,
+            "legend.frameon": False,
+            "image.interpolation": "nearest",
+            "savefig.bbox": "tight",
+        }
+    )
+
+
+def _reset_example_style(gallery_conf: Any = None, fname: Any = None) -> None:
+    """sphinx-gallery ``reset_modules`` hook: apply :func:`set_style`."""
+    set_style()
+
+
+def _interactive_backend() -> bool:
+    """True if the current matplotlib backend is interactive (widgets work)."""
+    backend = str(plt.get_backend()).lower()
+    if "ipympl" in backend or backend == "widget":
+        return True
+    try:
+        from matplotlib.backends import BackendFilter, backend_registry
+
+        interactive = backend_registry.list_builtin(BackendFilter.INTERACTIVE)
+    except ImportError:  # pragma: no cover (matplotlib < 3.9)
+        from matplotlib import rcsetup
+
+        interactive = rcsetup.interactive_bk
+    return backend in [b.lower() for b in interactive]
+
+
+def _show_vol_cuts_static(
+    vol: np.ndarray,
+    voxel_size: tuple[float, float, float],
+    axis_labels: tuple[str, str, str],
+    fig_title: str | None,
+    vmin: float,
+    vmax: float,
+    cmap: str,
+    origin: str | tuple[str, str, str],
+    leading: tuple[str, int] | None,
+) -> tuple:
+    """Static version of :func:`show_vol_cuts`: three central cuts + colorbar."""
+    lx, ly, lz = axis_labels
+    dx, dy, dz = voxel_size
+    if leading is not None:  # 4-D: central index of the leading axis
+        vol = vol[leading[1]]
+    nx, ny, nz = vol.shape
+    ix, iy, iz = nx // 2, ny // 2, nz // 2
+    origins = [origin] * 3 if isinstance(origin, str) else list(origin)
+    if len(origins) != 3:
+        raise ValueError("origin must be a string or a sequence of three strings")
+
+    cuts = (vol[ix, :, :].T, vol[:, iy, :].T, vol[:, :, iz].T)
+    titles = (f"{lx} = {ix}", f"{ly} = {iy}", f"{lz} = {iz}")
+    xlabels, ylabels = (ly, lx, lx), (lz, lz, ly)
+    aspects = (dz / dy, dz / dx, dy / dx)
+
+    # layout: the cut perpendicular to the last axis (e.g. transaxial) large on
+    # the left, the two other cuts stacked on the right, true aspect ratios
+    main_ratio = (ny * dy) / (nx * dx)  # height / width of the large panel
+    height = min(max(4.2 * main_ratio, 3.2), 6.0)
+    fig = plt.figure(figsize=(9.0, height + 0.6), layout="constrained")
+    gs = fig.add_gridspec(2, 2, width_ratios=(1.0, 1.0))
+    axs = [fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, 1]), fig.add_subplot(gs[:, 0])]
+    for c, ax in enumerate(axs):
+        im = ax.imshow(
+            cuts[c],
+            aspect=aspects[c],
+            origin=origins[c],
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+        )
+        ax.set_title(titles[c], fontsize="medium")
+        ax.set_xlabel(xlabels[c])
+        ax.set_ylabel(ylabels[c])
+    fig.colorbar(im, ax=axs, shrink=0.8, pad=0.02)
+    title = fig_title or ""
+    if leading is not None:
+        title = f"{title}  ({leading[0]} = {leading[1]})".strip()
+    if title:
+        fig.suptitle(title)
+    return fig, list(axs), {}
+
+
 def show_vol_cuts(
     vol: "np.ndarray | Array",
     voxel_size: tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -309,6 +434,7 @@ def show_vol_cuts(
     cmap: str = "Greys",
     origin: str | tuple[str, str, str] = ("lower", "lower", "upper"),
     figsize: tuple[int, int] = (12, 6),
+    interactive: bool | None = None,
 ) -> tuple:
     """Display interactive 2D cuts through a 3D or 4D array.
 
@@ -343,7 +469,14 @@ def show_vol_cuts(
         panel uses ``"upper"`` so the vertical axis ``x1``/``y`` runs top to
         bottom, matching the scanner coordinate convention.
     figsize : tuple, optional
-        Figure size in inches.
+        Figure size in inches (interactive viewer).
+    interactive : bool or None, optional
+        ``True``: interactive viewer with sliders and text boxes.  ``False``:
+        a static figure of the three central cuts with a colorbar (no
+        widgets), as used in the rendered documentation.  ``None`` (default):
+        interactive if the matplotlib backend is interactive (e.g. QtAgg,
+        TkAgg, ipympl), static otherwise (e.g. Agg in the documentation build,
+        or the inline backend of Jupyter notebooks).
 
     Returns
     -------
@@ -351,7 +484,7 @@ def show_vol_cuts(
     axs : list of three Axes (image panels)
     widgets : dict
         All interactive widgets keyed by name.  Keep a reference to prevent
-        garbage collection of the callbacks.
+        garbage collection of the callbacks.  Empty for a static figure.
     """
     # accept any array-API array (numpy / cupy / torch, incl. on GPU): move it
     # to a host numpy array once, up front, so all downstream slicing / imshow
@@ -388,6 +521,14 @@ def show_vol_cuts(
         vmax = float(vol.max())
 
     ix0, iy0, iz0 = nx // 2, ny // 2, nz // 2
+
+    if interactive is None:
+        interactive = _interactive_backend()
+    if not interactive:
+        return _show_vol_cuts_static(
+            vol, (dx, dy, dz), (lx, ly, lz), fig_title, vmin, vmax, cmap, origin,
+            None if not is_4d else (l0, i00),
+        )
 
     fig = plt.figure(figsize=figsize)
     if fig_title is not None:

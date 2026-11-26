@@ -103,6 +103,14 @@ Documentation
   (`#177 <https://github.com/KUL-recon-lab/parallelproj/issues/177>`_) One
   projector per GPU, a layer that splits a mini batch across all GPUs and
   gathers the results (with gradients), and how to time GPU code correctly.
+- **Example gallery look (part 1).** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) Shared figure
+  style for all examples (colour-vision-deficiency-safe colour cycle, font
+  sizes, high-resolution images), ``show_vol_cuts`` draws a static figure
+  (three cuts and a colorbar, no widgets) with non-interactive matplotlib
+  backends (documentation, Jupyter inline), shorter gallery section titles, a
+  "New here?" start row, and the first example rewritten with the new
+  example template (learning goals, numbered sections, summary and next steps).
 
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^

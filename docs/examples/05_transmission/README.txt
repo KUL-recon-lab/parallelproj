@@ -1,5 +1,5 @@
-Transmission and joint activity/attenuation (MLAA) examples
------------------------------------------------------------
+Transmission and joint activity / attenuation (MLAA)
+----------------------------------------------------
 
 Reconstruction of the attenuation image from transmission data using the exact
 Poisson model (no log-linearisation) with a strictly positive scatter
