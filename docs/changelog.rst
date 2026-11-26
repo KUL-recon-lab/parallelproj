@@ -141,6 +141,13 @@ Documentation
   print a note that the shown results are less converged. GPU builds keep the
   full numbers; ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1`` runs them on the
   CPU as well.
+- **New example: preconditioners for SVRG with an edge-preserving prior.**
+  (`#187 <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_)
+  Compares the EM preconditioner, the Hessian diagonal and the separable
+  majorizer of a logcosh prior for high / low counts and weak / medium /
+  strong regularisation, with a monotone MAP-EM algorithm (De Pierro with the
+  separable majorizer) as reference.  Only the majorizer converges for strong
+  priors.
 - **New example: projection layers on multiple GPUs with CUDA streams.**
   (`#177 <https://github.com/KUL-recon-lab/parallelproj/issues/177>`_) One
   projector per GPU, a layer that splits a mini batch across all GPUs and

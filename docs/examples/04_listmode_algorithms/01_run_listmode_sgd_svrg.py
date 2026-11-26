@@ -560,7 +560,9 @@ print()
 # :math:`\operatorname{diag}(H_R(x))` (``reg.hessian_diag(x)``), and the
 # sensitivity :math:`S = (A^k)^T\mathbf{1}` (exact subset sensitivity) for
 # the sinogram variant or :math:`S = A^T\mathbf{1}/m` (scaled full
-# sensitivity) for the listmode variant.
+# sensitivity) for the listmode variant.  For strong priors, the separable majorizer
+# (``reg.separable_majorizer_curvature(x)``) is a safer choice, see
+# :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`.
 
 # --- sinogram SGD ---
 df_sgd_sino: list[float] = []

@@ -262,8 +262,7 @@ print(f"eps mode: recon peak {float(xp.max(x)):.5g} (true amplitude {amp:.5g})")
 #
 # .. seealso::
 #
-#    **Next:** :ref:`sphx_glr_auto_examples_04_listmode_algorithms_00_run_listmode_mlem_osem_svrg.py`
-#    -- the first listmode reconstruction example (MLEM, OSEM and SVRG with
-#    listmode data).
+#    **Next:** :ref:`sphx_glr_auto_examples_03_algorithms_08_run_svrg_preconditioners.py`
+#    -- preconditioners for SVRG with weak and strong priors.
 
 # sphinx_gallery_thumbnail_number = 1
