@@ -30,6 +30,22 @@ New features
 Changes
 ~~~~~~~
 
+- **Separable quadratic majorizers.** (`#187
+  <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_)
+
+  - new :meth:`.C2Function.separable_majorizer_curvature`: a curvature
+    :math:`c(x) \geq 0` with :math:`f(z) \leq f(x) + \nabla f(x)^T (z - x)
+    + \tfrac{1}{2} \sum_j c_j (z_j - x_j)^2` -- Huber's optimal curvature
+    :math:`\psi'(t)/t` for :class:`.LogCosh`, the exact curvature for
+    :class:`.HalfSquaredL2Deviation`, De Pierro's separable surrogate
+    :math:`|A|^T (c_g \odot |A| 1)` for :class:`.C2AffineObjective`, and the
+    sum for :class:`.SumC2Function`.  Unlike the Hessian diagonal, it gives
+    guaranteed-descent (majorize-minimize) steps and safe preconditioners;
+  - new :meth:`.LinearOperator.abs_apply` / :meth:`.LinearOperator.abs_adjoint`
+    (:math:`|A| x`, :math:`|A|^T y`) and :attr:`.LinearOperator.nonnegative`;
+    the PET projectors, :class:`.GaussianFilterOperator` and composites of
+    non-negative operators are non-negative (:math:`|A| = A`).
+
 - **Hessian-vector products and Hessian diagonals of C2 functions.** (`#185
   <https://github.com/KUL-recon-lab/parallelproj/issues/185>`_)
   ``C2Function.hessian_diag_vec_prod`` was documented as
