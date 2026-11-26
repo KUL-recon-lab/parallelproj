@@ -157,7 +157,7 @@ y_back = lm_proj.adjoint(ones_list)
 # bin 0 closest to the start point of the LOR.  Bin 29 is the central bin.
 
 tof_params = parallelproj.tof.TOFParameters(
-    sigma_tof=30.0 / 2.35, num_tofbins=59, tofbin_width=12.5
+    sigma_tof=30.0 / 2.3548, num_tofbins=59, tofbin_width=12.5
 )
 event_tof_bins = xp.asarray([29, 30, 29, 28], device=dev, dtype=xp.int16)
 
@@ -189,7 +189,7 @@ y_back_tof = lm_proj.adjoint(ones_list)
 # factors.
 
 res_model = parallelproj.operators.GaussianFilterOperator(
-    lm_proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in lm_proj.voxel_size]
+    lm_proj.in_shape, sigma=[4.5 / (2.3548 * float(vs)) for vs in lm_proj.voxel_size]
 )
 
 att_list = xp.asarray([0.3, 0.4, 0.2, 0.6], device=dev)

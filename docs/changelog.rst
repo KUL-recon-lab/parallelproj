@@ -126,7 +126,12 @@ Documentation
   cuts (sinograms, back projections of a few LORs) now show the informative
   planes, the TOF axis of TOF sinograms is shown, and text that did not match
   the code is fixed (e.g. image size and TOF field of view in the TOF
-  projector example, the tail onset of the TOF kernel example).
+  projector example, the tail onset of the TOF kernel example).  The TOF
+  kernel example demonstrates ``kernel_scale``, and all examples convert FWHM
+  to sigma with the same factor :math:`2\sqrt{2 \ln 2} \approx 2.3548`.
+- **Axis labels ``x0``, ``x1``, ``x2``** (the world axes of parallelproj) in
+  ``show_tof_bins`` (previously x / y / z) and as the default labels of the
+  examples' ``show_vol_cuts``.
 
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^

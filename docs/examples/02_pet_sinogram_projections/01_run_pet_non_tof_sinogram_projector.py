@@ -179,14 +179,14 @@ x_fwd_back = proj.adjoint(x_fwd)
 #
 # :class:`.GaussianFilterOperator` models the limited spatial resolution of
 # the scanner as a Gaussian filter :math:`G` applied in image space, here with
-# a FWHM of 4.5 mm (``sigma`` is given in voxels: FWHM / (2.35 voxel size)).
+# a FWHM of 4.5 mm (``sigma`` is given in voxels: FWHM / (2.3548 voxel size)).
 # :class:`.CompositeLinearOperator` chains operators (the last one in the tuple
 # is applied first), giving the forward operator :math:`A = P G`.  Its
 # transpose :math:`A^T = G^T P^T` is implemented by
 # :meth:`.CompositeLinearOperator.adjoint`.
 
 res_model = parallelproj.operators.GaussianFilterOperator(
-    proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
+    proj.in_shape, sigma=[4.5 / (2.3548 * float(vs)) for vs in proj.voxel_size]
 )
 
 proj_with_res_model = parallelproj.operators.CompositeLinearOperator((proj, res_model))

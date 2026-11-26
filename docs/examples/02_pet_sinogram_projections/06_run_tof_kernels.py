@@ -180,7 +180,57 @@ fig.show()
 # more weight, at the expense of the central bins.
 
 # %%
-# 3. Per-LOR (per-event) TOF centre offsets
+# 3. Scaling a kernel with ``kernel_scale``
+# -----------------------------------------
+#
+# ``kernel_scale`` :math:`s` stretches a kernel around ``u = 0``: the
+# projectors use :math:`F_s(u) = F(u / s)`, where :math:`F` is the tabulated
+# cumulative distribution.  The shape is kept and all widths are multiplied
+# by :math:`s`.  This allows one measured kernel shape to be reused, e.g. for
+# a scanner with a different timing resolution.  For the Gaussian table (in
+# units of sigma), ``sigma_tof`` is exactly its ``kernel_scale``.
+#
+# Here, the tail kernel (measured in mm for 385 ps) is scaled to a scanner
+# with 214 ps timing resolution (:math:`s = 214 / 385`) and to a slower one
+# (:math:`s = 1.5`).  The dots are again :meth:`.TOFKernel.weights` with the
+# same scale.
+
+fig, ax = plt.subplots(figsize=(7, 3.8), layout="constrained")
+for scale, label in [
+    (214 / 385, "s = 214 / 385 (214 ps)"),
+    (1.0, "s = 1 (385 ps, as measured)"),
+    (1.5, "s = 1.5"),
+]:
+    tof_scaled = parallelproj.tof.TOFParameters(
+        num_tofbins=num_tofbins,
+        tofbin_width=tofbin_width,
+        kernel=kernel_tail,
+        kernel_scale=scale,
+    )
+    ax.step(d, tof_spectrum(tof_scaled), where="mid", lw=2, label=label)
+    ax.plot(
+        d,
+        kernel_tail.weights(d - tofbin_width / 2, d + tofbin_width / 2, scale),
+        ".",
+        color="k",
+    )
+ax.set_xlabel("TOF bin centre - emission position [mm]")
+ax.set_ylabel("TOF bin weight")
+ax.set_title("Tail kernel with different kernel_scale")
+ax.legend()
+ax.grid(alpha=0.3)
+fig.show()
+
+# %%
+# A smaller scale concentrates the weights in fewer TOF bins (better timing
+# resolution), a larger one spreads them, and the tail keeps its relative
+# size.  With :math:`s = 1.5`, the 25 TOF bins (+-150 mm) no longer contain
+# the whole tail, so the weights sum to 0.99 instead of 1.  ``kernel_scale`` can also be given per LOR (or per event), like the
+# centre offset in the next section, e.g. for crystals with different timing
+# resolution.
+
+# %%
+# 4. Per-LOR (per-event) TOF centre offsets
 # -----------------------------------------
 #
 # ``tofcenter_offset`` (and ``sigma_tof`` / ``kernel_scale``) can be given per
@@ -220,7 +270,7 @@ fig.show()
 # bin to the bins at -24 mm and -36 mm, i.e. by -30 mm.
 
 # %%
-# 4. Per-LOR parameters in sinogram projectors
+# 5. Per-LOR parameters in sinogram projectors
 # --------------------------------------------
 #
 # For the sinogram projectors, per-LOR values have the spatial sinogram shape
@@ -288,7 +338,7 @@ print(
 # The difference is at the level of float32 rounding errors.
 
 # %%
-# 5. Notes on the kernel table
+# 6. Notes on the kernel table
 # ----------------------------
 #
 # - The projectors always use the tabulated kernel; ``sigma_tof`` is turned

@@ -119,7 +119,7 @@ fig.show()
 # (``sigma`` in voxels) models the spatial resolution in image space.
 
 res_model = parallelproj.operators.GaussianFilterOperator(
-    proj.in_shape, sigma=[4.5 / (2.35 * float(vs)) for vs in proj.voxel_size]
+    proj.in_shape, sigma=[4.5 / (2.3548 * float(vs)) for vs in proj.voxel_size]
 )
 
 # %%
@@ -151,7 +151,7 @@ att_sino = xp.exp(-proj(x_att))
 proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=9,
     tofbin_width=78.0,
-    sigma_tof=24.4,  # (385e-3 ns / 2.355) * (C_MM_PER_NS / 2)
+    sigma_tof=24.5,  # (385e-3 ns / 2.3548) * (C_MM_PER_NS / 2)
     num_sigmas=3.0,
 )
 

@@ -18,7 +18,7 @@ localise the annihilation along the LOR to a Gaussian probability kernel:
     h(\\ell) = \\frac{1}{\\sqrt{2\\pi}\\,\\sigma_\\text{TOF}}
                \\exp\\!\\left(-\\frac{\\ell^2}{2\\sigma_\\text{TOF}^2}\\right),
     \\qquad
-    \\sigma_\\text{TOF} = \\frac{c}{2} \\cdot \\frac{\\Delta t_\\text{FWHM}}{2.355}
+    \\sigma_\\text{TOF} = \\frac{c}{2} \\cdot \\frac{\\Delta t_\\text{FWHM}}{2.3548}
 
 where :math:`\\ell` is the distance from the LOR midpoint and
 :math:`\\Delta t_\\text{FWHM}` is the scanner's coincidence timing
@@ -238,7 +238,7 @@ proj_tof = copy(proj_non_tof)
 proj_tof.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=int(300 / (fwhm_tof_mm / 4.0)) + 1,
     tofbin_width=fwhm_tof_mm / 4.0,
-    sigma_tof=fwhm_tof_mm / 2.35,
+    sigma_tof=fwhm_tof_mm / 2.3548,
 )
 
 # For TOF, att_sino has no TOF-bins dimension while the projector output does.
@@ -250,7 +250,7 @@ att_op_non_tof = parallelproj.operators.ElementwiseMultiplicationOperator(att_si
 
 res_model = parallelproj.operators.GaussianFilterOperator(
     img_shape,
-    sigma=[fwhm_res_model_mm / (2.35 * float(vs)) for vs in proj_tof.voxel_size],
+    sigma=[fwhm_res_model_mm / (2.3548 * float(vs)) for vs in proj_tof.voxel_size],
 )
 
 # compose all 3 operators into a single linear operator
@@ -312,7 +312,7 @@ contamination_non_tof = xp.sum(contamination_tof, axis=-1)
 # attenuation / non-TOF data indexing and 4-D slices for TOF data indexing.
 
 sm_op = parallelproj.operators.GaussianFilterOperator(
-    in_shape=img_shape, sigma=sm_fwhm_mm / (2.35 * voxel_size[0])
+    in_shape=img_shape, sigma=sm_fwhm_mm / (2.3548 * voxel_size[0])
 )
 
 # 3-D slices: used for non-TOF data *and* to index att_sino

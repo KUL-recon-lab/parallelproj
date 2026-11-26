@@ -85,7 +85,7 @@ def test_show_vol_cuts_static(ndim, monkeypatch) -> None:
     try:
         assert widgets == {}
         assert len(ax_im) == 3
-        assert ax_im[2].get_title() == "z = 2"
+        assert ax_im[2].get_title() == "x2 = 2"
         assert fig.get_suptitle().startswith("static")
         assert ("t = 1" in fig.get_suptitle()) == (ndim == 4)
         assert len(fig.axes) == 4  # three panels + colorbar
