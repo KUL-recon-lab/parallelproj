@@ -1,53 +1,33 @@
 """
-Listmode MLEM, OSEM, and SVRG
-=============================
+Listmode MLEM, OSEM and SVRG
+============================
 
-This example demonstrates how to run MLEM, OSEM, and SVRG using listmode
-(event-by-event) data, and compares all algorithms with their sinogram
-equivalents via a convergence plot of the negative Poisson log-likelihood.
+:bdg-primary:`reconstruction` :bdg-secondary:`intermediate` :bdg-light:`CPU or GPU`
 
-**Objective functions** from :mod:`parallelproj.functions`:
+In listmode, every detected event is stored individually instead of being
+histogrammed into a sinogram, which is efficient for TOF data and short time
+frames with fewer events than sinogram bins.  This example reconstructs the
+same simulated TOF data from a sinogram and from an event list with **MLEM**,
+**OSEM** and **SVRG**, and compares all six variants via the negative Poisson
+log-likelihood.  The key point: written as a preconditioned gradient step, the
+EM update is *agnostic of the data representation and the subset
+partitioning*, so the same update code runs for sinograms and listmode.
 
-- :class:`.NegPoissonLogL` -- operates in **prediction space** :math:`\\bar{y}`,
-  composed with an affine forward model via :class:`.C2AffineObjective`:
+**You will learn**
 
-  .. math::
+- how to convert a sinogram into an event list and set up the matching
+  listmode forward model with a :class:`.ListmodePETProjector`,
+- how :class:`.NegPoissonLogLListmode` relates to the sinogram objective
+  :class:`.NegPoissonLogL` (same gradient, constant offset in the value),
+- how to split an event list into subsets for listmode OSEM and SVRG,
+- how one EM / SVRG implementation, written against the
+  :class:`.C1Function` interface, runs on sinogram and listmode objectives.
 
-      f_{\\text{sino}}(x) = \\sum_i \\bigl[(Ax+s)_i - y_i \\log(Ax+s)_i\\bigr]
-
-- :class:`.NegPoissonLogLListmode` -- operates directly in **image space**
-  :math:`x`, with the listmode forward model built in internally:
-
-  .. math::
-
-      f_{\\text{LM}}(x) = \\langle A^T \\mathbf{1},\\, x \\rangle + c_{\\text{sino}}
-                          - \\sum_{e=1}^{N_{\\text{ev}}} \\log\\bigl((A_{\\text{LM}}\\,x)_e + s_e\\bigr)
-
-Both are mathematically equivalent (since
-:math:`\\sum_e \\log \\bar{y}_{j_e} = \\sum_i y_i \\log \\bar{y}_i`) and both
-expose the same :class:`.C1Function` interface with a ``gradient`` method
-w.r.t. the image :math:`x`.
-
-**OSEM subsets:**
-
-- *Sinogram OSEM*: the sinogram is split into :math:`m` subsets of
-  regularly-spaced views using
-  :meth:`~.RegularPolygonPETLORDescriptor.get_distributed_views_and_slices`.
-  Each subset has its own :class:`.C2AffineObjective` and its own subset
-  sensitivity image :math:`(A^k)^T\\mathbf{1}`.
-
-- *Listmode OSEM*: the event list is split into :math:`m` subsets by
-  taking every :math:`m`-th event -- subset :math:`k` uses events at indices
-  :math:`k, k{+}m, k{+}2m, \\ldots`.  The sensitivity image for each subset
-  is approximated as :math:`A^T\\mathbf{1}/m` and each subset gets a separate
-  :class:`.NegPoissonLogLListmode` instance.
-
-**Key learning goal:** The EM update -- written as a preconditioned gradient
-descent step -- is *agnostic of the data representation and the subset
-partitioning*.  The same :func:`em_update` function is used for all four
-variants (sinogram MLEM, LM-MLEM, sinogram OSEM, LM-OSEM) because every
-objective implements the :class:`.C1Function` interface with the correct
-gradient w.r.t. :math:`x`.
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_03_algorithms_00_run_mlem_osem_svrg.py`
+(MLEM, OSEM and SVRG for sinograms) and
+:ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_04_run_pet_listmode_projector.py`
+(listmode projector).
 
 .. note::
 
@@ -57,56 +37,58 @@ gradient w.r.t. :math:`x`.
     therefore less converged.  Run the example on a GPU, or set the environment
     variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
     results.
-
 """
 
 # %%
+# 0. Setup
+# --------
+#
+# Every example selects its array backend (NumPy, CuPy or PyTorch) and device
+# (CPU or GPU) with ``suggest_array_backend_and_device``: PyTorch on a CUDA
+# GPU if available, otherwise the best available backend on the CPU.  The
+# same code runs unchanged on all of them.
+
 from __future__ import annotations
+
 from collections.abc import Sequence
 from copy import copy
-from array_api_compat import size
 
-from parallelproj._examples_utils import show_vol_cuts
-from parallelproj._examples_utils import elliptic_cylinder_phantom
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+from array_api_compat import size
+from matplotlib.ticker import MaxNLocator
 
 import parallelproj.operators
-import parallelproj.tof
-import parallelproj.pet_scanners
 import parallelproj.pet_lors
+import parallelproj.pet_scanners
 import parallelproj.projectors
-from parallelproj import to_numpy_array, Array
+import parallelproj.tof
+from parallelproj import Array, to_numpy_array
+from parallelproj._examples_utils import (
+    elliptic_cylinder_phantom,
+    iterations_for_device,
+    show_vol_cuts,
+    suggest_array_backend_and_device,
+)
 from parallelproj.functions import (
+    C1Function,
+    C2AffineObjective,
     NegPoissonLogL,
     NegPoissonLogLListmode,
-    C2AffineObjective,
-    C1Function,
 )
 
-# %%
-from parallelproj._examples_utils import iterations_for_device, suggest_array_backend_and_device
-
-# To use a specific backend and/or device, replace the None arguments, e.g.:
-#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
-xp, dev = suggest_array_backend_and_device(None, None)
-
+# to choose explicitly, e.g. suggest_array_backend_and_device("numpy", "cpu")
+xp, dev = suggest_array_backend_and_device()
 
 # %%
-# Simulation of PET data in sinogram space
-# ----------------------------------------
+# 1. Reconstruction settings
+# --------------------------
 #
-# In this example, we use simulated listmode data for which we first
-# need to setup a sinogram forward model to create a noise-free and noisy
-# emission sinogram that can be converted to listmode data.
-
-# %%
-# Sinogram forward model setup
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#
-# We setup a linear forward operator :math:`A` consisting of an
-# image-based resolution model, a non-TOF PET projector and an attenuation model
-#
+# OSEM and SVRG split the data into ``num_subsets`` subsets; an **epoch** is
+# one cycle through all subsets.  For the same number of updates, MLEM runs
+# ``num_epochs * num_subsets`` iterations, which is too slow on the CPU, so
+# MLEM only runs on a GPU.  ``sens_factor`` scales the sensitivity of the
+# scanner, and with it the number of counts.
 
 num_subsets = 24
 num_epochs = iterations_for_device(dev, cpu=2, gpu=96 // num_subsets, what="epochs")
@@ -116,6 +98,22 @@ num_epochs_mlem = num_epochs * num_subsets
 run_mlem = dev != "cpu"
 
 sens_factor = 0.2
+
+# %%
+# 2. Scanner, sinogram and image
+# ------------------------------
+#
+# A small regular polygon scanner (16 sides, 5 rings), a span-1 sinogram with
+# a maximum ring difference of 2, and an image of 40 x 40 x 8 voxels of 2 mm.
+# The ground truth :math:`x_{true}` is an elliptic cylinder with hot and cold
+# spherical inserts.
+#
+# The scanner's cylindrical field of view (FOV) does not cover every voxel of
+# the image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity :math:`(A^T \mathbf{1})_i = 0`, and dividing by it in the
+# EM preconditioner would produce NaN / Inf values that corrupt the
+# reconstruction.  ``fov_mask`` is ``True`` inside the FOV and ``None`` when
+# every image voxel is inside the FOV (no masking needed).
 
 num_rings = 5
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -128,8 +126,6 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
     symmetry_axis=2,
 )
-
-# setup the LOR descriptor that defines the sinogram
 
 img_shape = (40, 40, 8)
 voxel_size = (2.0, 2.0, 2.0)
@@ -145,44 +141,30 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-# The scanner's cylindrical field of view does not cover every voxel of the
-# image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity (A^T 1)_i = 0.  Dividing by zero in the EM preconditioner
-# would produce NaN / Inf values that corrupt the reconstruction.
-# fov_mask is True inside the FOV and is set to None when every image voxel
-# is inside the FOV (no masking needed).
 cyl_mask = proj.fov_mask()
 fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
-del cyl_mask
 
 x_true = elliptic_cylinder_phantom(xp, dev)
 
-
 # %%
-# Attenuation image and sinogram setup
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# 3. Sinogram forward model :math:`\bar{y}(x) = A x + s`
+# ------------------------------------------------------
+#
+# The linear operator :math:`A` combines an image-based resolution model
+# (Gaussian, 2 mm FWHM), a TOF projector (13 TOF bins of 12 mm) and
+# attenuation (water, :math:`\mu` = 0.01 / mm, inside the phantom) times
+# ``sens_factor``.  The attenuation sinogram is computed before TOF is
+# enabled, so it has no TOF axis; for TOF, ``xp.broadcast_to`` repeats it over
+# the TOF bins without copying data (a zero-stride view).  Leave out the
+# ``proj.tof_parameters`` line to reconstruct non-TOF data.
 
-# setup an attenuation image
 x_att = 0.01 * xp.astype(x_true > 0, xp.float32)
-# calculate the attenuation sinogram
 att_sino = xp.exp(-proj(x_att))
 
-# %%
-# Complete PET forward model setup
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#
-# We combine an image-based resolution model,
-# a non-TOF or TOF PET projector and an attenuation model
-# into a single linear operator.
-
-# enable TOF - comment if you want to run non-TOF
 proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-# For TOF, att_sino has no TOF-bins dimension while the projector output does.
-# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
-# the TOF-bins axis without copying data (zero-stride view).
 att_values = (
     xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
     if proj.tof
@@ -196,20 +178,19 @@ res_model = parallelproj.operators.GaussianFilterOperator(
     proj.in_shape, sigma=[2.0 / (2.3548 * float(vs)) for vs in voxel_size]
 )
 
-# compose all 3 operators into a single linear operator
 pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
-# Simulation of sinogram projection data
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# 4. Simulated sinogram data
+# --------------------------
 #
-# We setup an arbitrary ground truth :math:`x_{true}` and simulate
-# noise-free and noisy data :math:`y` by adding Poisson noise.
+# The noise-free data are :math:`A x_{true} + s`, with a constant
+# contamination :math:`s` (scatter and randoms) of half the mean of
+# :math:`A x_{true}`.  The measured data :math:`y` are a Poisson realisation,
+# stored as integers so that they can be converted to an event list.
 
-# simulated noise-free data
 noise_free_data = pet_lin_op(x_true)
 
-# generate a constant contamination sinogram
 contamination = xp.full(
     noise_free_data.shape,
     0.5 * float(xp.mean(noise_free_data)),
@@ -219,7 +200,6 @@ contamination = xp.full(
 
 noise_free_data += contamination
 
-# add Poisson noise
 np.random.seed(1)
 y = xp.asarray(
     np.random.poisson(to_numpy_array(noise_free_data)),
@@ -228,44 +208,57 @@ y = xp.asarray(
 )
 
 # %%
-# Conversion of the emission sinogram to listmode
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# 5. Conversion of the sinogram to listmode
+# -----------------------------------------
 #
-# Using :meth:`.RegularPolygonPETProjector.convert_sinogram_to_listmode` we can convert an
-# integer non-TOF or TOF sinogram to an event list for listmode processing.
-#
-# **Note:** The create event list is sorted and should be shuffled running LM-MLEM.
+# :meth:`.RegularPolygonPETProjector.convert_sinogram_to_listmode` converts an
+# integer non-TOF or TOF sinogram into an event list: the world coordinates of
+# the two LOR endpoints and the TOF bin of every event.  The events are
+# created bin by bin, i.e. sorted; ``shuffle=True`` puts them into random
+# order, as in a real acquisition, which matters when the list is split into
+# subsets.
 
 event_start_coords, event_end_coords, event_tofbins = proj.convert_sinogram_to_listmode(
     y, shuffle=True
 )
 
 # %%
-# Setup of the LM projector and LM forward model
-# ----------------------------------------------
+# 6. Listmode forward model
+# -------------------------
+#
+# The listmode operator :math:`A_\text{LM}` maps an image to the expected
+# counts of every event's sinogram bin.  It chains the same resolution model,
+# a :class:`.ListmodePETProjector` for the event list and the attenuation
+# factor of every event.  The attenuation factors are non-TOF line integrals,
+# so they are computed before TOF is enabled in the listmode projector.  The
+# contamination :math:`s_\text{LM}` of every event is the (constant)
+# contamination of its sinogram bin.
 
-lm_proj = parallelproj.projectors.ListmodePETProjector(
-    event_start_coords,
-    event_end_coords,
-    img_shape,
-    voxel_size,
-    proj.img_origin,
+
+def setup_listmode_projector(
+    start_coords: Array, end_coords: Array, tofbins: Array | None
+) -> tuple[parallelproj.projectors.ListmodePETProjector, Array]:
+    """TOF listmode projector for an event list and its attenuation factors"""
+    lm_proj = parallelproj.projectors.ListmodePETProjector(
+        start_coords, end_coords, img_shape, voxel_size, proj.img_origin
+    )
+    # attenuation factors of all events (non-TOF projection)
+    att_list = xp.exp(-lm_proj(x_att))
+    lm_proj.tof_parameters = proj.tof_parameters
+    if proj.tof:
+        assert tofbins is not None
+        lm_proj.event_tofbins = tofbins
+        lm_proj.tof = proj.tof
+    return lm_proj, att_list
+
+
+lm_proj, att_list = setup_listmode_projector(
+    event_start_coords, event_end_coords, event_tofbins
 )
-
-# recalculate the attenuation factor for all LM events
-# this needs to be a non-TOF projection
-att_list = xp.exp(-lm_proj(x_att))
 lm_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
     sens_factor * att_list
 )
 
-# enable TOF in the LM projector
-lm_proj.tof_parameters = proj.tof_parameters
-if proj.tof:
-    lm_proj.event_tofbins = event_tofbins
-    lm_proj.tof = proj.tof
-
-# create the contamination list
 contamination_list = xp.full(
     event_start_coords.shape[0],
     float(xp.reshape(contamination, (size(contamination),))[0]),
@@ -278,33 +271,47 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 )
 
 # %%
-# Setup of sinogram and listmode objective functions
-# --------------------------------------------------
+# 7. Sinogram and listmode objective functions
+# --------------------------------------------
 #
-# Both objective functions expose the same :class:`.C1Function` interface
-# (``__call__`` for the function value, ``gradient`` for the gradient w.r.t.
-# the image :math:`x`).
+# Both objective functions from :mod:`parallelproj.functions` expose the same
+# :class:`.C1Function` interface (``__call__`` for the value, ``gradient`` for
+# the gradient w.r.t. the image :math:`x`).
 #
-# The sinogram objective wraps :class:`.NegPoissonLogL` -- which operates on
-# predicted counts :math:`\bar{y}` -- with :class:`.C2AffineObjective` to
+# The sinogram objective wraps :class:`.NegPoissonLogL`, which operates in
+# **prediction space** :math:`\bar{y}`, with :class:`.C2AffineObjective` to
 # pull the gradient back through the forward model :math:`\bar{y}(x) = Ax + s`:
 #
 # .. math::
 #
-#     f_\text{sino}(x) = \sum_i \bigl[(Ax+s)_i - y_i\log(Ax+s)_i\bigr],
+#     f_\text{sino}(x) = \sum_i \bigl[(Ax+s)_i - y_i\log(Ax+s)_i\bigr]
+#                        + \text{const},
 #     \quad \nabla_x f_\text{sino} = A^T\!\left(1 - \tfrac{y}{Ax+s}\right)
 #
-# The listmode objective :class:`.NegPoissonLogLListmode` takes :math:`x`
-# directly and has the forward model built in.  Its gradient is:
+# (:class:`.NegPoissonLogL` evaluates the *deviance* form, which adds the
+# constant :math:`\sum_i y_i \log y_i - y_i`).  The listmode objective
+# :class:`.NegPoissonLogLListmode` operates directly in **image space**
+# :math:`x` and has the forward model built in:
 #
 # .. math::
 #
+#     f_\text{LM}(x) = \langle A^T \mathbf{1},\, x \rangle + c_\text{sino}
+#                      - N_\text{ev}
+#                      - \sum_{e=1}^{N_\text{ev}}
+#                        \log\bigl((A_\text{LM}\,x)_e + s_e\bigr),
+#     \quad
 #     \nabla_x f_\text{LM}(x) = A^T\mathbf{1}
 #         - A_\text{LM}^T\!\left(\frac{1}{A_\text{LM} x + s_\text{LM}}\right)
 #
-# Both gradients are mathematically equivalent because each detected event
-# from sinogram bin :math:`i` contributes the same :math:`\log\bar{y}_i`
-# term, so :math:`\sum_e \log\bar{y}_{j_e} = \sum_i y_i\log\bar{y}_i`.
+# with :math:`c_\text{sino} = \sum_i s_i` and the number of events
+# :math:`N_\text{ev}`.  Each detected event from sinogram bin :math:`i`
+# contributes the same :math:`\log\bar{y}_i` term, so
+# :math:`\sum_e \log\bar{y}_{j_e} = \sum_i y_i\log\bar{y}_i`: both objectives
+# have **identical gradients** and differ only by the constant
+# :math:`\sum_i y_i \log y_i`, which cannot be computed from the event list
+# alone (it is 0 if no bin contains more than one event).  The sensitivity
+# image :math:`A^T \mathbf{1}`, the back projection of ones with the
+# *sinogram* forward model, enters the listmode objective explicitly.
 #
 # .. note::
 #     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
@@ -318,17 +325,12 @@ lm_pet_lin_op = parallelproj.operators.CompositeLinearOperator(
 #     handled exactly).  Keep the default whenever the expected data can
 #     reach zero in bins with counts.
 
-# the strictly positive contamination guarantees A x + s > 0 in every bin,
-# so the exact (unmodified) log-likelihood can be used
 exact_mode = bool(xp.min(contamination) > 0)
 
 sinogram_neg_logL = C2AffineObjective(
     NegPoissonLogL(y, exact=exact_mode), pet_lin_op, contamination
 )
 
-# The sensitivity image A^T 1 is required by NegPoissonLogLListmode.
-# It equals the transpose of the *sinogram* (full) forward model applied to
-# all-ones, and serves as the diagonal of the EM preconditioner.
 adjoint_ones = pet_lin_op.adjoint(
     xp.ones(pet_lin_op.out_shape, dtype=xp.float32, device=dev)
 )
@@ -337,56 +339,52 @@ lm_neg_logL = NegPoissonLogLListmode(
 )
 
 # %%
-# Sinogram OSEM - splitting the sinogram into subsets
-# ---------------------------------------------------
+# 8. Sinogram and listmode subsets
+# --------------------------------
 #
-# For OSEM the sinogram is split into ``num_subsets`` subsets of
-# regularly-spaced views using
-# :meth:`~.RegularPolygonPETLORDescriptor.get_distributed_views_and_slices`.
-# Each subset :math:`k` yields a sub-operator :math:`A^k`, sub-data
-# :math:`y^k`, contamination :math:`s^k`, and a separate
-# :class:`.C2AffineObjective`.  The subset sensitivity
-# :math:`(A^k)^T\mathbf{1}` is precomputed for each subset.
+# *Sinogram subsets*: ``get_distributed_views_and_slices`` distributes the
+# sinogram views over :math:`m` subsets.  Each subset :math:`k` gets a
+# sub-operator :math:`A^k` (a copy of the projector that projects only these
+# views), sub-data :math:`y^k`, contamination :math:`s^k`, its own
+# :class:`.C2AffineObjective` and the exact subset sensitivity image
+# :math:`(A^k)^T\mathbf{1}`.
 
 subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
 )
+# the attenuation sinogram has no TOF axis: slices for 3 dimensions
 _, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, 3
 )
 
-# clear cached LOR endpoints before copying the projector many times
+# clear the cached LOR endpoints since we create many copies of the projector
 proj.clear_cached_lor_endpoints()
 
-sino_subset_linop_list = []
+sino_subset_linops = []
 for k in range(num_subsets):
     subset_proj = copy(proj)
     subset_proj.views = subset_views[k]
-    att_values_k = (
-        xp.broadcast_to(
-            xp.expand_dims(att_sino[subset_slices_non_tof[k]], axis=-1),
-            subset_proj.out_shape,
-        )
+
+    subset_att_sino = att_sino[subset_slices_non_tof[k]]
+    subset_att_values = (
+        xp.broadcast_to(xp.expand_dims(subset_att_sino, axis=-1), subset_proj.out_shape)
         if subset_proj.tof
-        else att_sino[subset_slices_non_tof[k]]
+        else subset_att_sino
     )
-    sino_subset_linop_list.append(
+    subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
+        sens_factor * subset_att_values
+    )
+    sino_subset_linops.append(
         parallelproj.operators.CompositeLinearOperator(
-            [
-                parallelproj.operators.ElementwiseMultiplicationOperator(
-                    sens_factor * att_values_k
-                ),
-                subset_proj,
-                res_model,
-            ]
+            [subset_att_op, subset_proj, res_model]
         )
     )
 
-# compute (A^k)^T 1 for every subset k, stored as (num_subsets, *in_shape)
+# (A^k)^T 1 for every subset k, stored as (num_subsets, *in_shape)
 subset_adjoint_ones = xp.zeros(
     (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
 )
-for k, op in enumerate(sino_subset_linop_list):
+for k, op in enumerate(sino_subset_linops):
     subset_adjoint_ones[k] = op.adjoint(
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
@@ -394,25 +392,20 @@ for k, op in enumerate(sino_subset_linop_list):
 sino_subset_neg_logL = [
     C2AffineObjective(
         NegPoissonLogL(y[sl], exact=exact_mode),
-        sino_subset_linop_list[k],
+        sino_subset_linops[k],
         contamination[sl],
     )
     for k, sl in enumerate(subset_slices)
 ]
 
 # %%
-# Listmode OSEM - splitting the event list into subsets
-# -----------------------------------------------------
-#
-# For LM-OSEM the event list is partitioned into ``num_subsets`` subsets by
-# taking every :math:`m`-th event: subset :math:`k` contains events at
-# indices :math:`k, k{+}m, k{+}2m, \ldots`
-#
-# Since each subset holds approximately :math:`1/m` of the total events,
-# its expected sensitivity is :math:`A^T\mathbf{1} / m`.  The contamination
-# constant is scaled by the same factor.  A separate
-# :class:`.NegPoissonLogLListmode` is created for each subset using a
-# dedicated :class:`.ListmodePETProjector` for that subset's events only.
+# *Listmode subsets*: the (shuffled) event list is split by taking every
+# :math:`m`-th event, i.e. subset :math:`k` contains the events with indices
+# :math:`k, k{+}m, k{+}2m, \ldots`.  Since each subset holds approximately
+# :math:`1/m` of all events, its sensitivity image is approximated as
+# :math:`A^T\mathbf{1} / m`, and the contamination constant
+# :math:`c_\text{sino}` is scaled by the same factor.  Every subset gets its
+# own :class:`.ListmodePETProjector` and :class:`.NegPoissonLogLListmode`.
 
 # shared per-subset sensitivity and contamination constant (both scaled by 1/m)
 lm_subset_adj_ones = adjoint_ones / num_subsets
@@ -420,24 +413,14 @@ lm_subset_contamination_sum = float(xp.sum(contamination)) / num_subsets
 
 lm_subset_neg_logL = []
 for k in range(num_subsets):
-    # every num_subsets-th event starting at index k
-    lm_proj_k = parallelproj.projectors.ListmodePETProjector(
+    lm_proj_k, att_list_k = setup_listmode_projector(
         xp.asarray(event_start_coords[k::num_subsets], copy=True),
         xp.asarray(event_end_coords[k::num_subsets], copy=True),
-        img_shape,
-        voxel_size,
-        proj.img_origin,
+        xp.asarray(event_tofbins[k::num_subsets], copy=True) if proj.tof else None,
     )
-    att_list_k = xp.exp(-lm_proj_k(x_att))  # non-TOF attenuation for this subset
     lm_att_op_k = parallelproj.operators.ElementwiseMultiplicationOperator(
         sens_factor * att_list_k
     )
-    lm_proj_k.tof_parameters = proj.tof_parameters
-    if proj.tof:
-        assert event_tofbins is not None
-        lm_proj_k.event_tofbins = xp.asarray(event_tofbins[k::num_subsets], copy=True)
-        lm_proj_k.tof = proj.tof
-
     lm_subset_neg_logL.append(
         NegPoissonLogLListmode(
             parallelproj.operators.CompositeLinearOperator(
@@ -450,225 +433,250 @@ for k in range(num_subsets):
     )
 
 # %%
-# EM reconstruction (sinogram and listmode)
-# -----------------------------------------
+# 9. The EM update as a preconditioned gradient step
+# --------------------------------------------------
 #
 # The classical MLEM update
 #
 # .. math::
 #
-#     x^{(k+1)} = \frac{x^{(k)}}{A^T \mathbf{1}} \odot A^T\!\left(\frac{y}{A x^{(k)} + s}\right)
+#     x^{(k+1)} = \frac{x^{(k)}}{A^T \mathbf{1}} \odot
+#                 A^T\!\left(\frac{y}{A x^{(k)} + s}\right)
 #
 # can equivalently be written as a preconditioned gradient descent step:
 #
 # .. math::
 #
-#     x^{(k+1)} = x^{(k)} - \underbrace{\frac{x^{(k)}}{A^T \mathbf{1}}}_{\text{preconditioner}} \odot \nabla_x f(x^{(k)})
+#     x^{(k+1)} = x^{(k)} - \underbrace{\frac{x^{(k)}}{A^T \mathbf{1}}}_{
+#                 \text{preconditioner}} \odot \nabla_x f(x^{(k)})
 #
 # This formulation is **data-representation agnostic**: the same
-# :func:`em_update` below works for any objective :math:`f` that provides
-# a gradient :math:`\nabla_x f` via the :class:`.C1Function` interface --
-# whether that objective is :class:`.C2AffineObjective` wrapping
-# :class:`.NegPoissonLogL` (sinogram data) or
-# :class:`.NegPoissonLogLListmode` (listmode data).
+# :func:`em_update` below works for any objective :math:`f` that provides a
+# gradient :math:`\nabla_x f` via the :class:`.C1Function` interface --
+# :class:`.C2AffineObjective` wrapping :class:`.NegPoissonLogL` (sinogram
+# data) or :class:`.NegPoissonLogLListmode` (listmode data), for the full data
+# or a subset.  The preconditioner is set to zero outside the FOV.
 
 
-def em_update(
-    x_cur: Array,
-    negpoissonlogl: C1Function,
-    adj_ones: Array,
-    img_mask: Array | None = None,
-) -> Array:
-    """One MLEM iteration as a preconditioned gradient descent step.
+def em_preconditioner(x: Array, adj_ones: Array) -> Array:
+    """EM preconditioner x / adj_ones, 0 outside the FOV"""
+    if fov_mask is None:
+        return x / adj_ones
+    return xp.where(fov_mask, x / adj_ones, xp.zeros_like(x))
 
-    Implements
 
-    .. math::
+def em_update(x_cur: Array, negpoissonlogl: C1Function, adj_ones: Array) -> Array:
+    """One EM update rewritten as a preconditioned gradient descent step.
 
-        x^{(k+1)} = x^{(k)} - \\frac{x^{(k)}}{A^T\\mathbf{1}}
-                    \\odot \\nabla_x f(x^{(k)})
-
-    This is equivalent to the standard MLEM multiplicative update and works
-    for *any* objective ``negpoissonlogl`` that implements the
-    :class:`.C1Function` interface -- in particular for both
-    :class:`.C2AffineObjective` (sinogram) and
-    :class:`.NegPoissonLogLListmode` (listmode).
-
-    Voxels outside the FOV are excluded via ``img_mask`` to avoid division by
-    the zero sensitivity values in ``adj_ones``.
+    Computes :math:`x^+ = x - (x / A^T\\mathbf{1}) \\odot \\nabla_x f(x)` for
+    any objective ``negpoissonlogl`` that implements the :class:`.C1Function`
+    interface, in particular for both :class:`.C2AffineObjective` (sinogram)
+    and :class:`.NegPoissonLogLListmode` (listmode).
 
     Parameters
     ----------
-    x_cur:
+    x_cur : Array
         Current image estimate :math:`x^{(k)}`.
-    negpoissonlogl:
-        Negative Poisson log-likelihood objective.  Must provide a
-        ``gradient(x)`` method returning the gradient w.r.t. :math:`x`.
-    adj_ones:
-        Sensitivity image :math:`A^T\\mathbf{1}` used as the diagonal
-        preconditioner.
-    img_mask:
-        Boolean FOV mask (``True`` inside the FOV).  Preconditioner is zeroed
-        outside the FOV so that zero-sensitivity voxels do not produce
-        NaN / Inf.  Pass ``None`` when every voxel is in the FOV.
+    negpoissonlogl : C1Function
+        Negative Poisson log-likelihood (full data or subset) whose gradient
+        w.r.t. :math:`x` is evaluated at ``x_cur``.
+    adj_ones : Array
+        Sensitivity image :math:`A^T\\mathbf{1}` (or its subset variant)
+        used in the diagonal preconditioner.
 
     Returns
     -------
     Array
         Updated image estimate :math:`x^{(k+1)}`.
     """
-    if img_mask is None:
-        d = x_cur / adj_ones
-    else:
-        d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
-
+    d = em_preconditioner(x_cur, adj_ones)
     return x_cur - d * negpoissonlogl.gradient(x_cur)
 
 
 # %%
-# Verify gradient equivalence at a test image
-# -------------------------------------------
+# 10. Warm start and gradient check
+# ---------------------------------
 #
-# We evaluate both objectives and their gradients at a flat all-ones image
-# :math:`x_\text{init}` to confirm that sinogram and listmode formulations
-# produce the same (up to floating-point) function values and gradients.
-#
-# The preconditioned gradient :math:`(x / A^T\mathbf{1}) \odot \nabla_x f`
-# is displayed: it equals :math:`x - x_\text{new}`, i.e. the negative of
-# a single EM update step, and highlights where the current iterate would
-# increase or decrease after one MLEM step.
+# All reconstructions start from the same warm start: one LM-OSEM epoch from a
+# uniform image (zero outside the FOV).  At the warm start we evaluate both
+# full objectives and their gradients.  As explained in section 7, the
+# function values differ by a constant, but the gradients agree up to
+# floating-point precision.
 
-# run 1 LM-OSEM epoch as a common warm-start for all reconstructions
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-# zero out voxels outside the FOV so they don't carry a spurious non-zero value
 if fov_mask is not None:
     x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
 for k in range(num_subsets):
     print(f"warm-start LM-OSEM subset {(k + 1):03} / {num_subsets:03}", end="\r")
-    x_init = em_update(x_init, lm_subset_neg_logL[k], lm_subset_adj_ones, fov_mask)
+    x_init = em_update(x_init, lm_subset_neg_logL[k], lm_subset_adj_ones)
 print()
 
 df_sino = sinogram_neg_logL(x_init)
 df_lm = lm_neg_logL(x_init)
 
 print(
-    f"Negative Poisson log-likelihood at x_init: {df_sino:.4E} (sinogram), {df_lm:.4E} (listmode)"
+    f"Negative Poisson log-likelihood at x_init: {df_sino:.4E} (sinogram), "
+    f"{df_lm:.4E} (listmode)"
 )
 
 grad_sinogram = sinogram_neg_logL.gradient(x_init)
 grad_lm = lm_neg_logL.gradient(x_init)
 
-# %%
-# Preconditioned gradient of the sinogram objective
-vmax = float(xp.max(xp.abs(x_init / adjoint_ones) * grad_sinogram))
+rel_grad_diff = float(
+    xp.linalg.vector_norm(grad_lm - grad_sinogram)
+    / xp.linalg.vector_norm(grad_sinogram)
+)
+print(f"Relative difference of the gradients at x_init: {rel_grad_diff:.2E}")
 
-fig_gs, _, widgets_gs = show_vol_cuts(
-    (x_init / adjoint_ones) * grad_sinogram,
+# %%
+# The preconditioned gradient :math:`(x / A^T\mathbf{1}) \odot \nabla_x f`
+# equals :math:`x - x^+`, i.e. the negative of a single EM update step: blue
+# voxels would increase, red voxels decrease after one MLEM iteration.  We show
+# it for the sinogram and the listmode objective with the same colour scale.
+
+precond_grad_sino = em_preconditioner(x_init, adjoint_ones) * grad_sinogram
+precond_grad_lm = em_preconditioner(x_init, adjoint_ones) * grad_lm
+vmax = float(xp.max(xp.abs(precond_grad_sino)))
+
+fig, _, _ = show_vol_cuts(
+    precond_grad_sino,
+    voxel_size=voxel_size,
+    fig_title="Preconditioned gradient, sinogram objective",
     vmin=-vmax,
     vmax=vmax,
     cmap="seismic",
 )
-fig_gs.show()
+fig.show()
 
 # %%
-# Preconditioned gradient of the listmode objective (should match the sinogram plot above)
-fig_glm, _, widgets_glm = show_vol_cuts(
-    (x_init / adjoint_ones) * grad_lm,
+
+fig, _, _ = show_vol_cuts(
+    precond_grad_lm,
+    voxel_size=voxel_size,
+    fig_title="Preconditioned gradient, listmode objective",
     vmin=-vmax,
     vmax=vmax,
     cmap="seismic",
 )
-fig_glm.show()
+fig.show()
+
+# %%
+# The two preconditioned gradients are indistinguishable, as expected from
+# the printed small relative difference (float32 rounding).  After the warm
+# start, the next EM step would still decrease most voxels inside the phantom
+# (red) and increase some voxels near its boundary (blue).
+
+# %%
+# 11. MLEM (sinogram and listmode)
+# --------------------------------
+#
+# One MLEM iteration uses the full data and the full sensitivity image
+# :math:`A^T \mathbf{1}`.  The sinogram and the listmode loops are identical;
+# only the objective passed to :func:`em_update` changes.  We record the
+# objective at half and at the full number of iterations.  MLEM only runs when
+# ``run_mlem`` is ``True`` (on a GPU).
 
 
-# epochs at which to record the MLEM objective value
+def run_mlem_recon(
+    neg_logL: C1Function, label: str
+) -> tuple[Array, dict[int, float]]:
+    """MLEM from x_init; returns the image and the sinogram objective at checkpoints"""
+    df: dict[int, float] = {}
+    x = xp.asarray(x_init, copy=True)
+    for i in range(num_epochs_mlem):
+        print(f"{label} epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
+        x = em_update(x, neg_logL, adjoint_ones)
+        if (i + 1) in mlem_checkpoints:
+            df[i + 1] = float(sinogram_neg_logL(x))
+    print()
+    return x, df
+
+
+# iterations at which to record the MLEM objective value
 mlem_checkpoints = [num_epochs_mlem // 2, num_epochs_mlem]
 
 if run_mlem:
-    # run MLEM with sinogram data
-    df_mlem_sino: dict[int, float] = {}
-    x_mlem_sino = xp.asarray(x_init, copy=True)
-    for i in range(num_epochs_mlem):
-        print(f"MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-        x_mlem_sino = em_update(x_mlem_sino, sinogram_neg_logL, adjoint_ones, fov_mask)
-        if (i + 1) in mlem_checkpoints:
-            df_mlem_sino[i + 1] = float(sinogram_neg_logL(x_mlem_sino))
-    print()
-
-    # run MLEM with listmode data -- identical loop, only the objective changes
-    df_mlem_lm: dict[int, float] = {}
-    x_mlem_lm = xp.asarray(x_init, copy=True)
-    for i in range(num_epochs_mlem):
-        print(f"LM-MLEM epoch {(i + 1):04} / {num_epochs_mlem:04}", end="\r")
-        x_mlem_lm = em_update(x_mlem_lm, lm_neg_logL, adjoint_ones, fov_mask)
-        if (i + 1) in mlem_checkpoints:
-            df_mlem_lm[i + 1] = float(sinogram_neg_logL(x_mlem_lm))
-    print()
+    x_mlem_sino, df_mlem_sino = run_mlem_recon(sinogram_neg_logL, "MLEM")
+    x_mlem_lm, df_mlem_lm = run_mlem_recon(lm_neg_logL, "LM-MLEM")
 
 # %%
-# OSEM reconstruction (sinogram and listmode)
-# -------------------------------------------
+# 12. OSEM (sinogram and listmode)
+# --------------------------------
 #
-# One OSEM epoch cycles through all :math:`m` subsets in sequence.
-# Each subset step is the same EM update as in MLEM -- the same
-# :func:`em_update` function is used -- but with the subset objective and
-# the corresponding subset sensitivity image.
+# One OSEM epoch cycles through all :math:`m` subsets in sequence.  Each
+# subset step is the same EM update as in MLEM, but with the subset objective
+# and the corresponding subset sensitivity image:
 #
-# * *Sinogram OSEM* passes a :class:`.C2AffineObjective` per subset together
+# * *Sinogram OSEM* uses a :class:`.C2AffineObjective` per subset together
 #   with the exact subset sensitivity :math:`(A^k)^T\mathbf{1}`.
-# * *LM-OSEM* passes a :class:`.NegPoissonLogLListmode` per subset together
+# * *LM-OSEM* uses a :class:`.NegPoissonLogLListmode` per subset together
 #   with the approximated subset sensitivity :math:`A^T\mathbf{1}/m`.
 #
-# The loops are structurally identical, once more demonstrating that
-# :func:`em_update` is agnostic of the underlying data representation.
+# Both variants run through the same function, once more demonstrating that
+# :func:`em_update` is agnostic of the underlying data representation.  To
+# compare all variants on the same scale, every iterate is evaluated with the
+# *sinogram* objective.
 
-# sinogram OSEM
-df_osem_sino: list[float] = []
-x_osem_sino = xp.asarray(x_init, copy=True)
-for i in range(num_epochs):
-    for k in range(num_subsets):
-        print(
-            f"OSEM epoch {(i + 1):04} / {num_epochs:04}, "
-            f"subset {(k + 1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        x_osem_sino = em_update(
-            x_osem_sino, sino_subset_neg_logL[k], subset_adjoint_ones[k], fov_mask
-        )
-    df_osem_sino.append(float(sinogram_neg_logL(x_osem_sino)))
-print()
 
-# listmode OSEM -- identical loop structure, objectives and sensitivity differ
-df_osem_lm: list[float] = []
-x_osem_lm = xp.asarray(x_init, copy=True)
-for i in range(num_epochs):
-    for k in range(num_subsets):
-        print(
-            f"LM-OSEM epoch {(i + 1):04} / {num_epochs:04}, "
-            f"subset {(k + 1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        x_osem_lm = em_update(
-            x_osem_lm, lm_subset_neg_logL[k], lm_subset_adj_ones, fov_mask
-        )
-    df_osem_lm.append(float(sinogram_neg_logL(x_osem_lm)))
-print()
+def run_osem(
+    subset_neg_logL: Sequence[C1Function], subset_adj_ones: Sequence[Array], label: str
+) -> tuple[Array, list[float]]:
+    """OSEM from x_init; returns the image and the sinogram objective per epoch"""
+    df: list[float] = []
+    x = xp.asarray(x_init, copy=True)
+    for i in range(num_epochs):
+        for k in range(num_subsets):
+            print(
+                f"{label} epoch {(i + 1):04} / {num_epochs:04}, "
+                f"subset {(k + 1):03} / {num_subsets:03}",
+                end="\r",
+            )
+            x = em_update(x, subset_neg_logL[k], subset_adj_ones[k])
+        df.append(float(sinogram_neg_logL(x)))
+    print()
+    return x, df
+
+
+x_osem_sino, df_osem_sino = run_osem(sino_subset_neg_logL, subset_adjoint_ones, "OSEM")
+x_osem_lm, df_osem_lm = run_osem(
+    lm_subset_neg_logL, num_subsets * [lm_subset_adj_ones], "LM-OSEM"
+)
 
 # %%
-# SVRG helper functions
-# ---------------------
+# 13. SVRG (sinogram and listmode)
+# --------------------------------
 #
-# Both :func:`svrg_calc_snapshot_gradients` and :func:`svrg_update` operate
-# on any list of :class:`.C1Function` objects, so the same code runs for the
-# sinogram subsets (:class:`.C2AffineObjective`) and the listmode subsets
+# SVRG reduces the variance of the subset gradients with gradients stored at
+# an anchor point :math:`\tilde{x}`.  Each epoch consists of two phases:
+#
+# 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
+#    subset gradients :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` at the
+#    current point :math:`\tilde{x}`, then take a full gradient step with
+#    :math:`\sum_k \tilde{g}_k`.
+# 2. **Variance-reduced subset updates**: for each subset :math:`k` form
+#
+#    .. math::
+#
+#        g^{VR}_k = m\bigl(\nabla f_k(x) - \tilde{g}_k\bigr) + \sum_j \tilde{g}_j
+#
+#    and take a preconditioned gradient step, followed by a projection onto
+#    :math:`x \geq 0`.
+#
+# The preconditioner is the EM preconditioner
+# :math:`x / (A^T \mathbf{1})`, updated in the anchor phases of epochs 1, 3
+# and 5 and kept fixed afterwards.  Both helper functions operate on any list
+# of :class:`.C1Function` objects, so the same code runs for the sinogram
+# subsets (:class:`.C2AffineObjective`) and the listmode subsets
 # (:class:`.NegPoissonLogLListmode`).
+
+svrg_step_size = 1.0
 
 
 def svrg_calc_snapshot_gradients(
     x_cur: Array,
     subset_obj_functions: Sequence[C1Function],
 ) -> tuple[Array, Array]:
-    """Compute and store all subset gradients at the current anchor point.
+    """Store all subset gradients at the current anchor point and return their sum.
 
     Returns
     -------
@@ -694,264 +702,177 @@ def svrg_update(
     precond: Array,
     step_size: float = 1.0,
 ) -> Array:
-    """Single SVRG subset update with variance-reduced gradient.
-
-    The variance-reduced gradient for subset :math:`k` is
-
-    .. math::
-
-        g^{VR}_k = m\\bigl(\\nabla f_k(x) - \\tilde{g}_k\\bigr) + \\sum_j \\tilde{g}_j
-
-    where :math:`\\tilde{g}_k` are the stored anchor gradients.
-    """
+    """Single SVRG subset update with variance-reduced gradient."""
     m = len(subset_obj_functions)
     grad_k = subset_obj_functions[subset_idx].gradient(x_cur)
     approx_grad = m * (grad_k - stored_subset_gradients[subset_idx]) + full_gradient
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
-# %%
-# SVRG reconstruction (sinogram and listmode)
-# -------------------------------------------
-#
-# Each SVRG epoch consists of two phases:
-#
-# 1. **Anchor phase** (every other epoch): compute all :math:`m` subset
-#    gradients at the current :math:`\tilde{x}`, then take a full gradient step.
-# 2. **Variance-reduced subset updates**: for each subset :math:`k` form
-#
-#    .. math::
-#
-#        g^{VR}_k = m\bigl(\nabla f_k(x) - \tilde{g}_k\bigr) + \sum_j \tilde{g}_j
-#
-# The same :func:`svrg_calc_snapshot_gradients` and :func:`svrg_update`
-# functions are used for both sinogram and listmode variants because both
-# expose the :class:`.C1Function` interface.
+def run_svrg(
+    subset_neg_logL: Sequence[C1Function], label: str
+) -> tuple[Array, list[float]]:
+    """SVRG from x_init; returns the image and the sinogram objective per epoch"""
+    df: list[float] = []
+    x = xp.asarray(x_init, copy=True)
+    for epoch in range(num_epochs):
+        if epoch % 2 == 0:
+            if epoch <= 4:
+                precond = em_preconditioner(x, adjoint_ones)
+            stored_grads, full_grad = svrg_calc_snapshot_gradients(x, subset_neg_logL)
+            x = xp.clip(x - svrg_step_size * precond * full_grad, 0, None)
+        for k in range(num_subsets):
+            print(
+                f"{label} epoch {(epoch + 1):04} / {num_epochs:04}, "
+                f"subset {(k + 1):03} / {num_subsets:03}",
+                end="\r",
+            )
+            x = svrg_update(
+                x,
+                k,
+                subset_neg_logL,
+                stored_grads,
+                full_grad,
+                precond,
+                step_size=svrg_step_size,
+            )
+        df.append(float(sinogram_neg_logL(x)))
+    print()
+    return x, df
 
-svrg_step_size = 1.0
 
-# sinogram SVRG
-df_svrg_sino: list[float] = []
-x_svrg_sino = xp.asarray(x_init, copy=True)
-if fov_mask is None:
-    svrg_precond_sino = x_svrg_sino / adjoint_ones
-else:
-    svrg_precond_sino = xp.where(
-        fov_mask, x_svrg_sino / adjoint_ones, xp.zeros_like(x_svrg_sino)
-    )
-stored_grads_sino: Array
-full_grad_sino: Array
-
-for epoch in range(num_epochs):
-    if epoch % 2 == 0:
-        if epoch <= 4:
-            if fov_mask is None:
-                svrg_precond_sino = x_svrg_sino / adjoint_ones
-            else:
-                svrg_precond_sino = xp.where(
-                    fov_mask, x_svrg_sino / adjoint_ones, xp.zeros_like(x_svrg_sino)
-                )
-        stored_grads_sino, full_grad_sino = svrg_calc_snapshot_gradients(
-            x_svrg_sino, sino_subset_neg_logL
-        )
-        x_svrg_sino = xp.clip(
-            x_svrg_sino - svrg_step_size * svrg_precond_sino * full_grad_sino, 0, None
-        )
-    for k in range(num_subsets):
-        print(
-            f"Sino-SVRG epoch {(epoch + 1):04} / {num_epochs:04}, "
-            f"subset {(k + 1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        x_svrg_sino = svrg_update(
-            x_svrg_sino,
-            k,
-            sino_subset_neg_logL,
-            stored_grads_sino,
-            full_grad_sino,
-            svrg_precond_sino,
-            step_size=svrg_step_size,
-        )
-    df_svrg_sino.append(float(sinogram_neg_logL(x_svrg_sino)))
-print()
-
-# listmode SVRG -- identical loop, subset objectives and sensitivity differ
-df_svrg_lm: list[float] = []
-x_svrg_lm = xp.asarray(x_init, copy=True)
-if fov_mask is None:
-    svrg_precond_lm = x_svrg_lm / adjoint_ones
-else:
-    svrg_precond_lm = xp.where(
-        fov_mask, x_svrg_lm / adjoint_ones, xp.zeros_like(x_svrg_lm)
-    )
-stored_grads_lm: Array
-full_grad_lm: Array
-
-for epoch in range(num_epochs):
-    if epoch % 2 == 0:
-        if epoch <= 4:
-            if fov_mask is None:
-                svrg_precond_lm = x_svrg_lm / adjoint_ones
-            else:
-                svrg_precond_lm = xp.where(
-                    fov_mask, x_svrg_lm / adjoint_ones, xp.zeros_like(x_svrg_lm)
-                )
-        stored_grads_lm, full_grad_lm = svrg_calc_snapshot_gradients(
-            x_svrg_lm, lm_subset_neg_logL
-        )
-        x_svrg_lm = xp.clip(
-            x_svrg_lm - svrg_step_size * svrg_precond_lm * full_grad_lm, 0, None
-        )
-    for k in range(num_subsets):
-        print(
-            f"LM-SVRG epoch {(epoch + 1):04} / {num_epochs:04}, "
-            f"subset {(k + 1):03} / {num_subsets:03}",
-            end="\r",
-        )
-        x_svrg_lm = svrg_update(
-            x_svrg_lm,
-            k,
-            lm_subset_neg_logL,
-            stored_grads_lm,
-            full_grad_lm,
-            svrg_precond_lm,
-            step_size=svrg_step_size,
-        )
-    df_svrg_lm.append(float(sinogram_neg_logL(x_svrg_lm)))
-print()
+x_svrg_sino, df_svrg_sino = run_svrg(sino_subset_neg_logL, "Sino-SVRG")
+x_svrg_lm, df_svrg_lm = run_svrg(lm_subset_neg_logL, "LM-SVRG")
 
 # %%
-# Convergence plot
-# ----------------
+# 14. Convergence comparison
+# --------------------------
 #
-# We compare all six variants (sino/LM x MLEM/OSEM/SVRG) by plotting the
-# **sinogram** negative Poisson log-likelihood vs epoch and vs full data passes.
+# We plot the **sinogram** negative Poisson log-likelihood of all variants vs
+# epoch (left) and vs full data passes (right):
 #
-# Data-pass counts per epoch:
-#
-# * **MLEM**: 1 pass / iteration (shown as horizontal reference lines).
-# * **OSEM**: 1 full data pass per epoch.
-# * **SVRG**: 2 passes on anchor epochs (snapshot + subset updates),
-#   1 pass on non-anchor epochs.
+# * **OSEM**: one full data pass per epoch.
+# * **SVRG**: two passes on anchor epochs (snapshot + subset updates), one
+#   pass on the other epochs.
+# * **MLEM** (GPU only): one pass per iteration; the values after half and
+#   after all ``num_epochs_mlem`` iterations are shown as horizontal lines
+#   (darker for sinogram, lighter for listmode).
 
 epochs = np.arange(1, num_epochs + 1)
-osem_passes = epochs.copy()
+svrg_passes = np.cumsum(np.where(np.arange(num_epochs) % 2 == 0, 2, 1))
 
-svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
-svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
-
-all_values = df_osem_sino + df_osem_lm + df_svrg_sino + df_svrg_lm
-df_min = min(all_values)
+df_min = min(df_osem_sino + df_osem_lm + df_svrg_sino + df_svrg_lm)
 df_max = max(df_osem_sino[0], df_osem_lm[0])
 
-fig_conv, axs = plt.subplots(1, 2, figsize=(13, 4.5), layout="constrained")
+fig, axs = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
 
-for ax, xvals_osem, xvals_svrg, xlabel in (
-    (axs[0], epochs, epochs, "Epoch"),
-    (axs[1], osem_passes, svrg_cumulative_passes, "Full data passes"),
-):
+for ax, svrg_xvals in ((axs[0], epochs), (axs[1], svrg_passes)):
+    ax.plot(epochs, df_osem_sino, marker="o", label=f"OSEM ({num_subsets} subsets)")
+    ax.plot(epochs, df_osem_lm, marker="s", label=f"LM-OSEM ({num_subsets} subsets)")
     ax.plot(
-        xvals_osem, df_osem_sino, label=f"Sino-OSEM ({num_subsets} subsets)", marker="o"
-    )
-    ax.plot(
-        xvals_osem, df_osem_lm, label=f"LM-OSEM ({num_subsets} subsets)", marker="s"
-    )
-    ax.plot(
-        xvals_svrg,
+        svrg_xvals,
         df_svrg_sino,
-        label=f"Sino-SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})",
         marker="^",
+        label=f"SVRG ({num_subsets} subsets, step {svrg_step_size:.1f})",
     )
     ax.plot(
-        xvals_svrg,
+        svrg_xvals,
         df_svrg_lm,
-        label=f"LM-SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})",
         marker="v",
+        label=f"LM-SVRG ({num_subsets} subsets, step {svrg_step_size:.1f})",
     )
     if run_mlem:
-        for ep, style, color in (
-            (mlem_checkpoints[0], "--", "gray"),
-            (mlem_checkpoints[1], "-.", "black"),
-        ):
+        # MLEM reference values: grey lines, line style by number of iterations
+        for n_iter, ls in zip(mlem_checkpoints, ("-.", "--")):
             ax.axhline(
-                df_mlem_sino[ep],
-                label=f"Sino-MLEM ({ep} iter.)",
-                ls=style,
-                color=color,
+                df_mlem_sino[n_iter],
+                color="0.3",
+                ls=ls,
+                label=f"MLEM ({n_iter} iterations)",
             )
             ax.axhline(
-                df_mlem_lm[ep],
-                label=f"LM-MLEM ({ep} iter.)",
-                ls=style,
-                color=color,
-                alpha=0.5,
+                df_mlem_lm[n_iter],
+                color="0.6",
+                ls=ls,
+                label=f"LM-MLEM ({n_iter} iterations)",
             )
     ax.set_ylim(df_min, df_max)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("Negative Poisson log-likelihood")
-    ax.legend(fontsize="small")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(ls=":")
 
-fig_conv.show()
+axs[0].set_xlabel("epoch")
+axs[0].set_ylabel("negative Poisson log-likelihood f(x)")
+axs[0].set_title("Convergence per epoch")
+axs[1].set_xlabel("full data passes")
+axs[1].set_title("Convergence per data pass")
+fig.legend(
+    *axs[0].get_legend_handles_labels(),
+    loc="outside lower center",
+    ncols=2,
+    fontsize="small",
+)
+fig.show()
 
 # %%
-# Reconstruction results
-# ----------------------
+# The sinogram and listmode SVRG curves lie on top of each other, although
+# the subsets are formed differently (views vs. every :math:`m`-th event).
+# The two OSEM curves differ slightly: OSEM does not converge to the
+# minimum, so its iterates depend on the subset partition (and LM-OSEM uses
+# the approximate subset sensitivity :math:`A^T\mathbf{1}/m`).  SVRG reaches
+# lower objective values than OSEM per epoch and also per data pass.
+
+# %%
+# 15. Reconstructed images
+# ------------------------
+#
+# The final images of all variants, with the same colour scale.
 
 vmax = float(xp.max(x_mlem_sino if run_mlem else x_osem_sino))
 
-# %%
+recons = [
+    (x_osem_sino, f"Sinogram OSEM ({num_subsets} subsets, {num_epochs} epochs)"),
+    (x_osem_lm, f"Listmode OSEM ({num_subsets} subsets, {num_epochs} epochs)"),
+    (x_svrg_sino, f"Sinogram SVRG ({num_subsets} subsets, {num_epochs} epochs)"),
+    (x_svrg_lm, f"Listmode SVRG ({num_subsets} subsets, {num_epochs} epochs)"),
+]
 if run_mlem:
-    fig_xsino, _, widgets_xsino = show_vol_cuts(
-        x_mlem_sino,
-        vmin=0,
-        vmax=vmax,
-        fig_title=f"Sinogram MLEM ({num_epochs_mlem} iterations)",
+    recons = [
+        (x_mlem_sino, f"Sinogram MLEM ({num_epochs_mlem} iterations)"),
+        (x_mlem_lm, f"Listmode MLEM ({num_epochs_mlem} iterations)"),
+    ] + recons
+
+for img, title in recons:
+    fig, _, _ = show_vol_cuts(
+        img, voxel_size=voxel_size, fig_title=title, vmin=0, vmax=vmax
     )
-    fig_xsino.show()
+    fig.show()
 
 # %%
-if run_mlem:
-    fig_xlm, _, widgets_xlm = show_vol_cuts(
-        x_mlem_lm,
-        vmin=0,
-        vmax=vmax,
-        fig_title=f"Listmode MLEM ({num_epochs_mlem} iterations)",
-    )
-    fig_xlm.show()
+# Sinogram and listmode reconstructions of the same algorithm look alike.
+# At this low count level and without regularisation, all images are very
+# noisy, and the noise increases further as the iterates approach the
+# maximum-likelihood solution; the next example adds a prior.
 
 # %%
-fig_xosino, _, widgets_xosino = show_vol_cuts(
-    x_osem_sino,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Sinogram OSEM ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_xosino.show()
+# Summary
+# -------
+#
+# - :meth:`.RegularPolygonPETProjector.convert_sinogram_to_listmode` turns an
+#   integer sinogram into an event list; a :class:`.ListmodePETProjector`
+#   with per-event attenuation factors gives the listmode forward model.
+# - :class:`.NegPoissonLogLListmode` has the same gradient w.r.t. the image as
+#   the sinogram :class:`.NegPoissonLogL` composed with the forward model;
+#   their values differ only by a data-dependent constant.
+# - Listmode subsets take every :math:`m`-th event of a shuffled list and use
+#   the approximated subset sensitivity :math:`A^T\mathbf{1}/m`.
+# - Written as a preconditioned gradient step, the EM update -- and SVRG built
+#   on top of it -- only needs the :class:`.C1Function` interface: the same
+#   code reconstructs sinogram and listmode data, and listmode SVRG converges
+#   like its sinogram counterpart.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_04_listmode_algorithms_01_run_listmode_sgd_svrg.py`
+#    -- listmode SGD and SVRG for a regularised objective (logcosh prior).
 
-# %%
-fig_xolm, _, widgets_xolm = show_vol_cuts(
-    x_osem_lm,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Listmode OSEM ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_xolm.show()
-
-# %%
-fig_xssvrg, _, widgets_xssvrg = show_vol_cuts(
-    x_svrg_sino,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Sinogram SVRG ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_xssvrg.show()
-
-# %%
-fig_xlsvrg, _, widgets_xlsvrg = show_vol_cuts(
-    x_svrg_lm,
-    vmin=0,
-    vmax=vmax,
-    fig_title=f"Listmode SVRG ({num_subsets} subsets, {num_epochs} epochs)",
-)
-fig_xlsvrg.show()
+# sphinx_gallery_thumbnail_number = 3
