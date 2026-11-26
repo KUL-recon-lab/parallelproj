@@ -316,13 +316,17 @@ def spdhg_update(
 img_scale = 0.1
 # number of MLEM epochs used to initialize PDHG and SPDHG
 num_epochs_mlem = 10
-# number of SPDHG epochs (each = 2 * num_subsets mini-iterations)
-num_epochs_spdhg = iterations_for_device(dev, cpu=10, gpu=20, what="SPDHG epochs")
 # number of sinogram subsets for SPDHG
 num_subsets = 28
-# number of PDHG epochs
+# number of SPDHG epochs (each = 2 * num_subsets mini-iterations); full number
+# on a GPU, fewer on the CPU
+num_epochs_spdhg_full = 20
+num_epochs_spdhg = iterations_for_device(
+    dev, cpu=10, gpu=num_epochs_spdhg_full, what="SPDHG epochs"
+)
+# number of PDHG iterations (full number: as many image updates as SPDHG)
 num_epochs_pdhg = iterations_for_device(
-    dev, cpu=10, gpu=num_epochs_spdhg * num_subsets, what="PDHG iterations"
+    dev, cpu=10, gpu=num_epochs_spdhg_full * num_subsets, what="PDHG iterations"
 )
 # regularization weight
 beta = 6.0

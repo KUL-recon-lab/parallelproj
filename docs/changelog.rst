@@ -129,6 +129,20 @@ Documentation
   projector example, the tail onset of the TOF kernel example).  The TOF
   kernel example demonstrates ``kernel_scale``, and all examples convert FWHM
   to sigma with the same factor :math:`2\sqrt{2 \ln 2} \approx 2.3548`.
+- **Example gallery look (part 4): reconstruction of sinogram data.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All
+  reconstruction examples follow the example template.  Fixes found on the
+  way: the FBP example's image was about 9 times too large (missing
+  :math:`\Delta\phi / \Delta s^2` scaling); the De Pierro example's Powell
+  reference now runs with every array backend; the full (GPU) number of PDHG
+  iterations of the PDHG / SPDHG example is 560 (it was derived from the
+  reduced CPU number of SPDHG epochs); the MLEM reference of the
+  MLEM / OSEM / SVRG example runs whenever the full number of iterations is
+  used; and text that contradicted the results was corrected (e.g. the noise
+  curves of the TOF variance example, the cost of an SVRG epoch, the memory
+  numbers of the memory-mapped OSEM example).  The examples' matplotlib style
+  no longer crops figures with ``savefig.bbox = "tight"``, which removed whole
+  panels of figures with shared y axes.
 - **Axis labels ``x0``, ``x1``, ``x2``** (the world axes of parallelproj) in
   ``show_tof_bins`` (previously x / y / z) and as the default labels of the
   examples' ``show_vol_cuts``.
