@@ -9,15 +9,15 @@ Preconditioned stochastic gradient methods such as SVRG take steps
 reconstruction with a prior, :math:`D` has to account for the curvature of
 the data fidelity *and* of the prior.  This example compares three diagonal
 preconditioners for a logcosh prior, for high and low count data and for
-weak, medium and strong regularisation, and uses a monotone MAP-EM algorithm built from the
-separable majorizer of the prior as reference.
+weak, medium and strong regularisation, and uses a monotone MAP-EM algorithm
+built from the separable majorizer of the prior as reference.
 
 **You will learn**
 
-- three diagonal preconditioners: the EM preconditioner :math:`x / A^T 1`, and
-  two extensions by the curvature of the prior, the **Hessian diagonal**
-  (:meth:`.C2Function.hessian_diag`) and the **separable majorizer**
-  (:meth:`.C2Function.separable_majorizer_curvature`),
+- three ways to extend the EM preconditioner :math:`x / A^T 1` by the
+  curvature of the prior: the **Hessian diagonal**
+  (:meth:`.C2Function.hessian_diag`), **twice the Hessian diagonal**, and the
+  **separable majorizer** (:meth:`.C2Function.separable_majorizer_curvature`),
 - how the count level and the regularisation strength change their
   behaviour,
 - how the separable majorizer turns De Pierro's MAP-EM algorithm into a
@@ -89,15 +89,19 @@ xp, dev = suggest_array_backend_and_device()
 #
 # and differ in the curvature :math:`c_R` of the prior:
 #
-# - **EM**: :math:`c_R = 0`, the preconditioner of MLEM/OSEM, which ignores
-#   the prior,
 # - **Hessian diagonal**: :math:`c_R = \operatorname{diag}(\nabla^2 R(x)) =
 #   |G|^T \psi''(Gx)`, the local curvature,
-# - **separable majorizer**: :math:`c_R = |G|^T (\omega(Gx) \odot |G| 1)`
-#   with Huber's curvature :math:`\omega(t) = \psi'(t) / t \geq \psi''(t)`.
-#   It is the curvature of a separable quadratic that lies above :math:`R`
-#   everywhere (De Pierro's surrogate), and roughly twice the Hessian
-#   diagonal for forward differences (:math:`|G| 1 = 2`).
+# - **2 x Hessian diagonal**: :math:`c_R = 2\, |G|^T \psi''(Gx)`, a
+#   heuristic with the factor 2 of De Pierro's separable surrogate for
+#   forward differences (:math:`|G| 1 = 2`, every difference involves two
+#   voxels), but with the local curvature :math:`\psi''`,
+# - **separable majorizer**: :math:`c_R = |G|^T (\omega(Gx) \odot |G| 1) =
+#   2\, |G|^T \omega(Gx)` with Huber's curvature
+#   :math:`\omega(t) = \psi'(t) / t \geq \psi''(t)`.  It is the curvature of
+#   a separable quadratic that lies above :math:`R` everywhere (De Pierro's
+#   surrogate).  2 x the Hessian diagonal is not: :math:`\psi''` of logcosh
+#   is largest at :math:`t = 0`, so the quadratic built from it is too flat
+#   for larger differences.
 
 # %%
 # 2. Scanner, projector and phantom
@@ -192,7 +196,8 @@ subset_sens = [
 # :math:`A^T 1` of the preconditioners (median over the FOV, Hessian diagonal
 # / majorizer): about 3 % / 7 % for the weak prior (:math:`\beta = 3`),
 # 9 % / 25 % for the medium prior (:math:`\beta = 10`) and 25 % / 70 % for the
-# strong prior (:math:`\beta = 30`, visibly over-smoothing).
+# strong prior (:math:`\beta = 30`, visibly over-smoothing); twice the
+# Hessian diagonal adds twice as much as the Hessian diagonal.
 
 betas = {"weak": 3.0, "medium": 10.0, "strong": 30.0}
 total_counts = {"high counts": 3e6, "low counts": 3e4}
@@ -241,16 +246,16 @@ def objectives(sc: dict):
 
 def preconditioner(kind: str, prior: C2AffineObjective, x: Array) -> Array:
     """x / (A^T 1 + c_R(x) x) inside the FOV, 0 outside"""
-    if kind == "EM":
-        denom = sens
-    elif kind == "Hessian diagonal":
+    if kind == "Hessian diagonal":
         denom = sens + prior.hessian_diag(x) * x
+    elif kind == "2 x Hessian diagonal":
+        denom = sens + 2 * prior.hessian_diag(x) * x
     else:  # separable majorizer
         denom = sens + prior.separable_majorizer_curvature(x) * x
     return xp.where(fov_mask, x / xp.where(fov_mask, denom, 1.0), 0.0)
 
 
-precond_kinds = ("EM", "Hessian diagonal", "separable majorizer")
+precond_kinds = ("Hessian diagonal", "2 x Hessian diagonal", "separable majorizer")
 
 # %%
 # 6. SVRG
@@ -376,8 +381,7 @@ for name, res in results.items():
 # --------------
 #
 # We plot the relative objective gap :math:`(F - F^*) / (F(x^0) - F^*)`
-# against the number of data passes.  A gap above 1 means that the objective
-# is larger than at the start.
+# against the number of data passes.
 
 fig, axs = plt.subplots(
     2, 3, figsize=(10, 6.4), layout="constrained", sharex=True, sharey=True
@@ -392,7 +396,7 @@ for ax, (name, res) in zip(axs.ravel(), results.items()):
     mm_gap = (np.asarray(res["MAP-EM"][1]) - f_star) / (f0 - f_star)
     ax.semilogy(np.maximum(mm_gap, 1e-8), "k--", label="MAP-EM (majorizer)")
     ax.set_title(name, fontsize="medium")
-    ax.set_ylim(1e-7, 1e2)
+    ax.set_ylim(1e-7, 3)
     ax.grid(alpha=0.3)
 for ax in axs[1]:
     ax.set_xlabel("data passes")
@@ -402,19 +406,19 @@ axs[0, 0].legend(fontsize="x-small")
 fig.show()
 
 # %%
-# - **Weak prior:** the curvature of the prior is small compared with
-#   :math:`A^T 1`, and all three preconditioners behave almost identically;
-#   the separable majorizer is marginally more cautious.
-# - **Medium prior:** the EM preconditioner ignores the curvature of the
-#   prior, its steps are too large, and SVRG does not improve on the initial
-#   image (gap of about 1 or larger).  The Hessian diagonal and
-#   the majorizer converge, the Hessian diagonal slightly faster.
-# - **Strong prior:** the Hessian diagonal fails as well and stalls.  The
-#   local curvature :math:`\psi''(t)` of logcosh decays exponentially for
+# - **Weak and medium prior:** the curvature of the prior is small compared
+#   with :math:`A^T 1`, and all three preconditioners behave almost
+#   identically; the larger curvatures (2 x Hessian diagonal, majorizer) are
+#   marginally more cautious.
+# - **Strong prior:** SVRG with the Hessian diagonal stalls.  The local
+#   curvature :math:`\psi''(t)` of logcosh decays exponentially for
 #   differences :math:`|t| \gg \delta` (edges, noise), while the prior still
 #   changes like :math:`\psi'(t) / t \sim 1 / |t|` there, so the steps of
-#   these voxels are too large.  Only the separable majorizer converges in
-#   all scenarios.
+#   these voxels are too large.  With twice the Hessian diagonal and with the
+#   separable majorizer, SVRG converges, about equally fast.
+# - The factor 2 is what makes the difference here.  The separable majorizer
+#   additionally *guarantees* an upper bound of the prior (2 x the Hessian
+#   diagonal does not), which makes MAP-EM monotone.
 # - The count level hardly matters, because the prior was scaled with the
 #   data.  MAP-EM is monotone in all scenarios, but needs many more data
 #   passes than SVRG.
@@ -456,15 +460,17 @@ fig.show()
 # -------
 #
 # - The three preconditioners only differ in the curvature of the prior that
-#   they add to the EM preconditioner :math:`x / A^T 1`.
+#   they add to the EM preconditioner :math:`x / A^T 1`.  (Ignoring the prior
+#   altogether, i.e. the EM preconditioner itself, is not shown here: in the
+#   same scenarios it did not converge already for the medium prior.)
 # - The **separable majorizer** (:meth:`.C2Function.separable_majorizer_curvature`)
 #   is an upper bound of the prior everywhere; with it, De Pierro's MAP-EM is
 #   a monotone algorithm for the logcosh prior and a reliable reference.
 # - The **Hessian diagonal** (:meth:`.C2Function.hessian_diag`) is the local
-#   curvature.  It is smaller, so SVRG takes larger steps: slightly faster
-#   for weak and medium priors, but not convergent for a strong prior.
-# - The **EM preconditioner** ignores the prior and only works for weak
-#   priors.
+#   curvature: fine for weak and medium priors, but SVRG with step size 1
+#   does not converge for a strong prior.
+# - **Twice the Hessian diagonal** works as well as the majorizer in these
+#   tests, but without a guarantee.
 # - With a fixed step size, use the separable majorizer when the
 #   regularisation can be strong.
 #
