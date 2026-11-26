@@ -689,11 +689,11 @@ fig.suptitle(f"Transaxial slice x2 = {sl}")
 fig.show()
 
 # %%
-# The MLEM initialization is noisy.  The TV prior removes the noise and gives
-# piecewise constant images with sharp edges.  After the same number of
-# iterations (i.e. passes over the data), the LM-SPDHG image is visually
-# indistinguishable from the PDHG reference, while PDHG itself is not yet
-# converged.
+# The MLEM initialization is blurry and noisy.  The TV prior suppresses the
+# noise and, when converged, gives piecewise constant images with sharp edges.
+# After the same number of iterations (i.e. passes over the data), the
+# LM-SPDHG image is closer to the PDHG reference than the PDHG image itself
+# (higher PSNR with respect to the reference).
 
 # %%
 # 14. Convergence
@@ -729,9 +729,11 @@ if track_cost:
     fig2.show()
 
 # %%
-# LM-SPDHG decreases the cost much faster per pass over the data than PDHG,
-# and its PSNR with respect to the PDHG reference increases quickly in the
-# first iterations.
+# The first LM-SPDHG value is the cost of the MLEM initialization.  After a
+# few iterations, LM-SPDHG reaches a lower cost than PDHG after the same
+# number of passes over the data.  Its PSNR with respect to the PDHG
+# reference increases overall, but not monotonically: SPDHG is a stochastic
+# algorithm, and its early iterates can overshoot.
 
 # %%
 # Summary

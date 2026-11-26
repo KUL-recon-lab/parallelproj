@@ -732,7 +732,16 @@ fig.colorbar(h_lam, ax=ax[1, :], fraction=0.04, location="right")
 fig.show()
 
 # %%
-# INTERPRETATION_IMAGES
+# With the uniform water image, the OS-MAPEM baseline shows clear
+# attenuation correction artefacts: the activity is overestimated around the
+# air-like insert (where water attenuation is assumed but none is present)
+# and underestimated around the dense insert, and it is overestimated at
+# the edge of the object (dark rim).  MLAA recovers the dense and air-like inserts in :math:`\mu`
+# (with more noise than the true image) without visible traces of the
+# activity inserts, and its activity image is very close to the reference
+# reconstructed with the true attenuation.  The printed cost of MLAA is even
+# slightly lower than that of the reference, because :math:`\mu` is fitted
+# to the noisy data as well.
 
 # %%
 # 13. Convergence of the MLAA estimates
