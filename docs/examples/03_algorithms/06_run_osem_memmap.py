@@ -2,52 +2,38 @@
 RAM-efficient OSEM with disk-backed TOF sinograms
 =================================================
 
-Demonstrates a memory-efficient OSEM variant in which full TOF sinograms
-are **never held in RAM simultaneously**.  Instead they are stored on disk
-in a *subset-contiguous* binary layout via :mod:`numpy.memmap`, and only one
-subset's data is loaded at a time during each OSEM update.
+:bdg-primary:`reconstruction` :bdg-secondary:`intermediate` :bdg-light:`CPU or GPU`
 
-**Why subset-contiguous layout?**
+TOF sinograms of clinical scanners need several GB of memory each, and OSEM
+needs at least two of them (the data and the contamination).  OSEM only
+works on one subset at a time, so the full sinograms never have to be in RAM
+together.  In this example we store them on disk in a *subset-contiguous*
+layout via :class:`numpy.memmap` and load only one subset at a time during
+the OSEM updates.
 
-The natural sinogram axis order (e.g. ``(num_rad, num_views, num_planes,
-num_tofbins)`` for RVP) stores views contiguously.  OSEM subsets are
-distributed across the view axis with stride ``num_subsets``, so reading
-subset *k* from this layout requires many non-sequential disk seeks.
+**You will learn**
 
-Re-organising the data to shape
-``(num_subsets, num_rad, views_per_subset, num_planes, num_tofbins)``
-on disk makes each subset a single contiguous block.  Sequential access
-lets the OS read-ahead prefetch the next subset from disk while the
-projector runs on the current one.
+- why a subset-contiguous layout on disk makes reading a subset fast,
+- how to convert full sinograms to disk-backed subset files with
+  :func:`parallelproj.data.to_subset_mmap`,
+- how to run OSEM (and evaluate the full objective function) with only one
+  subset of the data in RAM, using :class:`parallelproj.data.SubsetArrayMmap`,
+- how much memory this saves.
 
-**Memory comparison (this toy scanner)**
-
-.. code-block:: text
-
-    Before disk conversion (full sinograms in RAM):
-      y:                ~15 MB
-      contamination:    ~15 MB
-      total:            ~30 MB
-
-    After disk conversion:
-      per subset in RAM during update:
-        y_k:    ~0.65 MB
-        s_k:    ~0.65 MB
-        total:  ~1.30 MB  (vs ~30 MB -- a 23x reduction)
-
-On a clinical scanner (400 rad x 400 views x 837 planes x 27 TOF bins)
-the full sinogram is ~3.5 GB each, and the saving scales accordingly.
-
-**Helper code** (in :mod:`parallelproj.data`):
-
-* :class:`parallelproj.data.SubsetArrayMmap` -- read-only wrapper
-  around a ``numpy.memmap`` file.  ``mmap[k]`` returns an *owned* copy of
-  subset *k* that Python frees as soon as the caller deletes the reference.
-* :func:`parallelproj.data.to_subset_mmap` -- one-time conversion
-  from a full in-memory sinogram to the on-disk subset-contiguous format.
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_03_algorithms_00_run_mlem_osem_svrg.py`
+(OSEM with subsets).
 """
 
 # %%
+# 0. Setup
+# --------
+#
+# The example could run on any backend and device.  Since the memory-mapped
+# files are NumPy arrays (:class:`numpy.memmap`), we use NumPy on the CPU:
+# then the subset data are read directly from the files, without an
+# additional copy to a GPU.
+
 from __future__ import annotations
 
 import shutil
@@ -64,30 +50,26 @@ import parallelproj.pet_scanners
 import parallelproj.projectors
 import parallelproj.tof
 from parallelproj import Array, to_numpy_array
-from parallelproj.functions import C1Function, C2AffineObjective, NegPoissonLogL
-from parallelproj.data import to_subset_mmap
-
-
 from parallelproj._examples_utils import (
     elliptic_cylinder_phantom,
     show_vol_cuts,
+    suggest_array_backend_and_device,
 )
+from parallelproj.data import to_subset_mmap
+from parallelproj.functions import C1Function, C2AffineObjective, NegPoissonLogL
+
+# NumPy on the CPU on purpose: the memmaps are NumPy arrays
+xp, dev = suggest_array_backend_and_device("numpy", "cpu")
 
 # %%
-# Backend and device
-# ------------------
+# 1. Scanner, projector and phantom
+# ---------------------------------
 #
-# In principle we can run on any backend or device
-# However, since we will use (numpy-based) memmaps, it is best to use
-# the CPU as device.
-
-import array_api_compat.numpy as xp
-
-dev = "cpu"
-
-# %%
-# Scanner and projector setup
-# ---------------------------
+# A small scanner with 16 sides and 5 rings, a sinogram with a maximum ring
+# difference of 2 in radial-view-plane (RVP) order, an image of 55 x 55 x 8
+# voxels of 2 mm and an elliptic cylinder phantom with hot and cold inserts.
+# OSEM uses 24 subsets and runs for ``num_epochs`` epochs after a one-epoch
+# warm start.
 
 num_subsets = 24
 num_epochs = 5
@@ -123,8 +105,14 @@ x_true = elliptic_cylinder_phantom(
 )
 
 # %%
-# Attenuation and full forward model
-# -----------------------------------
+# 2. TOF forward model with attenuation
+# -------------------------------------
+#
+# The attenuation sinogram is computed with the non-TOF projector (water,
+# :math:`\mu = 0.01` / mm, inside the phantom).  Then TOF is switched on (13
+# TOF bins of 12 mm, :math:`\sigma_\text{TOF}` = 12 mm), the attenuation
+# factors are broadcast over the TOF bins, and a Gaussian resolution model
+# (2 mm FWHM) is added: :math:`A = \text{diag}(a) P G`.
 
 x_att = 0.01 * xp.astype(x_true > 0, xp.float32)
 att_sino = xp.exp(-proj(x_att))
@@ -133,11 +121,7 @@ proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-att_values = (
-    xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
-    if proj.tof
-    else att_sino
-)
+att_values = xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
 att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values)
 
 res_model = parallelproj.operators.GaussianFilterOperator(
@@ -148,8 +132,11 @@ res_model = parallelproj.operators.GaussianFilterOperator(
 pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
-# Simulate TOF PET data
-# ----------------------
+# 3. Simulation of TOF data
+# -------------------------
+#
+# Poisson data of the noise-free expectation :math:`A x + s`, with a constant
+# contamination :math:`s` (50 % of the mean of :math:`A x`).
 
 noise_free_data = pet_lin_op(x_true)
 
@@ -172,8 +159,12 @@ y = xp.asarray(
 del noise_free_data
 
 # %%
-# Subset view / slice definitions
-# --------------------------------
+# 4. Subset definitions
+# ---------------------
+#
+# The subsets are groups of views.  We need the slices of each subset for the
+# 4D TOF sinograms (data and contamination) and for the 3D non-TOF
+# attenuation sinogram.
 
 subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
@@ -184,13 +175,24 @@ _, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
 )
 
 # %%
-# Convert full sinograms to disk-backed subset files and free RAM
-# ---------------------------------------------------------------
+# 5. Disk-backed subset files
+# ---------------------------
 #
-# ``to_subset_mmap`` gathers the non-contiguous subset slices from
-# the full array and writes them as contiguous blocks on disk.  The
-# returned :class:`parallelproj.data.SubsetArrayMmap` is a thin read-only
-# wrapper; no sinogram data lives in RAM after the ``del`` calls.
+# **Why a subset-contiguous layout?**  The natural sinogram axis order (e.g.
+# ``(num_rad, num_views, num_planes, num_tofbins)`` for RVP) stores views
+# contiguously.  OSEM subsets take every ``num_subsets``-th view, so reading
+# subset *k* from this layout requires many non-sequential disk reads.
+# Re-organising the data to the shape
+# ``(num_subsets, num_rad, views_per_subset, num_planes, num_tofbins)``
+# on disk makes each subset a single contiguous block that can be read
+# sequentially (and prefetched by the operating system).
+#
+# :func:`parallelproj.data.to_subset_mmap` gathers the subset slices of a
+# full array once and writes them as contiguous blocks to a file.  It returns
+# a :class:`parallelproj.data.SubsetArrayMmap`, a thin read-only wrapper
+# around a :class:`numpy.memmap`: ``mmap[k]`` returns an *owned* copy of
+# subset *k* that is freed as soon as it is no longer referenced.  After the
+# ``del`` below, the full TOF sinograms are no longer in RAM.
 
 tmpdir = Path(tempfile.mkdtemp())
 
@@ -219,8 +221,20 @@ peak_mb = (y_mmap.nbytes_per_subset() + s_mmap.nbytes_per_subset()) / 1024**2
 print(f"  peak per update:  {peak_mb:.2f} MB")
 
 # %%
-# Subset forward operators and sensitivity images
-# ------------------------------------------------
+# During an OSEM update, only 1.29 MB of sinogram data are in RAM instead of
+# 30.9 MB, a reduction by the number of subsets (24).  On a clinical scanner
+# (400 radial bins x 400 views x 837 planes x 27 TOF bins, i.e.
+# :math:`3.6 \cdot 10^9` bins) each full sinogram needs about 14.5 GB in
+# float32, and the saving scales accordingly.
+
+# %%
+# 6. Subset forward operators and sensitivity images
+# --------------------------------------------------
+#
+# As in the in-memory OSEM, every subset gets its own forward operator (with
+# the attenuation factors of its views) and its sensitivity image
+# :math:`(A^k)^T 1`.  These operators and images are small compared with the
+# TOF sinograms.
 
 proj.clear_cached_lor_endpoints()
 
@@ -230,13 +244,9 @@ for i in range(num_subsets):
     subset_proj = copy(proj)
     subset_proj.views = subset_views[i]
 
-    att_values_k = (
-        xp.broadcast_to(
-            xp.expand_dims(att_sino[subset_slices_non_tof[i]], axis=-1),
-            subset_proj.out_shape,
-        )
-        if subset_proj.tof
-        else att_sino[subset_slices_non_tof[i]]
+    att_values_k = xp.broadcast_to(
+        xp.expand_dims(att_sino[subset_slices_non_tof[i]], axis=-1),
+        subset_proj.out_shape,
     )
     subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
         att_values_k
@@ -261,24 +271,20 @@ for k, op in enumerate(pet_subset_linop_seq):
     )
 
 # %%
-# FOV mask
-# --------
+# 7. FOV mask and EM update
+# -------------------------
 #
-# The scanner's cylindrical field of view does not cover every voxel of the
-# image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity :math:`(A^T 1)_i = 0`.  Dividing by zero in the EM
-# preconditioner would produce NaN / Inf values that corrupt the
-# reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
-# boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
-# ``None`` when every image voxel is inside the FOV (no masking needed).
+# The cylindrical field of view (FOV) of the scanner does not cover every
+# voxel of the image grid.  Voxels outside the FOV are not intersected by any
+# LOR, so their sensitivity :math:`(A^T 1)_j` is 0, and dividing by it in the
+# EM preconditioner would produce NaN / Inf values.
+# :meth:`.RegularPolygonPETProjector.fov_mask` returns a boolean array that
+# is ``True`` inside the FOV; ``fov_mask`` is ``None`` if every voxel is
+# inside the FOV (no masking needed).
 
 cyl_mask = proj.fov_mask()
 fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
 del cyl_mask
-
-# %%
-# EM update
-# ----------
 
 
 def em_update(
@@ -317,17 +323,19 @@ def em_update(
     if img_mask is None:
         d = x_cur / adj_ones
     else:
-        d = xp.where(img_mask, x_cur / adj_ones, xp.zeros_like(x_cur))
+        # divide by 1 outside the FOV to avoid 0 / 0 (those voxels are zeroed)
+        safe_adj_ones = xp.where(img_mask, adj_ones, xp.ones_like(adj_ones))
+        d = xp.where(img_mask, x_cur / safe_adj_ones, xp.zeros_like(x_cur))
     return x_cur - d * data_fidelity.gradient(x_cur)
 
 
 # %%
-# Full objective evaluated subset-by-subset
-# ------------------------------------------
+# 8. Full objective evaluated subset by subset
+# --------------------------------------------
 #
-# The negative Poisson log-likelihood is separable:
-# :math:`f(x) = \sum_k f_k(x)`.  We accumulate the value over subsets,
-# loading only one subset's data at a time.
+# The negative Poisson log-likelihood is separable,
+# :math:`f(x) = \sum_k f_k(x)`.  To monitor the convergence, we accumulate its
+# value over the subsets, loading only one subset of the data at a time.
 #
 # .. note::
 #     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
@@ -360,9 +368,16 @@ def full_objective_from_subsets(x: Array) -> float:
 
 
 # %%
-# Warm-start: one OSEM epoch before tracking convergence
-# -------------------------------------------------------
+# 9. OSEM reconstruction
+# ----------------------
+#
+# A first OSEM epoch from a uniform image serves as a warm start; then we run
+# ``num_epochs`` further epochs and evaluate the full objective after each of
+# them.  Only ``y_k`` and ``s_k`` (one subset each) are in RAM during a subset
+# update: they are loaded from the memory-mapped files (one sequential read
+# each) and released with ``del`` after the update.
 
+# --- warm start: 1 OSEM epoch ---
 x_osem = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
 if fov_mask is not None:
     x_osem = xp.where(fov_mask, x_osem, xp.zeros_like(x_osem))
@@ -376,14 +391,7 @@ for k in range(num_subsets):
     x_osem = em_update(x_osem, df_k, subset_adjoint_ones[k], fov_mask)
     del df_k, y_k, s_k
 
-# %%
-# OSEM reconstruction
-# --------------------
-#
-# Only ``y_k`` and ``s_k`` (one subset each) reside in RAM during a subset
-# update.  They are loaded from the memory-mapped files and freed by
-# ``del`` after each update, keeping the sinogram footprint minimal.
-
+# --- OSEM epochs with objective tracking ---
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 
 for i in range(num_epochs):
@@ -393,7 +401,7 @@ for i in range(num_epochs):
             f" subset {k + 1:03}/{num_subsets:03}",
             end="\r",
         )
-        # --- load subset k from disk (one sequential read) ---
+        # load subset k from disk (one sequential read)
         y_k = xp.asarray(y_mmap[k], device=dev, dtype=xp.float32)
         s_k = xp.asarray(s_mmap[k], device=dev, dtype=xp.float32)
 
@@ -402,7 +410,7 @@ for i in range(num_epochs):
         )
         x_osem = em_update(x_osem, df_k, subset_adjoint_ones[k], fov_mask)
 
-        # --- release subset data from RAM / GPU VRAM ---
+        # release the subset data
         del df_k, y_k, s_k
 
     df_osem[i] = full_objective_from_subsets(x_osem)
@@ -410,32 +418,68 @@ for i in range(num_epochs):
 print()
 
 # %%
-# Remove temporary files
-# ----------------------
+# 10. Removing the temporary files
+# --------------------------------
 
 shutil.rmtree(tmpdir)
 
 # %%
-# Convergence
-# -----------
+# 11. Convergence
+# ---------------
+#
+# The negative Poisson log-likelihood after each OSEM epoch (epoch 1, the
+# warm start, is not tracked).
 
 fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
-ax.plot(np.arange(1, num_epochs + 1), to_numpy_array(df_osem), marker="o")
-ax.set_xlabel("Epoch")
-ax.set_ylabel("Negative Poisson log-likelihood")
+epochs = np.arange(2, num_epochs + 2)
+ax.plot(epochs, to_numpy_array(df_osem), marker="o")
+ax.set_xticks(epochs)
+ax.set_xlabel("OSEM epoch")
+ax.set_ylabel("negative Poisson log-likelihood")
 ax.set_title(f"OSEM ({num_subsets} subsets, disk-backed sinograms)")
 ax.grid(ls=":")
 fig.show()
 
 # %%
-# Reconstructed image
-# --------------------
+# The objective decreases monotonically, with decreasing steps.  Loading the
+# data subset by subset from disk does not change the algorithm: the iterates
+# are those of standard OSEM.
 
-fig, axs, widgets = show_vol_cuts(
+# %%
+# 12. Reconstructed image
+# -----------------------
+
+fig, _, _ = show_vol_cuts(
     x_osem,
     voxel_size=voxel_size,
-    fig_title=f"OSEM {num_epochs} epochs (disk-backed)",
+    fig_title=f"OSEM, {num_epochs + 1} epochs with {num_subsets} subsets (disk-backed)",
     vmin=0,
     vmax=float(xp.max(x_osem)),
 )
 fig.show()
+
+# %%
+# The hot and cold inserts of the phantom are visible; after 6 epochs with 24
+# subsets the image is already noisy, as is typical for unregularised OSEM.
+
+# %%
+# Summary
+# -------
+#
+# - OSEM needs only one subset of the data and the contamination at a time,
+#   so the full TOF sinograms can stay on disk.
+# - :func:`parallelproj.data.to_subset_mmap` writes a sinogram in a
+#   subset-contiguous layout, so that each subset is read in one sequential
+#   access; :class:`parallelproj.data.SubsetArrayMmap` returns one subset per
+#   index.
+# - The sinogram memory during the reconstruction drops by the number of
+#   subsets (here from 30.9 MB to 1.29 MB), and the full objective can still
+#   be evaluated subset by subset.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_03_algorithms_07_run_mlem_negpoissonlogl_modes.py`
+#    -- the exact and the "safe epsilon" mode of the negative Poisson
+#    log-likelihood.
+
+# sphinx_gallery_thumbnail_number = 2
