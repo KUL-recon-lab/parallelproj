@@ -541,8 +541,8 @@ fig.suptitle("view 0 (black) and view 1 (red) with their radial-bin labels")
 fig.show()
 
 # %%
-# In all four panels, the central bin r3 of view 0 connects detectors 0 and
-# 4.  ``radial_direction`` reverses the radial labels, ``view_direction``
+# In all four panels, the central bin r3 of view 0 connects detector 0 and
+# detector 4.  ``radial_direction`` reverses the radial labels, ``view_direction``
 # changes whether view 1 is rotated clockwise or counterclockwise from
 # view 0.
 

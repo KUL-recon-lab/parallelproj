@@ -260,8 +260,10 @@ axes[1].set_title(
 fig.show()
 
 # %%
-# The maximum ring difference shrinks with the number of rings: 5 fine ring
-# differences become 2 coarse ring differences (``|Delta| <= 2``).
+# The mashed Michelogram keeps coarse ring differences up to 3, because a
+# coarse ring pair is kept as soon as some of its fine ring pairs lie within
+# the fine maximum ring difference of 5.  Ring pairs at the largest coarse
+# ring difference are therefore only partially filled.
 
 # %%
 # 7. Mashing a simulated emission sinogram
@@ -417,9 +419,8 @@ viewers.append(
 
 # %%
 # The exact and fast sinograms look almost the same (relative difference of
-# about 10 %).  The differences are largest at the edges of the projected
-# objects, where the different widths of the sensitivity profiles matter
-# most.
+# about 10 %).  The difference is concentrated in the bins with the highest
+# activity, where the exact model is mostly lower than the fast one.
 
 # %%
 # 10. Upsampling a coarse sinogram to the fine grid
@@ -551,9 +552,9 @@ axes[1].set_title(
 fig.show()
 
 # %%
-# In the GE Michelogram, neighbouring ring pairs are merged into one plane
-# (connected by lines); the mashed span-1 Michelogram has one plane per pair
-# of the 6 coarse rings.
+# In the GE Michelogram, pairs of ring pairs that share one plane are
+# connected by thin lines; the mashed span-1 Michelogram has one plane per
+# coarse ring pair with ``|Delta| <= 2``.
 
 # %%
 # 12. GE detector sensitivity
