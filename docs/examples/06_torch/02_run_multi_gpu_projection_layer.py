@@ -126,18 +126,30 @@ print(f"image {proj0.in_shape} -> sinogram {proj0.out_shape}")
 # 3. The projection layer
 # -----------------------
 #
-# The layer has two parts:
+# The layer has three parts:
 #
 # - :class:`ProjectChunk`, an autograd function that projects a *chunk* of the
 #   mini batch that is on **one** device, sample by sample, with the projector
 #   of that device.  Its ``backward`` is the adjoint (the back projection for a
 #   forward projection layer, and vice versa).  No synchronization is needed:
 #   every projection is queued on the current stream of the device.
-# - :class:`MultiDeviceProjection`, a :class:`torch.nn.Module` that splits the
-#   mini batch into one chunk per device, moves each chunk to its device,
-#   applies :class:`ProjectChunk`, and gathers the results on the device of
-#   the input.  The device-to-device copies (``.to``) are differentiable, so
-#   the gradients of every chunk flow back to the input automatically.
+# - :class:`Scatter` and :class:`Gather`, two autograd functions that copy the
+#   chunks of the mini batch to their devices, and the results back to the
+#   device of the input.  The backward of one is the other.
+# - :class:`MultiDeviceProjection`, a :class:`torch.nn.Module` that combines
+#   them: scatter, project every chunk on its device, gather.
+#
+# .. important::
+#
+#     **Do all copies between GPUs first.**  PyTorch queues a copy from GPU
+#     :math:`i` to GPU :math:`j` on the current stream of the *source* GPU
+#     :math:`i`, i.e. behind all work already queued there.  If the layer
+#     queued the projections of the chunk of GPU 0 first and then copied the
+#     chunk of GPU 1 from GPU 0, GPU 1 would only get its input after GPU 0 is
+#     done, and the GPUs would work one after another.  :class:`Scatter`
+#     copies *all* chunks before any projection is queued, and
+#     ``Gather.backward`` copies *all* gradient chunks before any back
+#     projection of the backward pass is queued.
 #
 # Images have the shape ``(batch, 1, *img_shape)`` (one channel), sinograms
 # ``(batch, *sinogram_shape)``.
@@ -164,6 +176,37 @@ class ProjectChunk(torch.autograd.Function):
         return g, None, None  # no gradients for proj and adjoint
 
 
+class Scatter(torch.autograd.Function):
+    """split a mini batch into one chunk per device and copy all chunks"""
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, devices: list) -> tuple[torch.Tensor, ...]:
+        ctx.src_device = x.device
+        chunks = torch.tensor_split(x, len(devices))  # 6 samples, 2 GPUs: 3 + 3
+        return tuple(c.to(d, non_blocking=True, copy=True) for c, d in zip(chunks, devices))
+
+    @staticmethod
+    def backward(ctx, *grads: torch.Tensor):
+        # gather the gradients of the chunks on the device of the input
+        return torch.cat([g.to(ctx.src_device, non_blocking=True) for g in grads]), None
+
+
+class Gather(torch.autograd.Function):
+    """concatenate the chunks of all devices on one device"""
+
+    @staticmethod
+    def forward(ctx, dst_device: torch.device, *chunks: torch.Tensor) -> torch.Tensor:
+        ctx.devices = [c.device for c in chunks]
+        ctx.sizes = [c.shape[0] for c in chunks]
+        return torch.cat([c.to(dst_device, non_blocking=True) for c in chunks])
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor):
+        # copy ALL gradient chunks to their devices before any back projection
+        parts = torch.split(grad, ctx.sizes)
+        return (None, *(p.to(d, non_blocking=True) for p, d in zip(parts, ctx.devices)))
+
+
 class MultiDeviceProjection(torch.nn.Module):
     """split a mini batch across devices, project, gather on the input device"""
 
@@ -173,14 +216,13 @@ class MultiDeviceProjection(torch.nn.Module):
         self.adjoint = adjoint
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        devices = list(self.projectors)
-        chunks = torch.tensor_split(x, len(devices))  # e.g. 6 samples on 2 GPUs -> 3 + 3
-        out = [
-            ProjectChunk.apply(c.to(d, non_blocking=True), self.projectors[d], self.adjoint)
+        devices = list(self.projectors)[: x.shape[0]]  # no empty chunks
+        chunks = Scatter.apply(x, devices)  # 1. all copies first
+        out = [  # 2. queue the projections on all devices (asynchronous)
+            ProjectChunk.apply(c, self.projectors[d], self.adjoint)
             for c, d in zip(chunks, devices)
-            if c.shape[0] > 0
         ]
-        return torch.cat([o.to(x.device, non_blocking=True) for o in out])
+        return Gather.apply(x.device, *out)  # 3. results on the input device
 
 
 fwd_layer = MultiDeviceProjection(projectors)  # A
@@ -401,12 +443,13 @@ fig.show()
 # -----------------
 #
 # - Build **one projector per GPU** once, and keep the geometry on its GPU.
-# - Split the mini batch with ``torch.tensor_split``, project every chunk on
-#   its GPU, and gather the results with ``torch.cat``.  No explicit
-#   synchronization is needed: the projections are queued on the current
-#   stream of each GPU, like any PyTorch operation, so one Python thread keeps
-#   all GPUs busy.  The autograd engine runs the backward pass of each GPU in
-#   its own thread.
+# - Split the mini batch, **copy all chunks to their GPUs first**, then queue
+#   the projections of every chunk on its GPU, and gather the results.  No
+#   explicit synchronization is needed: the projections are queued on the
+#   current stream of each GPU, like any PyTorch operation, so one Python
+#   thread keeps all GPUs busy.  Copies between GPUs are queued on the stream
+#   of the source GPU, so a copy queued after a projection waits for it.  The
+#   autograd engine runs the backward pass of each GPU in its own thread.
 # - **Time** GPU code only with synchronization and a warm-up.
 # - Choose the mini batch size as a **multiple of the number of GPUs**, so that
 #   all GPUs get the same number of samples.
