@@ -463,6 +463,24 @@ for task, t in timings.items():
 # the sinograms between the GPUs (gathering the outputs on one GPU, and
 # copying their gradients back); without gathering, the speed-up comes
 # closest to :math:`N`.
+#
+# **Measured** on a machine with three NVIDIA RTX A6000 (CUDA 13, P2P access
+# between the GPUs), image 128 x 128 x 32, sinogram 223 x 256 x 256 (58 MB),
+# mini batch of 6 samples; time in ms (speed-up vs. one GPU).  One forward
+# projection takes 7.8 ms, one back projection 33 ms.
+#
+# =========================  ================  ================  ================  ================
+# configuration              forward, 2 GPUs   forward, 3 GPUs   training, 2 GPUs  training, 3 GPUs
+# =========================  ================  ================  ================  ================
+# 1 GPU                      49.8 (1.00x)      49.8 (1.00x)      256.4 (1.00x)     257.7 (1.00x)
+# synchronous calls          53.0 (0.94x)      54.8 (0.91x)      166.6 (1.54x)     137.7 (1.87x)
+# asynchronous calls         31.2 (1.60x)      25.4 (1.96x)      144.1 (1.78x)     107.3 (2.40x)
+# asynchronous, no gather    24.1 (2.07x)      15.7 (3.18x)      128.5 (1.99x)     85.6 (3.01x)
+# =========================  ================  ================  ================  ================
+#
+# (The forward projection without gather is slightly more than :math:`N`
+# times faster, because the one-GPU reference also concatenates all
+# sinograms into one tensor.)
 
 fig, axs = plt.subplots(
     1, 2, figsize=(10, 0.9 + 0.45 * len(configs)), layout="constrained", sharey=True
