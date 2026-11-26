@@ -2,17 +2,22 @@
 
 These complement the low-level backend test in ``parallelproj_core``
 (``tests/test_tof_sinogram_projection.py``) by checking the **public**
-``parallelproj`` projector API.  The TOF kernel used by the Joseph projector
-is a Gaussian integrated over a TOF bin, i.e. for a voxel whose distance to
-the centre of a TOF bin is ``dx`` (in mm),
+``parallelproj`` projector API.  Since parallelproj-core 3.0, the TOF kernel
+used by the Joseph projector is a Gaussian **truncated at** ``num_sigmas``
+**sigma**, integrated over the part of a TOF bin inside that window and
+normalised to unit total weight.  For a voxel whose distance to the centre of a
+TOF bin is ``dx`` (in mm), with bin width ``W`` and spatial resolution
+``sigma`` (both in mm) and ``L = num_sigmas * sigma``,
 
-    w(dx) = 1/2 [ erf((dx + W/2) / (sqrt(2) sigma))
-                 - erf((dx - W/2) / (sqrt(2) sigma)) ]
+    w(dx) = [Phi(min(dx + W/2, L) / sigma) - Phi(max(dx - W/2, -L) / sigma)]
+            / [Phi(num_sigmas) - Phi(-num_sigmas)]        (0 if the bin is
+                                                            outside the window)
 
-with bin width ``W`` and spatial resolution ``sigma`` (both in mm).  The
-per-LOR weights are normalised to sum to one over the bins within
-``num_sigmas`` of the voxel, so summing the TOF forward projection over all
-TOF bins reproduces the (non-TOF) line integral.
+where ``Phi`` is the standard normal CDF.  The weights of all bins sum to one
+(if the TOF bins cover the window), so summing the TOF forward projection over
+all TOF bins reproduces the (non-TOF) line integral, and bins entirely outside
+the window get exactly zero weight.  (parallelproj-core < 3.0 used the full
+Gaussian bin integrals of the bins overlapping the window instead.)
 
 We drive this through :class:`parallelproj.projectors.ListmodePETProjector`,
 which accepts arbitrary LOR endpoints (the high-level sinogram projectors only
@@ -38,13 +43,25 @@ from .config import pytestmark
 import pytest
 
 
-def effective_tof_kernel(dx: float, sigma: float, tofbin_width: float) -> float:
-    """Gaussian of width ``sigma`` integrated over one TOF bin of width ``W``."""
-    sqrt2 = math.sqrt(2.0)
-    return 0.5 * (
-        math.erf((dx + 0.5 * tofbin_width) / (sqrt2 * sigma))
-        - math.erf((dx - 0.5 * tofbin_width) / (sqrt2 * sigma))
-    )
+def _phi(z: float) -> float:
+    """Standard normal CDF."""
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+def effective_tof_kernel(
+    dx: float, sigma: float, tofbin_width: float, num_sigmas: float
+) -> float:
+    """Weight of a TOF bin of width ``W`` whose centre is ``dx`` away from the
+    voxel: the Gaussian of width ``sigma``, truncated at ``num_sigmas`` sigma,
+    integrated over the part of the bin inside the window and normalised to
+    unit total weight (the kernel of parallelproj-core >= 3.0)."""
+    half_window = num_sigmas * sigma
+    lo = max(dx - 0.5 * tofbin_width, -half_window)
+    hi = min(dx + 0.5 * tofbin_width, half_window)
+    if hi <= lo:
+        return 0.0
+    norm = _phi(num_sigmas) - _phi(-num_sigmas)
+    return (_phi(hi / sigma) - _phi(lo / sigma)) / norm
 
 
 @pytest.mark.parametrize(
@@ -68,9 +85,11 @@ def test_tof_listmode_fwd_single_voxel(
     nvox: int = 19,
 ) -> None:
     """A single central voxel on a centre-crossing, axis-aligned LOR must give
-    a TOF spectrum equal to the analytic (normalised) erf kernel: symmetric,
+    a TOF spectrum equal to the analytic truncated kernel in every bin
+    (including exact zeros outside the +/- num_sigmas window): symmetric,
     peaked at the central bin, and summing to the line integral (the voxel
-    size)."""
+    size).  The parameters cover the window edge on a bin edge (sigma = 2.0:
+    +/- 7.5 bins) and inside a bin (sigma = 1.5, 3.5)."""
 
     assert num_tofbins % 2 == 1  # so the LOR centre falls exactly on a bin
 
@@ -110,31 +129,31 @@ def test_tof_listmode_fwd_single_voxel(
 
     spectrum = to_numpy_array(proj(img))  # shape (num_tofbins,), bin j <-> bins[j]
 
-    # ---- analytic reference: normalised erf-integrated Gaussian ----
+    # ---- analytic reference: truncated, normalised Gaussian bin weights ----
     # the central voxel sits exactly at the LOR centre -> fractional bin it_f.
     it_f = (num_tofbins - 1) / 2.0
-    raw = np.array(
+    ref = cf * np.asarray(
         [
-            effective_tof_kernel(abs(it - it_f) * tofbin_width, sigma_tof, tofbin_width)
+            effective_tof_kernel(
+                (it - it_f) * tofbin_width, sigma_tof, tofbin_width, num_sigmas
+            )
             for it in bins
         ],
         dtype=np.float64,
     )
 
-    # (a) Within the projector's TOF kernel support, the per-bin weights must
-    #     follow the erf-integrated Gaussian, normalised to sum to one (times
-    #     the line integral ``cf``).  The projector applies a ``num_sigmas``
-    #     window and zeroes bins beyond it, so we compare on its actual support
-    #     and normalise the reference over the same bins (exact match).
-    support = spectrum > 0.0
-    ref = cf * raw[support] / raw[support].sum()
-    # single-precision projector -> compare with a float32-appropriate tolerance
-    np.testing.assert_allclose(spectrum[support], ref, rtol=1e-3, atol=2e-4)
+    # (a) every bin (inside and outside the window) matches the reference;
+    #     single-precision projector -> float32-appropriate tolerance
+    np.testing.assert_allclose(spectrum, ref, rtol=1e-4, atol=1e-6)
 
-    # (b) the TOF spectrum sums to the non-TOF line integral (voxel size).
-    #     The kernel is windowed at +/- num_sigmas, so a small Gaussian tail is
-    #     truncated and the weights sum to slightly under one (<~0.3 %).
-    assert math.isclose(float(spectrum.sum()), cf, rel_tol=3e-3, abs_tol=1e-4)
+    # (a') bins entirely outside the +/- num_sigmas window get exactly zero
+    outside = ref == 0.0
+    assert outside.any()
+    assert bool(np.all(spectrum[outside] == 0.0))
+
+    # (b) the truncated kernel is normalised: the TOF spectrum sums to the
+    #     non-TOF line integral (voxel size)
+    assert math.isclose(float(spectrum.sum()), cf, rel_tol=1e-5)
 
     # (c) symmetric and peaked at the central TOF bin
     assert int(np.argmax(spectrum)) == (num_tofbins - 1) // 2
@@ -196,4 +215,4 @@ def test_tof_listmode_fwd_sum_equals_nontof_oblique(
 
     tof_sum = float(to_numpy_array(proj(img)).sum())
 
-    assert math.isclose(tof_sum, nontof, rel_tol=1e-3, abs_tol=1e-4)
+    assert math.isclose(tof_sum, nontof, rel_tol=1e-5, abs_tol=1e-6)
