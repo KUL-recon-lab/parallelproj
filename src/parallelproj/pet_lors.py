@@ -2025,9 +2025,9 @@ class RegularPolygonPETLORDescriptor(PETLORDescriptor):
                         ha="center",
                     )
 
-        ax.set_xlabel("x (mm)")
-        ax.set_ylabel("y (mm)")
-        ax.set_zlabel("z (mm)")
+        ax.set_xlabel("x0 (mm)")
+        ax.set_ylabel("x1 (mm)")
+        ax.set_zlabel("x2 (mm)")
 
         if show_colorbar:
             from matplotlib.colors import Normalize

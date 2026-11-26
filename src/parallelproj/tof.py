@@ -294,8 +294,8 @@ class TOFParameters:
     A scanner with 385 ps FWHM TOF resolution and 13 fine bins of 0.01302 ns
     each grouped into one sinogram bin::
 
-        # sigma_tof: FWHM [ns] / 2.355 * c/2 [mm/ns]
-        sigma_tof = (385e-3 / 2.355) * (C_MM_PER_NS / 2)   # ~ 24.5 mm
+        # sigma_tof: FWHM [ns] / 2.3548 * c/2 [mm/ns]
+        sigma_tof = (385e-3 / 2.3548) * (C_MM_PER_NS / 2)   # ~ 24.5 mm
 
         # tofbin_width: 13 fine bins * 0.01302 ns * c/2
         tofbin_width = 13 * 0.01302 * (C_MM_PER_NS / 2)    # ~ 25.4 mm

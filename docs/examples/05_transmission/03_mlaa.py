@@ -316,7 +316,7 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 proj.tof_parameters = parallelproj.tof.TOFParameters(
-    num_tofbins=51, tofbin_width=10.0, sigma_tof=30.0 / 2.355
+    num_tofbins=51, tofbin_width=10.0, sigma_tof=30.0 / 2.3548
 )
 
 fov_mask = proj_nt.fov_mask()
@@ -327,7 +327,7 @@ fov_mask = proj_nt.fov_mask()
 # activity update) is assembled automatically in the right order -- no chance
 # of forgetting B^T.  The attenuation path keeps the bare geometric non-TOF
 # projector (no PSF; see the module docstring).
-psf_sigma = tuple(psf_fwhm / 2.355 / vs for vs in voxel_size)  # voxels
+psf_sigma = tuple(psf_fwhm / 2.3548 / vs for vs in voxel_size)  # voxels
 B = parallelproj.operators.GaussianFilterOperator(img_shape, sigma=psf_sigma)
 A = parallelproj.operators.CompositeLinearOperator([proj, B])
 

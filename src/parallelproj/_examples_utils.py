@@ -453,8 +453,8 @@ def show_vol_cuts(
         Physical size ``(dx, dy, dz)`` of one voxel along the last three axes.
         Default ``(1, 1, 1)``.
     axis_labels : tuple of str or None, optional
-        Label for each axis, e.g. ``("x", "y", "z")`` (3-D) or
-        ``("t", "x", "y", "z")`` (4-D).
+        Label for each axis.  Default ``("x0", "x1", "x2")`` (3-D) or
+        ``("t", "x0", "x1", "x2")`` (4-D), the world axes of parallelproj.
     fig_title : str or None, optional
         Overall figure title.
     vmin, vmax : float or None, optional
@@ -498,7 +498,7 @@ def show_vol_cuts(
     is_4d = vol.ndim == 4
 
     if axis_labels is None:
-        axis_labels = ("t", "x", "y", "z") if is_4d else ("x", "y", "z")
+        axis_labels = ("t", "x0", "x1", "x2") if is_4d else ("x0", "x1", "x2")
     elif len(axis_labels) != vol.ndim:
         raise ValueError(
             f"axis_labels must have {vol.ndim} entries for a {vol.ndim}-D array"
