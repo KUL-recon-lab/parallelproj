@@ -237,6 +237,92 @@ def test_regular_polygon_pet_scanner(xp: ModuleType, dev: str) -> None:
     assert xp.all(scanner2.modules[0].phis == phis)
 
 
+@pytest.mark.parametrize(
+    "name,kwargs,expected",
+    [
+        # name, geometry options, (rings, radius, sides, endpoints per side, spacing)
+        ("SiemensMMRPET", {}, (64, 335.0, 56, 8, 4.0)),
+        ("SiemensMMRPET", {"model": "cylindrical"}, (64, 335.0, 504, 1, 0.0)),
+        ("SiemensVision600PET", {}, (80, 417.0, 38, 20, 3.2)),
+        ("SiemensVision600PET", {"model": "cylindrical"}, (80, 417.0, 798, 1, 0.0)),
+        ("GEDiscoveryMIPET", {}, (36, 380.5, 544, 1, 0.0)),
+        ("GEDiscoveryMIPET", {"num_block_rings": 3}, (27, 380.5, 544, 1, 0.0)),
+        ("GEDiscoveryMIPET", {"num_block_rings": 5}, (45, 380.5, 544, 1, 0.0)),
+        ("GEDiscoveryMIPET", {"num_block_rings": 6}, (54, 380.5, 544, 1, 0.0)),
+        ("GEDiscovery690PET", {}, (24, 414.5, 576, 1, 0.0)),
+        ("GEDiscovery690PET", {"model": "castor_blocks"}, (24, 417.6, 32, 18, 4.2)),
+        ("MedisoAnyScanPET", {}, (38, 424.2, 648, 1, 0.0)),
+        ("SiemensMCTPET", {}, (52, 438.0, 48, 13, 4.0)),
+        ("SiemensMCTPET", {"model": "cylindrical"}, (55, 428.0, 672, 1, 0.0)),
+        ("SiemensVisionQuadraPET", {}, (320, 417.0, 38, 20, 3.2)),
+        ("SiemensVisionQuadraPET", {"model": "cylindrical"}, (323, 417.0, 798, 1, 0.0)),
+        ("GESignaPETMR", {}, (45, 320.3, 448, 1, 0.0)),
+        ("PhilipsVereosPET", {}, (40, 391.5, 18, 32, None)),
+        ("SiemensHRRTPET", {}, (104, 241.765, 576, 1, 0.0)),
+        ("UnitedImagingUExplorerPET", {}, (672, 402.05, 24, 35, 2.85)),
+    ],
+)
+def test_named_pet_scanners(
+    xp: ModuleType,
+    dev: str,
+    name: str,
+    kwargs: dict,
+    expected: tuple,
+) -> None:
+    scanner_class = getattr(pps, f"{name}ScannerGeometry")
+    num_rings, radius, num_sides, endpoints_per_side, spacing = expected
+    for symmetry_axis in [0, 1, 2]:
+        scanner = scanner_class(xp, dev, symmetry_axis=symmetry_axis, **kwargs)
+
+        assert scanner.num_rings == num_rings
+        assert scanner.symmetry_axis == symmetry_axis
+        assert scanner.radius == radius
+        assert scanner.num_sides == num_sides
+        assert scanner.num_lor_endpoints_per_side == endpoints_per_side
+        assert scanner.lor_spacing == spacing
+        assert scanner.num_lor_endpoints_per_ring == num_sides * endpoints_per_side
+        assert scanner.num_modules == num_rings
+
+        mods = xp.asarray([0, 0, num_rings - 1], device=dev)
+        in_mods = xp.asarray([0, 1, 0], device=dev)
+        lin_index = scanner.linear_lor_endpoint_index(mods, in_mods)
+        assert xp.all(
+            lin_index
+            == xp.asarray(
+                [0, 1, (num_rings - 1) * scanner.num_lor_endpoints_per_ring],
+                device=dev,
+            )
+        )
+        endpoints = scanner.get_lor_endpoints(mods, in_mods)
+        assert xp.all(
+            endpoints == xp.take(scanner.all_lor_endpoints, lin_index, axis=0)
+        )
+        assert xp.all(
+            endpoints[:, symmetry_axis] == xp.take(scanner.ring_positions, mods, axis=0)
+        )
+        assert xp.all(
+            scanner.all_lor_endpoints_index_in_ring
+            == (
+                xp.arange(num_rings * scanner.num_lor_endpoints_per_ring, device=dev)
+                % scanner.num_lor_endpoints_per_ring
+            )
+        )
+
+    if hasattr(scanner, "model"):
+        default_model = (
+            "cylindrical"
+            if scanner_class is pps.GEDiscovery690PETScannerGeometry
+            else "blocks"
+        )
+        assert scanner.model == kwargs.get("model", default_model)
+        with pytest.raises(ValueError, match="model must be"):
+            scanner_class(xp, dev, model="invalid")
+
+    if scanner_class is pps.GEDiscoveryMIPETScannerGeometry:
+        with pytest.raises(ValueError, match="num_block_rings must be"):
+            scanner_class(xp, dev, num_block_rings=2)
+
+
 def test_ring_endpoint_ordering(xp: ModuleType, dev: str) -> None:
     """RingEndpointOrdering property, CCW branch, and reversal invariant."""
     import numpy as np

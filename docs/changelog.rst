@@ -10,6 +10,7 @@ Changelog
 New features
 ~~~~~~~~~~~~
 
+- Add several PET scanner geometry presets from Siemens, GE, Mediso, Philips and United Imaging in `pet_scanners.py` (`#161 <https://github.com/KUL-recon-lab/parallelproj/issues/161>`_). 
 - **Tabulated TOF kernels and per-LOR TOF parameters.** (`#166
   <https://github.com/KUL-recon-lab/parallelproj/issues/166>`_)
 
