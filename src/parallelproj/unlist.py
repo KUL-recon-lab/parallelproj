@@ -15,7 +15,7 @@ import array_api_compat
 
 from ._backend import Array, to_numpy_array
 from .pet_lors import RegularPolygonPETLORDescriptor
-from .tof import C_MM_PER_NS
+from .tof import C_MM_PER_NS, _is_scalar, _scalar_value
 
 if TYPE_CHECKING:
     from .projectors import RegularPolygonPETProjector
@@ -318,7 +318,11 @@ def detection_times_to_tof_bin(
 
     num_tof_bins = projector.tof_parameters.num_tofbins
     tofbin_width = projector.tof_parameters.tofbin_width
-    tofcenter_offset = projector.tof_parameters.tofcenter_offset
+    if not _is_scalar(projector.tof_parameters.tofcenter_offset):
+        raise NotImplementedError(
+            "TOF unlisting supports only a scalar tofcenter_offset"
+        )
+    tofcenter_offset = _scalar_value(projector.tof_parameters.tofcenter_offset)
 
     lor_desc = projector.lor_descriptor
     lut_np, sign_lut_np = _build_inring_luts(lor_desc)

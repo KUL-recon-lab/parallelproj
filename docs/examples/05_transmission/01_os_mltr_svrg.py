@@ -2,69 +2,48 @@
 Accelerating MLTR with ordered subsets (OS-MLTR) and SVRG
 =========================================================
 
-This example accelerates the transmission MLTR reconstruction of
-``00_mltr_sps.py`` with subset-based algorithms.  The model is the
-exact transmission Poisson likelihood with a strictly positive, smooth
-scatter background :math:`s` of known mean,
+:bdg-primary:`transmission` :bdg-secondary:`advanced` :bdg-light:`CPU or GPU`
 
-.. math::
-    L(\\mu) = \\sum_i y_i \\ln \\bar{y}_i (\\mu) - \\bar{y}_i (\\mu),
-    \\qquad
-    \\bar{y}_i (\\mu) = \\bar{z}_i (\\mu) + s_i,
-    \\qquad
-    \\bar{z}_i (\\mu) = b_i e^{-(P \\mu)_i},
+Full-data MLTR needs hundreds of iterations, each with a forward and back
+projection of all data, to reach the maximum-likelihood attenuation image.
+This example accelerates it with subset-based algorithms that update the
+image after each subset of views: **OS-MLTR** (the transmission analogue of
+OSEM: fast, but not convergent) and **SVRG** (stochastic variance-reduced
+gradient: fast and convergent in practice).  Both are compared with
+full-data MLTR and a converged **L-BFGS-B** reference.
 
-reconstructed by preconditioned gradient ascent
-:math:`\\mu \\leftarrow [\\mu + D(\\mu)\\odot\\nabla_\\mu L]_+` with the MLTR
-(Newton-type) diagonal preconditioner
-:math:`D_j = 1/P^T[(P\\mathbf 1)\\,\\bar z^2/\\bar y]_j`.
+**You will learn**
 
-The sinogram is split into :math:`m` view subsets :math:`S_k` with
-subset projectors :math:`P_k`.  Three accelerations are compared against
-**MLTR** (the full-data baseline) and a converged **L-BFGS-B** reference:
+- how to split transmission data and the projector into view subsets,
+- how to implement OS-MLTR, in which the :math:`1/m` factors of the subset
+  gradient and curvature cancel exactly as in OSEM,
+- how to combine SVRG with the MLTR diagonal preconditioner,
+- how to compare the convergence of subset and full-data algorithms per
+  epoch.
 
-* **OS-MLTR** -- the MLTR update evaluated on one subset at a time, using
-  subset-local quantities throughout.  Exactly as in OSEM, the
-  :math:`1/m` factors of the subset gradient and the subset curvature
-  cancel in the ratio, so each subset update has roughly the full-data
-  step size:
-
-  .. math::
-      \\mu \\leftarrow \\Bigl[\\mu +
-        \\frac{P_k^T\\bigl[\\tfrac{\\bar z_k}{\\bar y_k}(\\bar y_k - y_k)\\bigr]}
-             {P_k^T\\bigl[(P_k\\mathbf 1)\\,\\tfrac{\\bar z_k^2}{\\bar y_k}\\bigr]}
-        \\Bigr]_+ .
-
-  One epoch = :math:`m` subset updates ≈ one full data pass.  Like OSEM it
-  is fast per epoch but **not** convergent (it approaches a subset-dependent
-  limit cycle near the solution).
-
-* **SVRG** -- stochastic variance-reduced gradient.  Once per epoch the
-  full gradient :math:`g = \\nabla L(\\tilde\\mu)` is computed at an anchor
-  :math:`\\tilde\\mu`; each inner subset step uses the variance-reduced
-  estimate
-
-  .. math::
-      g_{\\mathrm{vr}} = g + m\\bigl(\\nabla L_k(\\mu) - \\nabla L_k(\\tilde\\mu)\\bigr),
-
-  preconditioned by the (fixed-per-epoch) full MLTR diagonal evaluated at
-  the anchor.  One epoch costs **two** data passes (anchor full gradient +
-  :math:`m` subset steps).  Unlike OS-MLTR it is provably convergent; with
-  a moderate number of subsets the two behave very similarly per epoch, and
-  the distinction matters mainly with many subsets or when iterating far
-  past the point shown here.
-
-* **L-BFGS-B** (≈ 100 iterations, no subsets) provides the converged
-  maximum-likelihood reference solution :math:`\\hat\\mu`.
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_05_transmission_00_mltr_sps.py`
+(transmission model and MLTR) and
+:ref:`sphx_glr_auto_examples_03_algorithms_00_run_mlem_osem_svrg.py`
+(OSEM and SVRG for emission data).
 
 .. note::
-    Each MLTR / OS-MLTR epoch is one full data pass; an SVRG epoch is
-    roughly 1.5 (anchor + subset sweep), so the epoch axis understates
-    SVRG's computation cost by about a factor of 1.5.
 
+    Because of its run time (80 epochs each for MLTR, OS-MLTR and SVRG,
+    and up to 500 L-BFGS-B iterations), this example is **not executed** in the
+    documentation build: the figures are not rendered on this page.
+    Download it and run it locally to see the results.
 """
 
 # %%
+# 0. Setup
+# --------
+#
+# Every example selects its array backend (NumPy, CuPy or PyTorch) and device
+# (CPU or GPU) with ``suggest_array_backend_and_device``: PyTorch on a CUDA
+# GPU if available, otherwise the best available backend on the CPU.  The
+# same code runs unchanged on all of them.
+
 from __future__ import annotations
 
 from copy import copy
@@ -77,31 +56,37 @@ import parallelproj.pet_lors
 import parallelproj.pet_scanners
 import parallelproj.projectors
 from parallelproj import Array, to_numpy_array
-
-
 from parallelproj._examples_utils import (
     elliptic_cylinder_phantom,
     poisson_transmission_terms,
-    show_vol_cuts,
+    suggest_array_backend_and_device,
 )
 
-# %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
-
-# To use a specific backend and/or device, replace the None arguments, e.g.:
-#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu")
-xp, dev = suggest_array_backend_and_device(None, None)
+# to choose explicitly, e.g. suggest_array_backend_and_device("numpy", "cpu")
+xp, dev = suggest_array_backend_and_device()
 
 # %%
-num_epochs = 80  # epochs (full data passes) for the subset algorithms
+# 1. Simulation and reconstruction settings
+# -----------------------------------------
+#
+# MLTR, OS-MLTR and SVRG run ``num_epochs`` epochs.  An **epoch** is one full
+# MLTR iteration or one cycle through all ``num_subsets`` subsets.
+# L-BFGS-B runs ``num_lbfgs`` iterations to provide the reference solution.
+# The data are simulated as in the previous example.
+
+num_epochs = 80  # epochs for MLTR and the subset algorithms
 num_subsets = 28  # number of ordered view subsets (divides the 168 views evenly)
-num_lbfgs = 500  # L-BFGS-B iterations for the reference solution
+num_lbfgs = 500  # max. L-BFGS-B iterations for the reference solution
 blank_counts = 500.0  # blank scan counts per LOR
 scatter_fraction = 0.5  # scatter relative to mean unscattered transmission
 
 # %%
-# Scanner, non-TOF projector, and ground-truth attenuation image
-# ---------------------------------------------------------------
+# 2. Scanner, projector and ground-truth attenuation image
+# --------------------------------------------------------
+#
+# The same non-TOF scanner (radius 300 mm, 3 rings), image grid
+# (100 x 100 x 3 voxels) and water-equivalent elliptic cylinder phantom as
+# in the previous example.
 
 num_rings = 3
 ring_spacing = 5.3  # mm, axial distance between rings
@@ -145,8 +130,21 @@ mu_true = mu_water * elliptic_cylinder_phantom(
 fov_mask = proj.fov_mask()
 
 # %%
-# Simulate transmission data
-# ---------------------------
+# 3. Simulated transmission data
+# ------------------------------
+#
+# The model is the exact transmission Poisson likelihood with a strictly
+# positive, smooth scatter background :math:`s` of known mean,
+#
+# .. math::
+#     L(\mu) = \sum_i y_i \ln \bar{y}_i (\mu) - \bar{y}_i (\mu),
+#     \qquad
+#     \bar{y}_i (\mu) = \bar{z}_i (\mu) + s_i,
+#     \qquad
+#     \bar{z}_i (\mu) = b_i e^{-(P \mu)_i},
+#
+# with the blank scan :math:`b`.  The measured counts :math:`y` are a
+# Poisson realisation of :math:`\bar{y}(\mu_{true})`.
 
 b = xp.full(proj.out_shape, blank_counts, device=dev, dtype=xp.float32)
 
@@ -166,13 +164,21 @@ y = xp.asarray(
 )
 
 # %%
-# Full-data and subset ingredients
-# --------------------------------
+# 4. Full-data and subset ingredients
+# -----------------------------------
 #
-# We build one subset projector :math:`P_k` per view subset and slice the
-# blank / scatter / data sinograms accordingly.  ``P1`` and the subset
-# sensitivities ``Pk1`` (forward projections of an all-ones image) are
-# precomputed once.
+# The sinogram is split into :math:`m` view subsets :math:`S_k`.  We build
+# one subset projector :math:`P_k` per view subset (a copy of the full
+# projector that projects only these views) and slice the blank, scatter and
+# data sinograms accordingly.  ``P1`` and the subset intersection lengths
+# ``Pk1`` (forward projections of an all-ones image) are precomputed once.
+#
+# ``poisson_transmission_terms`` returns the per-bin terms of the gradient
+# :math:`\tfrac{\bar z}{\bar y}(\bar y - y)` and of the MLTR curvature
+# :math:`\bar z^2/\bar y` (see the previous example).  From them we build
+# the full-data gradient :math:`\nabla_\mu L`, the MLTR curvature denominator
+# :math:`P^T[(P\mathbf 1)\,\bar z^2/\bar y]` and the subset gradients
+# :math:`\nabla_\mu L_k`.
 
 ones_img = xp.ones(proj.in_shape, dtype=xp.float32, device=dev)
 P1 = proj(ones_img)
@@ -227,29 +233,51 @@ def subset_grad(mu: Array, k: int) -> Array:
 
 
 # %%
-# MLTR (full-data baseline)
-# -------------------------
+# 5. MLTR (full-data baseline)
+# ----------------------------
+#
+# MLTR is preconditioned gradient ascent
+# :math:`\mu \leftarrow [\mu + D(\mu)\odot\nabla_\mu L]_+` with the
+# Newton-type diagonal preconditioner
+# :math:`D_j = 1/P^T[(P\mathbf 1)\,\bar z^2/\bar y]_j`.  Each iteration
+# (= epoch) is one full data pass.  All algorithms start from
+# :math:`\mu = 0`.
 
 mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
 cost: dict[str, np.ndarray] = {}
 mu_final: dict[str, Array] = {}
 
-c = [neg_logL(mu)]
+cost_epoch = [neg_logL(mu)]
 for ep in range(num_epochs):
     print(f"MLTR       epoch {ep + 1:03}/{num_epochs:03}", end="\r")
     grad, denom = full_grad_and_curv(mu)
     mu = xp.clip(mu + _safe_ratio(grad, denom), 0, None)
-    c.append(neg_logL(mu))
+    cost_epoch.append(neg_logL(mu))
 print()
-cost["MLTR"] = np.asarray(c)
+cost["MLTR"] = np.asarray(cost_epoch)
 mu_final["MLTR"] = mu
 
 # %%
-# OS-MLTR (one subset per update)
-# -------------------------------
+# 6. OS-MLTR (one subset per update)
+# ----------------------------------
+#
+# OS-MLTR evaluates the MLTR update on one subset at a time, using
+# subset-local quantities throughout.  Exactly as in OSEM, the :math:`1/m`
+# factors of the subset gradient and the subset curvature cancel in the
+# ratio, so each subset update has roughly the full-data step size:
+#
+# .. math::
+#     \mu \leftarrow \Bigl[\mu +
+#       \frac{P_k^T\bigl[\tfrac{\bar z_k}{\bar y_k}(\bar y_k - y_k)\bigr]}
+#            {P_k^T\bigl[(P_k\mathbf 1)\,\tfrac{\bar z_k^2}{\bar y_k}\bigr]}
+#       \Bigr]_+ .
+#
+# One epoch (:math:`m` subset updates in a fixed order) is about one full
+# data pass.  Like OSEM, OS-MLTR is fast per epoch but **not** convergent: it
+# approaches a subset-dependent limit cycle near the solution.
 
 mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
-c = [neg_logL(mu)]
+cost_epoch = [neg_logL(mu)]
 for ep in range(num_epochs):
     print(f"OS-MLTR    epoch {ep + 1:03}/{num_epochs:03}", end="\r")
     for k in range(num_subsets):
@@ -259,18 +287,43 @@ for ep in range(num_epochs):
         num = subset_proj[k].adjoint(grad_sino)
         denom = subset_proj[k].adjoint(Pk1[k] * curv_sino)
         mu = xp.clip(mu + _safe_ratio(num, denom), 0, None)
-    c.append(neg_logL(mu))
+    cost_epoch.append(neg_logL(mu))
 print()
-cost["OS-MLTR"] = np.asarray(c)
+cost["OS-MLTR"] = np.asarray(cost_epoch)
 mu_final["OS-MLTR"] = mu
 
 # %%
-# SVRG (variance-reduced, preconditioned by the anchor MLTR diagonal)
-# -------------------------------------------------------------------
+# 7. SVRG (preconditioned by the MLTR diagonal at the anchor)
+# -----------------------------------------------------------
+#
+# Every other epoch (epochs 1, 3, 5, ...), SVRG sets an anchor
+# :math:`\tilde\mu` to the current image and computes the full gradient
+# :math:`g = \nabla L(\tilde\mu)`, the subset gradients
+# :math:`\nabla L_k(\tilde\mu)` and the full MLTR diagonal preconditioner
+# at the anchor.  Each inner subset step (subsets in random order) uses the
+# variance-reduced gradient estimate
+#
+# .. math::
+#     g_{\mathrm{vr}} = g + m\bigl(\nabla L_k(\mu) - \nabla L_k(\tilde\mu)\bigr),
+#
+# followed by a preconditioned ascent step and clipping to
+# :math:`\mu \geq 0`.  In contrast to OS-MLTR, the variance-reduced gradient
+# vanishes at the solution, so SVRG does not get stuck in a limit cycle.
+# (The variant used here, with a step size of 1, an anchor-dependent
+# preconditioner and clipping, is not covered by the standard SVRG
+# convergence proofs.)
+#
+# .. note::
+#     An anchor epoch costs about three data passes (the :math:`m` subset
+#     gradients at the anchor, the full gradient and MLTR curvature for the
+#     preconditioner, and the :math:`m` subset steps), the other epochs one,
+#     i.e. about two data passes per SVRG epoch on average.  The epoch axis
+#     of the convergence plot below therefore understates the computational
+#     cost of SVRG by about a factor of two compared to MLTR / OS-MLTR.
 
 rng = np.random.default_rng(1)
 mu = xp.zeros(proj.in_shape, dtype=xp.float32, device=dev)
-c = [neg_logL(mu)]
+cost_epoch = [neg_logL(mu)]
 for ep in range(num_epochs):
     print(f"SVRG       epoch {ep + 1:03}/{num_epochs:03}", end="\r")
 
@@ -278,19 +331,26 @@ for ep in range(num_epochs):
         anchor = mu
         g_full, denom_full = full_grad_and_curv(anchor)
         gk_anchor = [subset_grad(anchor, k) for k in range(num_subsets)]
-        precond = _safe_ratio(xp.ones_like(mu), denom_full)  # MLTR diagonal at anchor
+        precond = _safe_ratio(xp.ones_like(mu), denom_full)  # MLTR diagonal
 
     for k in rng.permutation(num_subsets):
         g_vr = g_full + num_subsets * (subset_grad(mu, k) - gk_anchor[k])
         mu = xp.clip(mu + precond * g_vr, 0, None)
-    c.append(neg_logL(mu))
+    cost_epoch.append(neg_logL(mu))
 print()
-cost["SVRG"] = np.asarray(c)
+cost["SVRG"] = np.asarray(cost_epoch)
 mu_final["SVRG"] = mu
 
 # %%
-# L-BFGS-B reference solution (no subsets)
-# ----------------------------------------
+# 8. L-BFGS-B reference solution (no subsets)
+# -------------------------------------------
+#
+# As in the previous example, SciPy's L-BFGS-B minimises :math:`-L(\mu)`
+# with the bound :math:`\mu \geq 0` on the full data.  It provides the
+# converged maximum-likelihood reference solution :math:`\hat\mu` and the
+# reference value of :math:`-L`.  ``num_lbfgs`` is only an upper limit:
+# L-BFGS-B stops at its default convergence tolerance, here after about 100
+# function evaluations.
 
 n_vox = int(np.prod(proj.in_shape))
 cost_lbfgs: list[float] = []  # -L recorded at every function evaluation
@@ -325,52 +385,114 @@ for name in ("MLTR", "OS-MLTR", "SVRG"):
     print(f"{name:8}: -L after {num_epochs} epochs = {cost[name][-1]:.2f}")
 
 # %%
-# Convergence and reconstructions
-# -------------------------------
+# 9. Convergence and line profiles
+# --------------------------------
 #
-# We plot the absolute cost :math:`-L(\mu)` per epoch (per function
-# evaluation for L-BFGS-B), zoomed to the converged region.  OS-MLTR and
-# SVRG reach in a few epochs what full MLTR needs many more for -- roughly
-# an ``num_subsets``-fold per-epoch speed-up.  With many subsets, however,
-# OS-MLTR has no convergence guarantee: it approaches a subset-dependent
-# limit cycle and its cost stalls (or rises) above the optimum, whereas the
-# variance-reduced SVRG remains stable and keeps decreasing towards the
-# L-BFGS-B reference.
+# The left panel shows the cost :math:`-L(\mu)` per epoch (per function
+# evaluation for L-BFGS-B), zoomed to the range below the MLTR value after
+# ``num_epochs // 2`` epochs.  The right panel compares profiles along
+# :math:`x_0` through the centre of the final images with the ground truth.
 
-c_min = float(min(c.min() for c in cost.values()))
-c_max = float(cost["MLTR"][num_epochs // 2])
-
-fig, ax = plt.subplots(1, 2, figsize=(11, 4.5), tight_layout=True)
-for name in ("MLTR", "OS-MLTR", "SVRG", "L-BFGS-B"):
-    ax[0].plot(cost[name], label=name)
-ax[0].set_ylim(c_min, c_max)
-ax[0].set_xlabel("epoch (subset methods) / function evaluation (L-BFGS-B)")
-ax[0].set_ylabel(r"$-L(\mu)$")
-ax[0].grid(ls=":")
-ax[0].legend()
+algo_names = ("MLTR", "OS-MLTR", "SVRG", "L-BFGS-B")
+cost_min = float(min(c.min() for c in cost.values()))
+cost_max = float(cost["MLTR"][num_epochs // 2])
 
 sl = img_shape[2] // 2
+x0_mm = (np.arange(img_shape[0]) - (img_shape[0] - 1) / 2) * voxel_size[0]
+
+fig, ax = plt.subplots(1, 2, figsize=(10, 4.2), layout="constrained")
+for name in algo_names:
+    ax[0].plot(cost[name], label=name)
+ax[0].set_ylim(cost_min, cost_max)
+ax[0].set_xlabel("epoch (MLTR, subset methods) / function evaluation (L-BFGS-B)")
+ax[0].set_ylabel(r"$-L(\mu)$")
+ax[0].set_title("Convergence")
+ax[0].grid(ls=":")
+ax[0].legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=4)
+
 ax[1].plot(
-    to_numpy_array(mu_true[:, img_shape[1] // 2, sl]), "k--", label=r"true $\mu$"
+    x0_mm,
+    to_numpy_array(mu_true[:, img_shape[1] // 2, sl]),
+    "k--",
+    label=r"true $\mu$",
 )
-for name in ("MLTR", "OS-MLTR", "SVRG", "L-BFGS-B"):
-    ax[1].plot(to_numpy_array(mu_final[name][:, img_shape[1] // 2, sl]), label=name)
-ax[1].set_xlabel("pixel")
+for name in algo_names:
+    ax[1].plot(
+        x0_mm, to_numpy_array(mu_final[name][:, img_shape[1] // 2, sl]), label=name
+    )
+ax[1].set_xlabel(r"$x_0$ [mm]")
 ax[1].set_ylabel(r"$\mu$ [1/mm]")
+ax[1].set_title(r"Central profile along $x_0$")
 ax[1].grid(ls=":")
-ax[1].legend()
+ax[1].legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncols=3)
 fig.show()
 
 # %%
-fig2 = show_vol_cuts(
-    np.concatenate(
-        [to_numpy_array(mu_true)[None]]
-        + [to_numpy_array(mu_final[name])[None] for name in mu_final]
-    ),
-    voxel_size=voxel_size,
-    fig_title=r"$\mu$: true / " + " / ".join(mu_final),
-    vmin=0,
-    vmax=3.4 * mu_water,
+# OS-MLTR and SVRG reach in a few epochs what full MLTR needs many more
+# epochs for -- roughly a ``num_subsets``-fold per-epoch speed-up.  With many
+# subsets, however, OS-MLTR has no convergence guarantee: it approaches a
+# subset-dependent limit cycle and its cost stalls (or rises) above the
+# optimum, whereas the variance-reduced SVRG remains stable and keeps
+# decreasing towards the L-BFGS-B reference.  The profiles of the
+# subset methods and of L-BFGS-B are similar and show the noise of the
+# unregularised maximum-likelihood solution; full-data MLTR, still further
+# from convergence, is smoother.
+
+# %%
+# 10. Reconstructed images
+# ------------------------
+#
+# The central transaxial slice of the true :math:`\mu` image and of the four
+# reconstructions, with the same colour scale.
+
+images = {r"true $\mu$": mu_true} | mu_final
+extent = (
+    -img_shape[0] * voxel_size[0] / 2,
+    img_shape[0] * voxel_size[0] / 2,
+    img_shape[1] * voxel_size[1] / 2,
+    -img_shape[1] * voxel_size[1] / 2,
 )
 
-plt.show()
+fig2, ax2 = plt.subplots(
+    1, len(images), figsize=(10, 2.8), sharey=True, layout="compressed"
+)
+for axi, (name, img) in zip(ax2, images.items()):
+    im = axi.imshow(
+        to_numpy_array(img[:, :, sl]).T,
+        cmap="Greys",
+        vmin=0,
+        vmax=3.4 * mu_water,
+        extent=extent,
+    )
+    axi.set_title(name)
+    axi.set_xlabel(r"$x_0$ [mm]")
+ax2[0].set_ylabel(r"$x_1$ [mm]")
+fig2.colorbar(im, ax=ax2, shrink=0.8, label=r"$\mu$ [1/mm]")
+fig2.show()
+
+# %%
+# The OS-MLTR, SVRG and L-BFGS-B images are visually almost identical and
+# contain the noise of the unregularised maximum-likelihood solution; the
+# MLTR image after the same number of epochs is less converged.  The next
+# example adds a prior to suppress the noise.
+
+# %%
+# Summary
+# -------
+#
+# - Splitting the views into :math:`m` subsets accelerates MLTR by roughly a
+#   factor :math:`m` per epoch; in OS-MLTR the :math:`1/m` factors of the
+#   subset gradient and curvature cancel, as in OSEM.
+# - OS-MLTR does not converge but approaches a subset-dependent limit cycle.
+# - SVRG with the MLTR diagonal preconditioner at the anchor is as fast per
+#   epoch and keeps approaching the maximum-likelihood solution, at about
+#   two data passes per epoch.
+# - L-BFGS-B on the full data provides a converged reference solution.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_05_transmission_02_run_maptr.py`
+#    -- penalised (MAPTR) transmission reconstruction with an edge-preserving
+#    prior.
+
+# sphinx_gallery_thumbnail_path = "_static/thumbnails/01_os_mltr_svrg.png"

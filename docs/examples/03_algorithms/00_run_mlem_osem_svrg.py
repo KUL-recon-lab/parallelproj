@@ -1,80 +1,104 @@
 """
-Convergence comparison: MLEM vs OSEM vs SVRG
+Convergence comparison of MLEM, OSEM and SVRG
 =============================================
 
-This example compares the convergence speed (per epoch) of three algorithms
-for minimising the negative Poisson log-likelihood
+:bdg-primary:`reconstruction` :bdg-secondary:`intermediate` :bdg-light:`CPU or GPU`
 
-.. math::
-    f(x) = \\sum_i \\bar{y}_i - y_i \\log \\bar{y}_i, \\qquad \\bar{y}(x) = A x + s
+Maximum-likelihood PET reconstruction minimises the negative Poisson
+log-likelihood of the measured data.  This example compares three iterative
+algorithms for this problem on simulated TOF data: **MLEM** (convergent but
+slow), **OSEM** (fast, but without convergence guarantee) and **SVRG**
+(stochastic variance-reduced gradient, fast and convergent in practice).  We
+compare how quickly they decrease the objective per epoch and per full pass
+through the data, the main cost of every update.
 
-subject to :math:`x \\geq 0`:
+**You will learn**
 
-* **MLEM** -- expectation-maximisation on the full data; one iteration = one
-  full data pass; guaranteed to converge but slow per epoch.
-* **OSEM** -- ordered-subsets EM; one epoch = :math:`m` subset updates ~= one
-  full data pass; fast empirical convergence but *no* convergence guarantee.
-* **SVRG** -- stochastic variance-reduced gradient with subsets; one epoch =
-  :math:`m` variance-reduced subset updates; provably convergent like MLEM
-  while achieving the fast per-epoch progress of OSEM.
+- how to set up a complete TOF forward model :math:`\\bar{y}(x) = A x + s`
+  and split it into subsets of views,
+- how the EM update can be written as a preconditioned gradient step and
+  implemented with :class:`.C2AffineObjective` and :class:`.NegPoissonLogL`,
+- how to implement MLEM, OSEM and SVRG with the same building blocks,
+- how to compare the convergence of algorithms per epoch and per data pass.
+
+**Prerequisites:**
+:ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_01_run_pet_non_tof_sinogram_projector.py`
+(projector, resolution model and attenuation) and
+:ref:`sphx_glr_auto_examples_02_pet_sinogram_projections_02_run_pet_tof_sinogram_projector.py`
+(TOF projector).
 
 .. note::
-    For SVRG, one epoch requires **two** full data passes: one to compute
-    the snapshot gradients at the anchor point, and one for the
-    :math:`m` variance-reduced subset updates.  The epoch axis in the
-    convergence plot therefore understates the true computational cost of
-    SVRG relative to OSEM by a factor of roughly two.
 
+    To keep the documentation build short, this example runs **fewer
+    iterations on the CPU** than on a GPU (see the printed note below).
+    The results shown on CPU-only builds (e.g. on Read the Docs) are
+    therefore less converged.  Run the example on a GPU, or set the environment
+    variable ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1``, for converged
+    results.
 """
 
 # %%
+# 0. Setup
+# --------
+#
+# Every example selects its array backend (NumPy, CuPy or PyTorch) and device
+# (CPU or GPU) with ``suggest_array_backend_and_device``: PyTorch on a CUDA
+# GPU if available, otherwise the best available backend on the CPU.  The
+# same code runs unchanged on all of them.
+
 from __future__ import annotations
+
 from collections.abc import Sequence
-import matplotlib.pyplot as plt
 from copy import copy
+
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 
 import parallelproj.operators
-import parallelproj.tof
-import parallelproj.pet_scanners
 import parallelproj.pet_lors
+import parallelproj.pet_scanners
 import parallelproj.projectors
-from parallelproj import to_numpy_array, Array
-from parallelproj.functions import NegPoissonLogL, C2AffineObjective, C1Function
+import parallelproj.tof
+from parallelproj import Array, to_numpy_array
+from parallelproj._examples_utils import (
+    elliptic_cylinder_phantom,
+    iterations_for_device,
+    show_vol_cuts,
+    suggest_array_backend_and_device,
+)
+from parallelproj.functions import C1Function, C2AffineObjective, NegPoissonLogL
 
-
-from parallelproj._examples_utils import show_vol_cuts
-from parallelproj._examples_utils import elliptic_cylinder_phantom
+# to choose explicitly, e.g. suggest_array_backend_and_device("numpy", "cpu")
+xp, dev = suggest_array_backend_and_device()
 
 # %%
-from parallelproj._examples_utils import suggest_array_backend_and_device
+# 1. Reconstruction settings
+# --------------------------
+#
+# OSEM and SVRG split the data into ``num_subsets`` subsets.  An **epoch** is
+# one cycle through all subsets.  To compare MLEM with the same number of
+# subset updates, MLEM runs ``num_epochs * num_subsets`` iterations.  MLEM is
+# only run on a GPU: on the CPU this many iterations would be too slow.
 
-# To use a specific backend and/or device, replace the None arguments, e.g.:
-#   xp, dev = suggest_array_backend_and_device(backend="numpy", dev="cpu") or by setting xp and dev manually
-xp, dev = suggest_array_backend_and_device(None, None)
-
-# %%
-
-# number of subsets for OSEM and SVRG
 num_subsets = 24
 
-# if run on a CPU limit the number of "OSEM / SVRG epochs"
-num_epochs_mlem = 120 if dev == "cpu" else 1200
-num_epochs = num_epochs_mlem // num_subsets
+# fewer OSEM / SVRG epochs on the CPU
+num_epochs = iterations_for_device(dev, cpu=3, gpu=1200 // num_subsets, what="epochs")
+num_epochs_mlem = num_epochs * num_subsets
 
-# run MLEM only on GPU - it is too slow on CPU for the number of iterations used here
-run_mlem = dev != "cpu"
+# the MLEM reference (1200 iterations) only runs with the full number of
+# iterations: on a GPU, or with PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1
+run_mlem = num_epochs_mlem >= 100
 
 # %%
-# Setup of the forward model :math:`\bar{y}(x) = A x + s`
-# --------------------------------------------------------
+# 2. Scanner, sinogram and image
+# ------------------------------
 #
-# We setup a linear forward operator :math:`A` consisting of an
-# image-based resolution model, a non-TOF PET projector and an attenuation model
-#
-# .. note::
-#     The OSEM implementation below works with all linear operators that
-#     subclass :class:`.LinearOperator` (e.g. the high-level projectors).
+# We use a small regular polygon scanner (16 sides, 5 rings), a span-1
+# sinogram with a maximum ring difference of 2, and an image of
+# 55 x 55 x 8 voxels of 2 mm.  The ground truth :math:`x_{true}` is an
+# elliptic cylinder with hot and cold spherical inserts.
 
 num_rings = 5
 scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
@@ -87,9 +111,6 @@ scanner = parallelproj.pet_scanners.RegularPolygonPETScannerGeometry(
     ring_positions=xp.linspace(-10, 10, num_rings, device=dev),
     symmetry_axis=2,
 )
-
-# %%
-# setup the LOR descriptor that defines the sinogram
 
 img_shape = (55, 55, 8)
 voxel_size = (2.0, 2.0, 2.0)
@@ -105,36 +126,33 @@ proj = parallelproj.projectors.RegularPolygonPETProjector(
     lor_desc, img_shape=img_shape, voxel_size=voxel_size
 )
 
-# setup a simple test image containing a few "hot rods"
 x_true = elliptic_cylinder_phantom(
     xp, dev, image_shape=img_shape, voxel_size=voxel_size
 )
 
 # %%
-# Attenuation image and sinogram setup
-# ------------------------------------
+# 3. Forward model :math:`\bar{y}(x) = A x + s`
+# ---------------------------------------------
+#
+# The linear operator :math:`A` combines an image-based resolution model
+# (Gaussian, 2 mm FWHM), a TOF projector (13 TOF bins of 12 mm) and
+# attenuation (water, :math:`\mu` = 0.01 / mm, inside the phantom).  The
+# attenuation sinogram is computed with the projector *before* TOF is enabled,
+# so it has no TOF axis; for TOF, ``xp.broadcast_to`` repeats it over the TOF
+# bins without copying data (a zero-stride view).
+#
+# .. note::
+#     The algorithms below work with any operator that subclasses
+#     :class:`.LinearOperator` (e.g. the high-level projectors).  Leave out
+#     the ``proj.tof_parameters`` line to reconstruct non-TOF data.
 
-# setup an attenuation image
 x_att = 0.01 * xp.astype(x_true > 0, xp.float32)
-# calculate the attenuation sinogram
 att_sino = xp.exp(-proj(x_att))
 
-# %%
-# Complete PET forward model setup
-# --------------------------------
-#
-# We combine an image-based resolution model,
-# a non-TOF or TOF PET projector and an attenuation model
-# into a single linear operator.
-
-# enable TOF - comment if you want to run non-TOF
 proj.tof_parameters = parallelproj.tof.TOFParameters(
     num_tofbins=13, tofbin_width=12.0, sigma_tof=12.0
 )
 
-# For TOF, att_sino has no TOF-bins dimension while the projector output does.
-# broadcast_to adds a trailing singleton via expand_dims and broadcasts it over
-# the TOF-bins axis without copying data (zero-stride view).
 att_values = (
     xp.broadcast_to(xp.expand_dims(att_sino, axis=-1), proj.out_shape)
     if proj.tof
@@ -143,23 +161,21 @@ att_values = (
 att_op = parallelproj.operators.ElementwiseMultiplicationOperator(att_values)
 
 res_model = parallelproj.operators.GaussianFilterOperator(
-    proj.in_shape, sigma=[2.0 / (2.35 * float(vs)) for vs in proj.voxel_size]
+    proj.in_shape, sigma=[2.0 / (2.3548 * float(vs)) for vs in proj.voxel_size]
 )
 
-# compose all 3 operators into a single linear operator
 pet_lin_op = parallelproj.operators.CompositeLinearOperator((att_op, proj, res_model))
 
 # %%
-# Simulation of projection data
-# -----------------------------
+# 4. Simulated data
+# -----------------
 #
-# We setup an arbitrary ground truth :math:`x_{true}` and simulate
-# noise-free and noisy data :math:`y` by adding Poisson noise.
+# The noise-free data are :math:`A x_{true} + s`, with a constant
+# contamination :math:`s` (scatter and randoms) of half the mean of
+# :math:`A x_{true}`.  The measured data :math:`y` are a Poisson realisation.
 
-# simulated noise-free data
 noise_free_data = pet_lin_op(x_true)
 
-# generate a constant contamination sinogram
 contamination = xp.full(
     noise_free_data.shape,
     0.5 * float(xp.mean(noise_free_data)),
@@ -169,7 +185,6 @@ contamination = xp.full(
 
 noise_free_data += contamination
 
-# add Poisson noise
 np.random.seed(1)
 y = xp.asarray(
     np.random.poisson(to_numpy_array(noise_free_data)),
@@ -178,69 +193,61 @@ y = xp.asarray(
 )
 
 # %%
-# Splitting of the forward model into subsets :math:`A^k`
-# -------------------------------------------------------
+# 5. Subset forward models :math:`A^k`
+# ------------------------------------
 #
-# Calculate the view numbers and slices for each subset.
-# We will use the subset views to setup a sequence of projectors projecting only
-# a subset of views. The slices can be used to extract the corresponding subsets
-# from full data or corrections sinograms.
+# ``get_distributed_views_and_slices`` distributes the sinogram views over the
+# subsets.  The views define a subset projector (a copy of the full projector
+# that projects only these views); the slices extract the matching subset of
+# the data, contamination and attenuation sinograms.  Each subset operator
+# :math:`A^k` chains the resolution model, the subset projector and the
+# subset of the attenuation sinogram.
 
 subset_views, subset_slices = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, len(proj.out_shape)
 )
-
+# the attenuation sinogram has no TOF axis: slices for 3 dimensions
 _, subset_slices_non_tof = proj.lor_descriptor.get_distributed_views_and_slices(
     num_subsets, 3
 )
 
-# clear the cached LOR endpoints since we will create many copies of the projector
+# clear the cached LOR endpoints since we create many copies of the projector
 proj.clear_cached_lor_endpoints()
-pet_subset_linop_seq = []
 
-# we setup a sequence of subset forward operators each constisting of
-# (1) image-based resolution model
-# (2) subset projector
-# (3) multiplication with the corresponding subset of the attenuation sinogram
-for i in range(num_subsets):
-    # make a copy of the full projector and reset the views to project
+subset_linops = []
+for k in range(num_subsets):
     subset_proj = copy(proj)
-    subset_proj.views = subset_views[i]
+    subset_proj.views = subset_views[k]
 
-    # same TOF/non-TOF broadcasting as for the full operator above
-    att_values_k = (
-        xp.broadcast_to(
-            xp.expand_dims(att_sino[subset_slices_non_tof[i]], axis=-1),
-            subset_proj.out_shape,
-        )
+    subset_att_sino = att_sino[subset_slices_non_tof[k]]
+    subset_att_values = (
+        xp.broadcast_to(xp.expand_dims(subset_att_sino, axis=-1), subset_proj.out_shape)
         if subset_proj.tof
-        else att_sino[subset_slices_non_tof[i]]
+        else subset_att_sino
     )
     subset_att_op = parallelproj.operators.ElementwiseMultiplicationOperator(
-        att_values_k
+        subset_att_values
     )
-
-    # add the resolution model and multiplication with a subset of the attenuation sinogram
-    pet_subset_linop_seq.append(
+    subset_linops.append(
         parallelproj.operators.CompositeLinearOperator(
-            [
-                subset_att_op,
-                subset_proj,
-                res_model,
-            ]
+            [subset_att_op, subset_proj, res_model]
         )
     )
 
-pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(
-    pet_subset_linop_seq
-)
+pet_subset_linop_seq = parallelproj.operators.LinearOperatorSequence(subset_linops)
 
 # %%
-# EM update
-# ---------
+# 6. The EM update as a preconditioned gradient step
+# --------------------------------------------------
 #
-# The EM update used in MLEM and OSEM is :footcite:p:`Dempster1977`
-# :footcite:p:`Shepp1982` :footcite:p:`Lange1984` :footcite:p:`Hudson1994`
+# All three algorithms minimise the negative Poisson log-likelihood
+#
+# .. math::
+#     f(x) = \sum_i \bar{y}_i - y_i \log \bar{y}_i, \qquad \bar{y}(x) = A x + s
+#
+# subject to :math:`x \geq 0`.  The EM update used in MLEM and OSEM is
+# :footcite:p:`Dempster1977` :footcite:p:`Shepp1982` :footcite:p:`Lange1984`
+# :footcite:p:`Hudson1994`
 #
 # .. math::
 #     x^+ = \frac{x}{A^T 1} A^T \frac{y}{A x + s}
@@ -295,15 +302,20 @@ def em_update(
 
 
 # %%
-# Setup of objective functions and sensitivity images
-# ---------------------------------------------------
+# 7. Sensitivity images and FOV mask
+# ----------------------------------
 #
-# We define one :class:`.C2AffineObjective` per subset (for OSEM and SVRG)
-# and one for the full data (for MLEM and objective evaluation).
-# The sensitivity image :math:`A^T 1` and its per-subset counterparts
-# :math:`(A^k)^T 1` are precomputed once.
+# The subset sensitivity images :math:`(A^k)^T 1` and the full sensitivity
+# image :math:`A^T 1 = \sum_k (A^k)^T 1` are computed once.
+#
+# The scanner's cylindrical field of view (FOV) does not cover every voxel of
+# the image grid.  Voxels outside the FOV are never intersected by any LOR, so
+# their sensitivity :math:`(A^T 1)_i = 0`, and dividing by it in the EM
+# preconditioner would produce NaN / Inf values that corrupt the
+# reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
+# boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
+# ``None`` when every image voxel is inside the FOV (no masking needed).
 
-# calculate A_k^T 1 for all subsets k, stored as (num_subsets, *in_shape)
 subset_adjoint_ones = xp.zeros(
     (num_subsets,) + pet_lin_op.in_shape, dtype=xp.float32, device=dev
 )
@@ -312,31 +324,18 @@ for k, op in enumerate(pet_subset_linop_seq):
         xp.ones(op.out_shape, dtype=xp.float32, device=dev)
     )
 
-# full sensitivity image A^T 1 = sum of all subset sensitivities
 adjoint_ones = xp.sum(subset_adjoint_ones, axis=0)
-
-# %%
-# FOV mask
-# --------
-#
-# The scanner's cylindrical field of view does not cover every voxel of the
-# image grid.  Voxels outside the FOV are never intersected by any LOR, so
-# their sensitivity :math:`(A^T 1)_i = 0`.  Dividing by zero in the EM
-# preconditioner would produce NaN / Inf values that corrupt the
-# reconstruction.  :meth:`.RegularPolygonPETProjector.fov_mask` returns a
-# boolean array that is ``True`` inside the FOV.  ``fov_mask`` is set to
-# ``None`` when every image voxel is inside the FOV (no masking needed).
 
 cyl_mask = proj.fov_mask()
 fov_mask = None if bool(xp.all(cyl_mask)) else cyl_mask
-del cyl_mask
 
 # %%
-# Setup of data-fidelity terms
-# ----------------------------
+# 8. Data-fidelity terms and warm start
+# -------------------------------------
 #
-# We define one :class:`.C2AffineObjective` per subset (for OSEM and SVRG)
-# and one for the full data (for MLEM and objective evaluation).
+# We define one :class:`.C2AffineObjective` :math:`f_k` per subset (for OSEM
+# and SVRG) and one for the full data (for MLEM and to evaluate the
+# objective of all algorithms).
 #
 # .. note::
 #     By default :class:`.NegPoissonLogL` evaluates a "safe epsilon"
@@ -350,9 +349,10 @@ del cyl_mask
 #     handled exactly).  Keep the default whenever the expected data can
 #     reach zero in bins with counts, e.g. with zero contamination and a
 #     mismatched forward model.
+#
+# All algorithms start from the same warm start: one OSEM epoch from a
+# uniform image (zero outside the FOV).
 
-# the strictly positive contamination guarantees A x + s > 0 in every bin,
-# so the exact (unmodified) log-likelihood can be used
 exact_mode = bool(xp.min(contamination) > 0)
 
 subset_data_fidelities = [
@@ -368,31 +368,27 @@ full_data_fidelity = C2AffineObjective(
     NegPoissonLogL(y, exact=exact_mode), pet_lin_op, contamination
 )
 
-# run 1 OSEM epoch as a common warm-start for MLEM, OSEM and SVRG
 x_init = xp.ones(pet_lin_op.in_shape, dtype=xp.float32, device=dev)
-# zero out voxels not seen by every subset so they don't carry a spurious non-zero value
 if fov_mask is not None:
     x_init = xp.where(fov_mask, x_init, xp.zeros_like(x_init))
 
-for k in range(len(subset_slices)):
-    print(f"warm-start OSEM subset {(k+1):03} / {num_subsets:03}", end="\r")
+for k in range(num_subsets):
+    print(f"warm-start OSEM subset {(k + 1):03} / {num_subsets:03}", end="\r")
     x_init = em_update(
         x_init, subset_data_fidelities[k], subset_adjoint_ones[k], fov_mask
     )
 print()
 
 # %%
-# MLEM
-# ----
+# 9. MLEM
+# -------
 #
 # One MLEM iteration uses the full data (:math:`A`, :math:`y`, :math:`s`)
 # and the full sensitivity image :math:`A^T 1`.  It is guaranteed to
 # converge to the maximum-likelihood solution but requires one full data
-# pass per iteration.
-#
-# .. note::
-#     MLEM is only run when ``run_mlem`` is ``True`` (i.e. on CUDA devices).
-#     On CPU it is skipped because the large number of iterations is too slow.
+# pass per iteration.  It only runs when ``run_mlem`` is ``True`` (full number
+# of iterations, e.g. on a GPU).
+
 if run_mlem:
     df_mlem = xp.zeros(num_epochs_mlem, dtype=xp.float32, device=dev)
     x_mlem = xp.asarray(x_init, copy=True)
@@ -403,20 +399,21 @@ if run_mlem:
     print()
 
 # %%
-# OSEM
-# ----
+# 10. OSEM
+# --------
 #
-# One OSEM epoch cycles through all :math:`m` subsets, each using the
+# One OSEM epoch cycles through all :math:`m` subsets, each update using the
 # subset operator :math:`A^k`, subset data :math:`y^k`, contamination
-# :math:`s^k`, and subset sensitivity :math:`(A^k)^T 1`.  Fast empirical
-# convergence but no convergence guarantee.
+# :math:`s^k` and subset sensitivity :math:`(A^k)^T 1`.  OSEM converges fast
+# in the first epochs, but has no convergence guarantee.
 
 df_osem = xp.zeros(num_epochs, dtype=xp.float32, device=dev)
 x_osem = xp.asarray(x_init, copy=True)
 for i in range(num_epochs):
-    for k in range(len(subset_slices)):
+    for k in range(num_subsets):
         print(
-            f"OSEM epoch {(i+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
+            f"OSEM epoch {(i + 1):04} / {num_epochs:04}, "
+            f"subset {(k + 1):04} / {num_subsets:04}",
             end="\r",
         )
         x_osem = em_update(
@@ -427,14 +424,16 @@ for i in range(num_epochs):
 print()
 
 # %%
-# SVRG
-# ----
+# 11. SVRG
+# --------
 #
-# Each SVRG epoch consists of two phases:
+# SVRG reduces the variance of the subset gradients with gradients stored at
+# an anchor point :math:`\tilde{x}`.  Each epoch consists of two phases:
 #
 # 1. **Anchor phase** (every other epoch): compute and store all :math:`m`
-#    subset gradients at the current point :math:`\tilde{x}`, then take a
-#    full gradient step.
+#    subset gradients :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` at the
+#    current point :math:`\tilde{x}`, then take a full gradient step with
+#    :math:`\nabla f(\tilde{x}) = \sum_k \tilde{g}_k`.
 # 2. **Variance-reduced subset updates**: for each subset :math:`k`, form
 #    the variance-reduced gradient
 #
@@ -442,17 +441,21 @@ print()
 #        g^{VR}_k = m \left( \nabla f_k(x) - \tilde{g}_k \right)
 #                   + \sum_{j=1}^m \tilde{g}_j
 #
-#    where :math:`\tilde{g}_k = \nabla f_k(\tilde{x})` are the stored
-#    anchor gradients.
+#    and take a preconditioned gradient step, followed by a projection onto
+#    :math:`x \geq 0`.
+#
+# The preconditioner is the EM preconditioner
+# :math:`\operatorname{diag}(x / (A^T 1))`, updated in the anchor phases of
+# the first three anchor epochs (epochs 1, 3 and 5) and kept fixed afterwards.
 #
 # .. note::
 #     The anchor phase requires one full pass through all subsets to
 #     compute :math:`\tilde{g}_1, \ldots, \tilde{g}_m`.  Therefore, each
-#     SVRG epoch that includes an anchor phase costs **two full data
-#     passes** (one for the snapshot, one for the :math:`m` subset
-#     updates), compared to one full data pass for OSEM or MLEM.
-#     The epoch axis in the convergence plot understates SVRG's
-#     computational cost relative to OSEM by a factor of roughly two.
+#     SVRG epoch with an anchor phase costs **two full data passes** (one
+#     for the snapshot, one for the :math:`m` subset updates), the other
+#     epochs one, compared to one full data pass per OSEM epoch or MLEM
+#     iteration.  With an anchor every other epoch, an SVRG epoch costs 1.5
+#     data passes on average.
 
 
 def svrg_calc_snapshot_gradients(
@@ -492,7 +495,6 @@ def svrg_update(
     return xp.clip(x_cur - step_size * precond * approx_grad, 0, None)
 
 
-# start SVRG from the same warm-start as OSEM and MLEM
 x_svrg = xp.asarray(x_init, copy=True)
 
 svrg_step_size = 1.0
@@ -516,7 +518,8 @@ for epoch in range(num_epochs):
 
     for k in range(num_subsets):
         print(
-            f"SVRG epoch {(epoch+1):04} / {num_epochs:04}, subset {(k+1):04} / {num_subsets:04}",
+            f"SVRG epoch {(epoch + 1):04} / {num_epochs:04}, "
+            f"subset {(k + 1):04} / {num_subsets:04}",
             end="\r",
         )
         x_svrg = svrg_update(
@@ -532,125 +535,133 @@ for epoch in range(num_epochs):
     df_svrg[epoch] = full_data_fidelity(x_svrg)
 
 # %%
-# Convergence comparison
-# ----------------------
+# 12. Convergence comparison
+# --------------------------
 #
-# We plot the negative Poisson log-likelihood vs epoch for OSEM and SVRG,
-# and overlay two horizontal reference lines showing where MLEM stands after
-# ``num_epochs`` and ``num_epochs_mlem`` iterations respectively.
-# One epoch of OSEM or SVRG corresponds to one cycle through all subsets
-# (roughly one full data pass for OSEM, roughly two for SVRG).
+# We plot the negative Poisson log-likelihood :math:`f(x)` of the OSEM and
+# SVRG iterates vs epoch (left) and vs the number of full data passes
+# (right): one per OSEM epoch, two per SVRG epoch with an anchor phase and
+# one otherwise.  On a GPU, horizontal lines show the value MLEM reaches
+# after 50, 100 and ``num_epochs_mlem`` iterations, and the right panel also
+# shows the MLEM curve for the same number of data passes.
 
-# data-pass counts
-# OSEM:  1 full data pass per epoch
-# SVRG:  2 passes on anchor epochs (snapshot + subset updates),
-#         1 pass on non-anchor epochs (subset updates only)
-# MLEM:  1 pass per iteration
 epochs = np.arange(1, num_epochs + 1)
-osem_passes = epochs.copy()
+svrg_passes = np.cumsum(np.where(np.arange(num_epochs) % 2 == 0, 2, 1))
 
-svrg_passes_per_epoch = np.where(np.arange(num_epochs) % 2 == 0, 2, 1)
-svrg_cumulative_passes = np.cumsum(svrg_passes_per_epoch)
-
-max_passes = int(svrg_cumulative_passes[-1])
+df_min = min(float(xp.min(df_osem)), float(xp.min(df_svrg)))
 if run_mlem:
-    df_mlem_trimmed = to_numpy_array(df_mlem[:max_passes])
-
-if run_mlem:
-    df_min = min(float(xp.min(df_mlem)), float(xp.min(df_osem)), float(xp.min(df_svrg)))
-else:
-    df_min = min(float(xp.min(df_osem)), float(xp.min(df_svrg)))
-df_max = float(df_osem[0])  # use first OSEM epoch as upper limit
+    df_min = min(df_min, float(xp.min(df_mlem)))
+df_max = float(df_osem[0])  # first OSEM epoch as upper limit
 
 osem_label = f"OSEM ({num_subsets} subsets)"
-svrg_label = f"SVRG ({num_subsets} subsets, step={svrg_step_size:.1f})"
-mlem_label = "MLEM"
+svrg_label = f"SVRG ({num_subsets} subsets, step {svrg_step_size:.1f})"
 
-fig, axs = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
+fig, axs = plt.subplots(1, 2, figsize=(10, 4), layout="constrained")
+axs[0].plot(epochs, to_numpy_array(df_osem), marker="o", label=osem_label)
+axs[0].plot(epochs, to_numpy_array(df_svrg), marker="o", label=svrg_label)
+axs[1].plot(epochs, to_numpy_array(df_osem), marker="o", label=osem_label)
+axs[1].plot(svrg_passes, to_numpy_array(df_svrg), marker="o", label=svrg_label)
 
-# --- left: vs epoch ---
-axs[0].plot(epochs, to_numpy_array(df_osem), label=osem_label, marker="o")
-axs[0].plot(epochs, to_numpy_array(df_svrg), label=svrg_label, marker="o")
 if run_mlem:
-    axs[0].axhline(
-        float(df_mlem[50 - 1]),
-        label=f"{mlem_label} (50 iter.)",
-        ls="--",
-        color="gray",
-    )
-    axs[0].axhline(
-        float(df_mlem[100 - 1]),
-        label=f"{mlem_label} (100 iter.)",
-        ls="--",
-        color="gray",
-    )
-    axs[0].axhline(
-        float(df_mlem[-1]),
-        label=f"{mlem_label} ({num_epochs_mlem} iter.)",
-        ls="--",
-        color="black",
-    )
-axs[0].set_ylim(df_min, df_max)
-axs[0].set_xlabel("Epoch")
-axs[0].set_ylabel("Negative Poisson log-likelihood")
-axs[0].legend()
-axs[0].grid(ls=":")
-
-# --- right: vs full data passes ---
-axs[1].plot(osem_passes, to_numpy_array(df_osem), label=osem_label, marker="o")
-axs[1].plot(
-    svrg_cumulative_passes, to_numpy_array(df_svrg), label=svrg_label, marker="o"
-)
-if run_mlem:
-    axs[1].axhline(
-        float(df_mlem[50 - 1]),
-        label=f"{mlem_label} (50 iter.)",
-        ls=":",
-        color="gray",
-    )
-    axs[1].axhline(
-        float(df_mlem[100 - 1]),
-        label=f"{mlem_label} (100 iter.)",
-        ls="--",
-        color="gray",
+    # MLEM reference values: grey lines, line style by number of iterations
+    for n_iter, ls in ((50, ":"), (100, "-."), (num_epochs_mlem, "--")):
+        axs[0].axhline(
+            float(df_mlem[n_iter - 1]),
+            color="0.4",
+            ls=ls,
+            label=f"MLEM ({n_iter} iterations)",
+        )
+    max_passes = int(svrg_passes[-1])
+    axs[1].plot(
+        np.arange(1, max_passes + 1),
+        to_numpy_array(df_mlem[:max_passes]),
+        label="MLEM",
     )
     axs[1].axhline(
         float(df_mlem[-1]),
-        label=f"{mlem_label} ({num_epochs_mlem} iter.)",
+        color="0.4",
         ls="--",
-        color="black",
+        label=f"MLEM ({num_epochs_mlem} iterations)",
     )
-axs[1].set_ylim(df_min, df_max)
-axs[1].set_xlabel("Full data passes")
-axs[1].set_ylabel("Negative Poisson log-likelihood")
-axs[1].legend()
-axs[1].grid(ls=":")
 
+axs[0].set_xlabel("epoch")
+axs[0].set_ylabel("negative Poisson log-likelihood f(x)")
+axs[0].set_title("Convergence per epoch")
+axs[1].set_xlabel("full data passes")
+axs[1].set_title("Convergence per data pass")
+for ax in axs:
+    ax.set_ylim(df_min, df_max)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.legend(fontsize="small")
+    ax.grid(ls=":")
 fig.show()
 
 # %%
+# SVRG reaches lower values than OSEM, per epoch and also per data pass,
+# although its anchor phases cost extra passes and narrow the gap.  With more
+# epochs (on a GPU), OSEM levels off at a higher value, as it does not
+# converge to the minimum, while SVRG keeps decreasing the objective.  The
+# grey MLEM lines show how many MLEM iterations reach a comparable value.
+
+# %%
+# 13. Reconstructed images
+# ------------------------
+#
+# The final OSEM and SVRG images, with the same colour scale.
+
 vmax = float(xp.max(x_svrg))
 
-fig, axs, widgets = show_vol_cuts(
+fig, _, _ = show_vol_cuts(
     x_osem,
     voxel_size=voxel_size,
-    fig_title="OSEM result",
+    fig_title=f"OSEM, {num_epochs} epochs",
     vmin=0,
     vmax=vmax,
 )
 fig.show()
 
 # %%
-fig2, axs2, widgets2 = show_vol_cuts(
+
+fig, _, _ = show_vol_cuts(
     x_svrg,
     voxel_size=voxel_size,
-    fig_title="SVRG result",
+    fig_title=f"SVRG, {num_epochs} epochs",
     vmin=0,
     vmax=vmax,
 )
-fig2.show()
+fig.show()
 
 # %%
+# The OSEM and SVRG images look very similar: both show the elliptic cylinder
+# with its hot and cold inserts, and both are noisy.  Without regularisation,
+# the noise increases further as the iterates approach the
+# maximum-likelihood solution; the next example adds a prior.
+
+# %%
+# Summary
+# -------
+#
+# - The EM update is a preconditioned gradient step with preconditioner
+#   :math:`\operatorname{diag}(x / (A^T 1))`; MLEM applies it to the full
+#   data, OSEM to one subset at a time.
+# - SVRG combines subset updates with stored gradients at an anchor point.
+#   It converges in practice, like MLEM, but decreases the objective much
+#   faster per epoch.  (The variant used here, with step size 1, a
+#   preconditioner that is frozen after a few epochs and clipping to
+#   non-negative values, is not covered by the standard SVRG convergence
+#   proofs.)
+# - An SVRG epoch with an anchor phase costs two full data passes: compare
+#   algorithms per data pass, not only per epoch.
+# - Voxels outside the scanner FOV have zero sensitivity and must be masked
+#   in the preconditioner.
+#
+# .. seealso::
+#
+#    **Next:** :ref:`sphx_glr_auto_examples_03_algorithms_01_run_sgd_svrg.py`
+#    -- SGD and SVRG for a regularised objective (logcosh prior).
+#
 # .. rubric:: References
 #
 # .. footbibliography::
+
+# sphinx_gallery_thumbnail_number = 1

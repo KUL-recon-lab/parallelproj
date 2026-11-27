@@ -638,3 +638,21 @@ def test_error_detection_times_no_tof_params(xp: ModuleType, dev: str) -> None:
     dt = xp.asarray([0.0], dtype=xp.float32, device=dev)
     with pytest.raises(ValueError, match="tof_parameters"):
         detection_times_to_tof_bin(d, d, dt, proj)
+
+
+def test_error_detection_times_per_lor_offset(xp: ModuleType, dev: str) -> None:
+    """detection_times_to_tof_bin supports only a scalar tofcenter_offset."""
+    if detection_times_to_tof_bin is None:
+        pytest.skip("detection_times_to_tof_bin not available")
+    scanner = _small_scanner(xp, dev, num_rings=1)
+    proj = _small_proj(scanner)
+    proj.tof_parameters = ppt.TOFParameters(
+        num_tofbins=5,
+        tofbin_width=10.0,
+        sigma_tof=8.0,
+        tofcenter_offset=np.zeros(proj.lor_descriptor.spatial_sinogram_shape, np.float32),
+    )
+    d = xp.asarray([0], dtype=xp.int32, device=dev)
+    dt = xp.asarray([0.0], dtype=xp.float32, device=dev)
+    with pytest.raises(NotImplementedError, match="scalar tofcenter_offset"):
+        detection_times_to_tof_bin(d, d, dt, proj)

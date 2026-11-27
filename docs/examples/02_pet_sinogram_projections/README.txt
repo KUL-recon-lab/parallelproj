@@ -1,5 +1,5 @@
-PET sinogram and listmode projector examples
---------------------------------------------
+Projectors
+----------
 
 Here you build projectors and run forward and back projections: non-TOF and TOF
 sinogram projectors for cylindrical scanners, the equal-block projector for

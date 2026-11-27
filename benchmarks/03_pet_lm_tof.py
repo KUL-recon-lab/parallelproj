@@ -96,7 +96,7 @@ tof_parameters = ppt.TOFParameters(
     * 299.792
     / 2,  # 13 TOF "small" TOF bins of 0.01302[ns] * (speed of light / 2) [mm/ns]
     sigma_tof=(299.792 / 2)
-    * (0.385 / 2.355),  # (speed_of_light [mm/ns] / 2) * TOF FWHM [ns] / 2.355
+    * (0.385 / 2.3548),  # (speed_of_light [mm/ns] / 2) * TOF FWHM [ns] / 2.3548
     num_sigmas=3,
     tofcenter_offset=0,
 )

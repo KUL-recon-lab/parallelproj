@@ -4,13 +4,224 @@ Changelog
 2.x
 ---
 
-Unreleased
-^^^^^^^^^^
+2.1.0 (unreleased)
+^^^^^^^^^^^^^^^^^^
 
 New features
 ~~~~~~~~~~~~
 
-- Add several PET scanner geometry presets from Siemens, GE, Mediso, Philips and United Imaging in `pet_scanners.py`. 
+- Add several PET scanner geometry presets from Siemens, GE, Mediso, Philips and United Imaging in `pet_scanners.py` (`#161 <https://github.com/KUL-recon-lab/parallelproj/issues/161>`_). 
+- **Tabulated TOF kernels and per-LOR TOF parameters.** (`#166
+  <https://github.com/KUL-recon-lab/parallelproj/issues/166>`_)
+
+  - new :class:`.TOFKernel`: a TOF kernel given as a table of its cumulative
+    distribution, built with ``TOFKernel.gaussian``, ``TOFKernel.from_pdf`` or
+    ``TOFKernel.from_cdf``. Non-Gaussian (measured, asymmetric, with tails)
+    kernels are passed as ``TOFParameters(..., kernel=k, kernel_scale=s)``
+    instead of ``sigma_tof``;
+  - ``sigma_tof`` / ``kernel_scale`` and ``tofcenter_offset`` can be given per
+    LOR (sinogram projectors: one value per LOR of the LOR descriptor;
+    listmode: per event). Scalars cost nothing extra;
+  - the sinogram and listmode projectors **always use the tabulated TOF
+    projectors** of parallelproj-core. A Gaussian ``sigma_tof`` becomes a
+    2001-point table of the normal CDF; projections differ from the closed-form
+    Gaussian by < 1e-6 (relative to the maximum). The listmode forward
+    projection uses 256 CUDA threads per block (faster with the table, #165).
+
+Changes
+~~~~~~~
+
+- **Separable quadratic majorizers.** (`#187
+  <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_)
+
+  - new :meth:`.C2Function.separable_majorizer_curvature`: a curvature
+    :math:`c(x) \geq 0` with :math:`f(z) \leq f(x) + \nabla f(x)^T (z - x)
+    + \tfrac{1}{2} \sum_j c_j (z_j - x_j)^2` -- Huber's optimal curvature
+    :math:`\psi'(t)/t` for :class:`.LogCosh`, the exact curvature for
+    :class:`.HalfSquaredL2Deviation`, De Pierro's separable surrogate
+    :math:`|A|^T (c_g \odot |A| 1)` for :class:`.C2AffineObjective`, and the
+    sum for :class:`.SumC2Function`.  Unlike the Hessian diagonal, it gives
+    guaranteed-descent (majorize-minimize) steps and safe preconditioners;
+  - new :meth:`.LinearOperator.abs_apply` / :meth:`.LinearOperator.abs_adjoint`
+    (:math:`|A| x`, :math:`|A|^T y`) and :attr:`.LinearOperator.nonnegative`;
+    the PET projectors, :class:`.GaussianFilterOperator` and composites of
+    non-negative operators are non-negative (:math:`|A| = A`).
+
+- **Hessian-vector products and Hessian diagonals of C2 functions.** (`#185
+  <https://github.com/KUL-recon-lab/parallelproj/issues/185>`_)
+  ``C2Function.hessian_diag_vec_prod`` was documented as
+  :math:`\operatorname{diag}(H_f(x)) \odot v`, but composite functions
+  (:class:`.C2AffineObjective`, :class:`.NegPoissonLogLListmode`) return the
+  full Hessian-vector product :math:`H_f(x)\, v`.
+
+  - new :meth:`.C2Function.hessian_vec_prod`: the Hessian-vector product
+    (same values as the old method for all classes);
+    ``hessian_diag_vec_prod`` is a deprecated alias (``DeprecationWarning``),
+    and subclasses that implement the old ``_hessian_diag_vec_prod`` keep
+    working (with a ``DeprecationWarning``);
+  - new :meth:`.C2Function.hessian_diag`: the Hessian diagonal
+    :math:`\operatorname{diag}(H_f(x))`, for composite functions
+    :math:`|A|^{2\,T} \operatorname{diag}(H_g)`;
+  - new :meth:`.LinearOperator.abs_sq_adjoint`: :math:`(|A|^2)^T y`,
+    implemented for :class:`.MatrixOperator`,
+    :class:`.ElementwiseMultiplicationOperator`,
+    :class:`.FiniteForwardDifference` and :class:`.VstackOperator`; other
+    operators (e.g. the PET projectors) raise ``NotImplementedError``;
+  - the SGD / SVRG examples (sinogram and listmode) use the non-negative
+    Hessian diagonal of the prior in their preconditioner,
+    :math:`x / (A^T 1 + \operatorname{diag}(H_R(x))\, x)`, instead of
+    :math:`2 H_R(x)\, x`, which is negative in voxels colder than their
+    neighbours.
+
+- **GPU projections run on the current CUDA stream (asynchronous).** (`#176
+  <https://github.com/KUL-recon-lab/parallelproj/issues/176>`_) All projectors
+  pass the current stream of the GPU of their arrays to parallelproj-core
+  (PyTorch: ``torch.cuda.current_stream(device)``, CuPy:
+  ``cupy.cuda.get_current_stream()``). A GPU projection now behaves like any
+  other PyTorch / CuPy operation: it is queued on that stream and returns
+  without waiting for the GPU, it is correctly ordered with the other work on
+  that stream (also inside ``with torch.cuda.stream(s):``, where the previous
+  projections on the legacy default stream did not wait for the work queued on
+  ``s``), and projections on several GPUs run at the same time even when
+  called one after another from one Python thread. Results are unchanged, and
+  everything that reads a result (``.cpu()``, ``.item()``, ``print``,
+  ``to_numpy_array``, ...) waits for it automatically; only hand-written timing
+  code has to synchronize (``torch.cuda.synchronize()``) before reading the
+  clock. CPU arrays are not affected.
+- **TOFParameters**: ``sigma_tof`` is optional (but required unless ``kernel``
+  is given), and the class has the new fields ``kernel`` and ``kernel_scale``
+  and properties ``tof_kernel``, ``scale`` and ``is_lor_dependent``. Existing
+  code that constructs ``TOFParameters(num_tofbins, tofbin_width, sigma_tof,
+  ...)`` works unchanged. The TOF unlisting helpers and ``show_tof_bins``
+  support only a scalar ``tofcenter_offset`` (``NotImplementedError``
+  otherwise).
+
+- **Requires parallelproj-core >= 3.0.** (`#164
+  <https://github.com/KUL-recon-lab/parallelproj/issues/164>`_) Numerical
+  results of the TOF projectors change slightly, through the libparallelproj
+  3.0 TOF kernel:
+
+  - the Gaussian TOF kernel is truncated at ``num_sigmas`` sigma **inside** a
+    TOF bin (only the part of a bin within the window counts) and normalised to
+    unit total weight. Bins entirely outside the window get exactly zero weight,
+    and the TOF projections summed over the TOF bins equal the non-TOF
+    projection. Previously the full Gaussian integrals of the bins overlapping
+    the window were used, and listmode weights were normalised differently, so
+    single bin weights change by up to ~1e-3 (of a total of 1) near the window
+    edges;
+  - a listmode event now gets exactly the value of its TOF sinogram bin.
+
+  See the libparallelproj 3.0 changelog for all changes of the backend
+  (CUDA streams, tabulated TOF kernels, event sorting, ...).
+
+- **``NegPoissonLogL`` returns the Poisson deviance, summed in float64.** The
+  function value is now :math:`\sum_i \bar{y}_i - y_i - y_i \log(\bar{y}_i /
+  y_i)` (terms with :math:`y_i = 0`: :math:`\bar{y}_i`), i.e. the textbook
+  form :math:`\sum_i \bar{y}_i - y_i \log \bar{y}_i` plus the constant
+  :math:`\sum_i y_i \log y_i - y_i`. Gradient, Hessian, proximal operators and
+  minimisers are unchanged; **function values differ from 2.0 by that
+  constant.** Every term is :math:`\geq 0` and :math:`0` at the fit, and the
+  sum is accumulated in float64 (where the backend supports it), so the value
+  is now usable for convergence monitoring and line searches with float32 data
+  and :math:`10^7`--:math:`10^9` bins. Previously, the float32 sum lost all
+  significant digits of the change between late iterations. (`#167
+  <https://github.com/KUL-recon-lab/parallelproj/issues/167>`_)
+- **``NegPoissonLogLListmode``: consistent constant and float64 sums.** The
+  value now subtracts the number of events :math:`N_\text{ev}`, so it equals the
+  sinogram deviance of ``NegPoissonLogL`` minus :math:`\sum_i y_i \log y_i`
+  (:math:`0` if no sinogram bin contains more than one event), and all sums are
+  accumulated in float64. Gradient and Hessian are unchanged; function values
+  differ from 2.0 by :math:`-N_\text{ev}`.
+
+Documentation
+~~~~~~~~~~~~~
+
+- **Shorter documentation build.** (`#169
+  <https://github.com/KUL-recon-lab/parallelproj/issues/169>`_) The six slowest
+  iterative examples run fewer iterations on the CPU (as on Read the Docs) and
+  print a note that the shown results are less converged. GPU builds keep the
+  full numbers; ``PARALLELPROJ_EXAMPLES_FULL_ITERATIONS=1`` runs them on the
+  CPU as well.
+- **MAP examples use the separable majorizer of the prior in their
+  preconditioners.** (`#187
+  <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_) The SGD /
+  SVRG examples (sinogram and listmode) use
+  :math:`x / (A^T 1 + \beta c_R(x)\, x)`, the transmission examples (MAPTR,
+  MLAA) :math:`1 / (c_\text{data} + \beta c_R)` (activity in MLAA:
+  :math:`\lambda / (\text{sens} + \beta c_R \lambda)`), with
+  :math:`\beta c_R` = ``reg.separable_majorizer_curvature(x)``.  The
+  transmission examples previously used the constant
+  :math:`\beta \operatorname{diag}(G^TG) / \delta`, the maximal Hessian
+  diagonal, which is not a separable majorizer (it lacks the factor 2 of De
+  Pierro's surrogate).  Results are practically unchanged.
+- **Example gallery look (part 5): listmode, transmission and PyTorch
+  galleries.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All remaining
+  examples follow the example template.  Static figures that showed only one
+  volume of a stacked 4D ``show_vol_cuts`` (MLTR/SPS, OS-MLTR/SVRG, MAPTR) are
+  side-by-side image panels on a common scale, the listmode MLEM reference
+  runs whenever the full number of iterations is used, and text that
+  contradicted the code or the results was corrected (e.g. the sinogram and
+  listmode objectives differ by a constant, the listmode examples use TOF,
+  the data passes of an SVRG epoch, the convergence of the transmission
+  algorithms).
+- **New example: preconditioners for SVRG with an edge-preserving prior.**
+  (`#187 <https://github.com/KUL-recon-lab/parallelproj/issues/187>`_)
+  Compares the Hessian diagonal, twice the Hessian diagonal and the
+  separable majorizer of a logcosh prior as curvature in the SVRG
+  preconditioner, for high / low counts and weak / medium / strong
+  regularisation and a strongly edge-preserving prior (small :math:`\delta`),
+  with a monotone MAP-EM algorithm (De Pierro with the separable majorizer)
+  as reference.  With the Hessian diagonal, SVRG does not converge for strong
+  priors, with twice the Hessian diagonal not for the edge-preserving one;
+  the separable majorizer converges in all scenarios.
+- **New example: projection layers on multiple GPUs with CUDA streams.**
+  (`#177 <https://github.com/KUL-recon-lab/parallelproj/issues/177>`_) One
+  projector per GPU, a layer that splits a mini batch across all GPUs and
+  gathers the results (with gradients), and how to time GPU code correctly.
+- **Example gallery look (part 1).** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) Shared figure
+  style for all examples (colour-vision-deficiency-safe colour cycle, font
+  sizes, high-resolution images), ``show_vol_cuts`` draws a static figure
+  (three cuts and a colorbar, no widgets) with non-interactive matplotlib
+  backends (documentation, Jupyter inline), shorter gallery section titles, a
+  "New here?" start row, and the first example rewritten with the new
+  example template (learning goals, numbered sections, summary and next steps).
+- **Example gallery look (part 2): scanner geometry gallery.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All examples
+  of the geometry gallery follow the example template, with figures of at most
+  10 inches width, an interpretation after every figure, and fixes of text
+  that did not match the code (e.g. the detector pairs and the endpoint
+  numbering in the zig-zag example, the number of rings and the class sizes in
+  the symmetry and mashing examples).  The examples that are not executed on
+  Read the Docs get static thumbnails, and configuration comments
+  (``# sphinx_gallery_thumbnail_number``) are no longer shown.
+- **Example gallery look (part 3): projector gallery.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All projector
+  examples follow the example template.  Figures that showed empty central
+  cuts (sinograms, back projections of a few LORs) now show the informative
+  planes, the TOF axis of TOF sinograms is shown, and text that did not match
+  the code is fixed (e.g. image size and TOF field of view in the TOF
+  projector example, the tail onset of the TOF kernel example).  The TOF
+  kernel example demonstrates ``kernel_scale``, and all examples convert FWHM
+  to sigma with the same factor :math:`2\sqrt{2 \ln 2} \approx 2.3548`.
+- **Example gallery look (part 4): reconstruction of sinogram data.** (`#178
+  <https://github.com/KUL-recon-lab/parallelproj/issues/178>`_) All
+  reconstruction examples follow the example template.  Fixes found on the
+  way: the FBP example's image was about 9 times too large (missing
+  :math:`\Delta\phi / \Delta s^2` scaling); the De Pierro example's Powell
+  reference now runs with every array backend; the full (GPU) number of PDHG
+  iterations of the PDHG / SPDHG example is 560 (it was derived from the
+  reduced CPU number of SPDHG epochs); the MLEM reference of the
+  MLEM / OSEM / SVRG example runs whenever the full number of iterations is
+  used; and text that contradicted the results was corrected (e.g. the noise
+  curves of the TOF variance example, the cost of an SVRG epoch, the memory
+  numbers of the memory-mapped OSEM example).  The examples' matplotlib style
+  no longer crops figures with ``savefig.bbox = "tight"``, which removed whole
+  panels of figures with shared y axes.
+- **Axis labels ``x0``, ``x1``, ``x2``** (the world axes of parallelproj) in
+  ``show_tof_bins`` (previously x / y / z) and as the default labels of the
+  examples' ``show_vol_cuts``.
 
 2.0.2 (Jul 29, 2026)
 ^^^^^^^^^^^^^^^^^^^^

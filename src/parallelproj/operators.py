@@ -127,6 +127,116 @@ class LinearOperator(abc.ABC):
         else:
             return self._scale.conjugate() * self._adjoint(y)
 
+    @property
+    def nonnegative(self) -> bool:
+        """``True`` if all matrix elements are known to be :math:`\\geq 0`.
+
+        Then :math:`|A| = A`, and :meth:`abs_apply` / :meth:`abs_adjoint` fall
+        back to :meth:`apply` / :meth:`adjoint` (without the sign of the
+        scale).  ``False`` (default) means unknown.  The PET projectors and
+        :class:`GaussianFilterOperator` are non-negative, a
+        :class:`CompositeLinearOperator` is non-negative if all its operators
+        are.
+        """
+        return False
+
+    def _abs_apply(self, x: Array) -> Array:
+        """:math:`|A| x` without the scale (implemented by subclasses)."""
+        if self.nonnegative:
+            return self._apply(x)
+        raise NotImplementedError(f"{type(self).__name__} does not implement abs_apply")
+
+    def _abs_adjoint(self, y: Array) -> Array:
+        """:math:`|A|^T y` without the scale (implemented by subclasses)."""
+        if self.nonnegative:
+            return self._adjoint(y)
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement abs_adjoint"
+        )
+
+    def abs_apply(self, x: Array) -> Array:
+        """Apply the element-wise absolute operator, :math:`|\\alpha A|\\, x`.
+
+        :math:`|A|` is the matrix of the absolute values of the elements of
+        :math:`A`.  Together with :meth:`abs_adjoint` this is used for
+        separable quadratic majorizers of composite functions (see
+        :meth:`.C2Function.separable_majorizer_curvature`).
+
+        Implemented for non-negative operators (:attr:`nonnegative`, e.g. the
+        PET projectors, where :math:`|A| = A`), :class:`MatrixOperator`,
+        :class:`ElementwiseMultiplicationOperator`,
+        :class:`FiniteForwardDifference`, :class:`VstackOperator` and
+        :class:`AdjointLinearOperator` of such operators; other operators
+        raise :exc:`NotImplementedError`.
+
+        Parameters
+        ----------
+        x : Array
+            Array of shape :attr:`in_shape`.
+
+        Returns
+        -------
+        Array
+            Array of shape :attr:`out_shape`.
+        """
+        y = self._abs_apply(x)
+        s = abs(self.scale)
+        return y if s == 1.0 else s * y
+
+    def abs_adjoint(self, y: Array) -> Array:
+        """Apply the transpose of the element-wise absolute operator,
+        :math:`|\\alpha A|^T y` (see :meth:`abs_apply`).
+
+        Parameters
+        ----------
+        y : Array
+            Array of shape :attr:`out_shape`.
+
+        Returns
+        -------
+        Array
+            Array of shape :attr:`in_shape`.
+        """
+        x = self._abs_adjoint(y)
+        s = abs(self.scale)
+        return x if s == 1.0 else s * x
+
+    def _abs_sq_adjoint(self, y: Array) -> Array:
+        """:math:`(|A|^2)^T y` without the scale (implemented by subclasses)."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement abs_sq_adjoint"
+        )
+
+    def abs_sq_adjoint(self, y: Array) -> Array:
+        """Adjoint of the element-wise squared absolute operator.
+
+        Computes :math:`x_j = \\sum_i |\\alpha a_{ij}|^2 \\, y_i`, i.e. the
+        transpose of the matrix :math:`|\\alpha A|^2` (element-wise squared
+        absolute values of the scaled operator) applied to :math:`y`.  This
+        is needed for exact Hessian diagonals of composite functions,
+        :math:`\\operatorname{diag}(A^H \\operatorname{diag}(h) A) =
+        (|A|^2)^T h` (see :meth:`.C2Function.hessian_diag`).
+
+        Only implemented where it is cheap (e.g. :class:`MatrixOperator`,
+        :class:`ElementwiseMultiplicationOperator`,
+        :class:`FiniteForwardDifference`, :class:`VstackOperator` of such
+        operators); other operators (e.g. the PET projectors) raise
+        :exc:`NotImplementedError`.
+
+        Parameters
+        ----------
+        y : Array
+            Array of shape :attr:`out_shape`.
+
+        Returns
+        -------
+        Array
+            Array of shape :attr:`in_shape`.
+        """
+        x = self._abs_sq_adjoint(y)
+        s = abs(self.scale) ** 2
+        return x if s == 1.0 else s * x
+
     def _resolve_namespace_device(
         self, xp: ModuleType | None, dev: str | None
     ) -> tuple[ModuleType, str | None]:
@@ -350,6 +460,17 @@ class AdjointLinearOperator(LinearOperator):
     def _adjoint(self, y: Array) -> Array:
         return self._operator._apply(y)
 
+    @property
+    def nonnegative(self) -> bool:
+        """Same as the wrapped operator."""
+        return self._operator.nonnegative
+
+    def _abs_apply(self, x: Array) -> Array:
+        return self._operator._abs_adjoint(x)
+
+    def _abs_adjoint(self, y: Array) -> Array:
+        return self._operator._abs_apply(y)
+
     def apply(self, x: Array) -> Array:
         """(scaled) forward step :math:`y = \\overline{\\alpha} A^H x`.
 
@@ -437,6 +558,15 @@ class MatrixOperator(LinearOperator):
         else:
             return self.xp.matmul(self._A.T, y)
 
+    def _abs_apply(self, x: Array) -> Array:
+        return self.xp.matmul(self.xp.abs(self._A), x)
+
+    def _abs_adjoint(self, y: Array) -> Array:
+        return self.xp.matmul(self.xp.abs(self._A).T, y)
+
+    def _abs_sq_adjoint(self, y: Array) -> Array:
+        return self.xp.matmul((self.xp.abs(self._A) ** 2).T, y)
+
 
 class CompositeLinearOperator(LinearOperator):
     """Composite Linear Operator defined by a sequence of Linear Operators
@@ -494,6 +624,15 @@ class CompositeLinearOperator(LinearOperator):
         """get the i-th operator :math:`A_i`"""
         return self._operators[i]
 
+    @property
+    def nonnegative(self) -> bool:
+        """``True`` if all operators are non-negative and have a non-negative
+        real scale (then :math:`|A| = A`)."""
+        return all(
+            op.nonnegative and not isinstance(op.scale, complex) and op.scale >= 0
+            for op in self._operators
+        )
+
 
 class ElementwiseMultiplicationOperator(LinearOperator):
     """Element-wise multiplication operator (multiplication with a diagonal matrix)"""
@@ -537,6 +676,15 @@ class ElementwiseMultiplicationOperator(LinearOperator):
             return self.xp.conj(self._values) * y
         else:
             return self._values * y
+
+    def _abs_apply(self, x: Array) -> Array:
+        return self.xp.abs(self._values) * x
+
+    def _abs_adjoint(self, y: Array) -> Array:
+        return self.xp.abs(self._values) * y
+
+    def _abs_sq_adjoint(self, y: Array) -> Array:
+        return self.xp.abs(self._values) ** 2 * y
 
     @property
     def iscomplex(self) -> bool:
@@ -613,6 +761,11 @@ class GaussianFilterOperator(LinearOperator):
     def out_shape(self) -> tuple[int, ...]:
         """Shape of the output (and input) array (operator is square)."""
         return self._in_shape
+
+    @property
+    def nonnegative(self) -> bool:
+        """The Gaussian kernel is non-negative (:math:`|A| = A`)."""
+        return True
 
     def _apply(self, x: Array) -> Array:
         xp = array_api_compat.get_namespace(x)
@@ -718,6 +871,35 @@ class VstackOperator(LinearOperator):
 
         for i, op in enumerate(self._operators):
             x += op.adjoint(xp.reshape(y[self._slices[i]], self._out_shapes[i]))
+
+        return x
+
+    def _abs_apply(self, x: Array) -> Array:
+        xp = array_api_compat.get_namespace(x)
+        y = xp.zeros(self._out_shape, dtype=x.dtype, device=device(x))
+
+        for i, op in enumerate(self._operators):
+            y[self._slices[i]] = xp.reshape(op.abs_apply(x), (-1,))
+
+        return y
+
+    def _abs_adjoint(self, y: Array) -> Array:
+        xp = array_api_compat.get_namespace(y)
+        x = xp.zeros(self._in_shape, dtype=y.dtype, device=device(y))
+
+        for i, op in enumerate(self._operators):
+            x += op.abs_adjoint(xp.reshape(y[self._slices[i]], self._out_shapes[i]))
+
+        return x
+
+    def _abs_sq_adjoint(self, y: Array) -> Array:
+        xp = array_api_compat.get_namespace(y)
+        x = xp.zeros(self._in_shape, dtype=y.dtype, device=device(y))
+
+        for i, op in enumerate(self._operators):
+            x += op.abs_sq_adjoint(
+                xp.reshape(y[self._slices[i]], self._out_shapes[i])
+            )
 
         return x
 
@@ -972,6 +1154,39 @@ class FiniteForwardDifference(LinearOperator):
         else:
             raise ValueError("only up to 4 dimensions supported")
 
+        return res
+
+    def _abs_apply(self, x: Array) -> Array:
+        # |G| x: the sums x[i + 1] + x[i] instead of the differences
+        xp = array_api_compat.get_namespace(x)
+        g = xp.zeros(self.out_shape, dtype=x.dtype, device=device(x))
+        full = (slice(None),) * self.ndim
+        for a in range(self.ndim):
+            head = full[:a] + (slice(None, -1),) + full[a + 1 :]
+            tail = full[:a] + (slice(1, None),) + full[a + 1 :]
+            g[(a,) + head] = x[tail] + x[head]
+        return g
+
+    def _abs_sq_adjoint(self, y: Array) -> Array:
+        # the elements of G are 0 and +-1, so |G|^2 = |G|
+        return self._abs_adjoint(y)
+
+    def _abs_adjoint(self, y: Array) -> Array:
+        # every row of the forward difference matrix along axis a is
+        # (... -1 ... +1 ...) (or zero for the last element along a), so
+        # |G|^2 = |G| and |G|^T y adds the difference value of every
+        # difference that involves a voxel (as the "-1" and the "+1" voxel)
+        xp = array_api_compat.get_namespace(y)
+        res = xp.zeros(self.in_shape, dtype=y.dtype, device=device(y))
+        full = (slice(None),) * self.ndim
+        for a in range(self.ndim):
+            head = full[:a] + (slice(None, -1),) + full[a + 1 :]
+            tail = full[:a] + (slice(1, None),) + full[a + 1 :]
+            ya = y[a, ...]
+            # voxel i is the "-1" voxel of difference i (i < n - 1) ...
+            res[head] += ya[head]
+            # ... and the "+1" voxel of difference i - 1 (i >= 1)
+            res[tail] += ya[head]
         return res
 
 

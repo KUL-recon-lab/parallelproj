@@ -1,5 +1,5 @@
-PET scanner and sinogram geometry examples
-------------------------------------------
+Scanner geometry and sinograms
+------------------------------
 
 These examples introduce the geometry objects that every projector is built
 from: cylindrical regular-polygon scanners and modular block scanners, how
